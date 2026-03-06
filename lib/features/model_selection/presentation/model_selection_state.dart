@@ -1,9 +1,18 @@
 import 'package:flutter_base_app/features/model_selection/domain/llm_model.dart';
 
+class DownloadProgress {
+  final int received;
+  final int total;
+
+  DownloadProgress({required this.received, required this.total});
+
+  double get progress => total > 0 ? received / total : 0;
+}
+
 class ModelSelectionState {
   final List<LlmModel> models;
   final String? selectedModelId;
-  final Map<String, double> downloadProgress;
+  final Map<String, DownloadProgress> downloadProgress;
   final String? error;
 
   ModelSelectionState({
@@ -25,7 +34,7 @@ class ModelSelectionState {
   ModelSelectionState copyWith({
     List<LlmModel>? models,
     String? selectedModelId,
-    Map<String, double>? downloadProgress,
+    Map<String, DownloadProgress>? downloadProgress,
     String? error,
   }) {
     return ModelSelectionState(

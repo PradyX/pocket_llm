@@ -57,7 +57,10 @@ class ModelSelectionController extends _$ModelSelectionController {
 
     // Initialize progress at 0
     state = state.copyWith(
-      downloadProgress: {...state.downloadProgress, model.id: 0.0},
+      downloadProgress: {
+        ...state.downloadProgress,
+        model.id: DownloadProgress(received: 0, total: 0),
+      },
     );
 
     try {
@@ -65,12 +68,12 @@ class ModelSelectionController extends _$ModelSelectionController {
         model.downloadUrl!,
         model.localFileName!,
         onProgress: (received, total) {
-          if (total != -1) {
-            final progress = received / total;
-            state = state.copyWith(
-              downloadProgress: {...state.downloadProgress, model.id: progress},
-            );
-          }
+          state = state.copyWith(
+            downloadProgress: {
+              ...state.downloadProgress,
+              model.id: DownloadProgress(received: received, total: total),
+            },
+          );
         },
       );
 
@@ -79,7 +82,7 @@ class ModelSelectionController extends _$ModelSelectionController {
           .map((m) => m.id == model.id ? m.copyWith(isDownloaded: true) : m)
           .toList();
 
-      final Map<String, double> updatedProgress = Map.of(
+      final Map<String, DownloadProgress> updatedProgress = Map.of(
         state.downloadProgress,
       );
       updatedProgress.remove(model.id);
@@ -91,7 +94,7 @@ class ModelSelectionController extends _$ModelSelectionController {
       );
     } catch (e) {
       // Remove progress on error and set error message
-      final Map<String, double> updatedProgress = Map.of(
+      final Map<String, DownloadProgress> updatedProgress = Map.of(
         state.downloadProgress,
       );
       updatedProgress.remove(model.id);
@@ -104,5 +107,39 @@ class ModelSelectionController extends _$ModelSelectionController {
 
   void clearError() {
     state = state.copyWith(error: null);
+  }
+
+  Future<void> deleteModel(LlmModel model) async {
+    if (model.localFileName == null) return;
+
+    try {
+      await _storageService.deleteModel(model.localFileName!);
+
+      // Update model status in state
+      final updatedModels = state.models
+          .map((m) => m.id == model.id ? m.copyWith(isDownloaded: false) : m)
+          .toList();
+
+      // If the deleted model was selected, clear selection
+      String? newSelectedId = state.selectedModelId;
+      if (newSelectedId == model.id) {
+        newSelectedId = null;
+        // Try to auto-select another downloaded model
+        try {
+          newSelectedId = updatedModels.firstWhere((m) => m.isDownloaded).id;
+        } catch (_) {
+          newSelectedId = null;
+        }
+      }
+
+      state = state.copyWith(
+        models: updatedModels,
+        selectedModelId: newSelectedId,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        error: 'Failed to delete ${model.name}: ${e.toString()}',
+      );
+    }
   }
 }
