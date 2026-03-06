@@ -1,6 +1,4 @@
-import 'package:flutter_base_app/core/state/base_state.dart';
-import 'package:flutter_base_app/features/login/domain/auth_response.dart';
-import 'package:flutter_base_app/storage/secure_storage.dart';
+import 'package:flutter_base_app/features/home/domain/chat_message.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'home_controller.g.dart';
@@ -8,27 +6,44 @@ part 'home_controller.g.dart';
 @riverpod
 class HomeController extends _$HomeController {
   @override
-  UiState<AuthResponse?> build() {
-    _loadUser();
-    return const UiLoading();
+  List<ChatMessage> build() {
+    return [];
   }
 
-  Future<void> _loadUser() async {
-    try {
-      final data = await SecureStorage.instance.read('auth_data');
-      if (data != null) {
-        final user = AuthResponse.fromJson(data);
-        state = UiSuccess(user);
-      } else {
-        state = const UiSuccess(null);
-      }
-    } catch (e) {
-      state = UiError(e.toString());
-    }
+  /// Sends a user message and adds it to the chat history.
+  void sendMessage(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    final userMessage = ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      text: trimmed,
+      isUser: true,
+      timestamp: DateTime.now(),
+    );
+
+    state = [...state, userMessage];
+
+    // TODO: Wire up local LLM inference to generate AI responses.
+    _addPlaceholderResponse(trimmed);
   }
 
-  Future<void> logout() async {
-    await SecureStorage.instance.delete('auth_data');
-    state = const UiSuccess(null);
+  /// Adds a placeholder assistant response (to be replaced with real inference).
+  void _addPlaceholderResponse(String userText) {
+    Future.delayed(const Duration(milliseconds: 600), () {
+      final response = ChatMessage(
+        id: '${DateTime.now().millisecondsSinceEpoch}_ai',
+        text:
+            'This is a placeholder response. Connect a local model to get real answers!',
+        isUser: false,
+        timestamp: DateTime.now(),
+      );
+      state = [...state, response];
+    });
+  }
+
+  /// Clears all messages from the chat.
+  void clearChat() {
+    state = [];
   }
 }
