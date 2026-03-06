@@ -64,12 +64,13 @@ class _HomePageState extends ConsumerState<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('PocketLlama'),
-            Text(
-              '${selectedModel.name} · ${selectedModel.parameterSize}',
-              style: textTheme.labelSmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+            if (selectedModel != null)
+              Text(
+                '${selectedModel.name} · ${selectedModel.parameterSize}',
+                style: textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
           ],
         ),
         actions: [
@@ -114,6 +115,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     ColorScheme colorScheme,
     TextTheme textTheme,
   ) {
+    final selectionState = ref.watch(modelSelectionControllerProvider);
+    final hasDownloadedModel = selectionState.models.any((m) => m.isDownloaded);
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -128,26 +132,38 @@ class _HomePageState extends ConsumerState<HomePage> {
                 borderRadius: BorderRadius.circular(24),
               ),
               child: Icon(
-                Icons.smart_toy_rounded,
+                hasDownloadedModel
+                    ? Icons.smart_toy_rounded
+                    : Icons.download_for_offline_rounded,
                 size: 40,
                 color: colorScheme.onPrimaryContainer,
               ),
             ),
             const SizedBox(height: 24),
             Text(
-              'Start a conversation',
+              hasDownloadedModel ? 'Start a conversation' : 'No models ready',
               style: textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Type a message below to chat with your local LLM.',
+              hasDownloadedModel
+                  ? 'Type a message below to chat with your local LLM.'
+                  : 'You need to download a model before you can start chatting.',
               style: textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
               textAlign: TextAlign.center,
             ),
+            if (!hasDownloadedModel) ...[
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: () => context.push(AppRoutes.modelSelection),
+                icon: const Icon(Icons.settings_suggest_rounded),
+                label: const Text('Go to Model Selection'),
+              ),
+            ],
           ],
         ),
       ),
@@ -264,12 +280,14 @@ class _HomePageState extends ConsumerState<HomePage> {
           ListTile(
             leading: const Icon(Icons.smart_toy_outlined),
             title: const Text('Model Selection'),
-            subtitle: Text(
-              '${selectedModel.name} · ${selectedModel.parameterSize}',
-              style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
+            subtitle: selectedModel != null
+                ? Text(
+                    '${selectedModel.name} · ${selectedModel.parameterSize}',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  )
+                : const Text('No model selected'),
             onTap: () {
               Navigator.pop(context);
               context.push(AppRoutes.modelSelection);
