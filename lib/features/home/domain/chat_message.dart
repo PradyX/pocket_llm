@@ -11,4 +11,13 @@ class ChatMessage {
     required this.isUser,
     required this.timestamp,
   });
+
+  ChatMessage copyWith({String? text}) {
+    return ChatMessage(
+      id: id,
+      text: text ?? this.text,
+      isUser: isUser,
+      timestamp: timestamp,
+    );
+  }
 }

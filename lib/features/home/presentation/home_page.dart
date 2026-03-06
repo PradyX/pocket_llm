@@ -48,7 +48,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final messages = ref.watch(homeControllerProvider);
-    final selectedModel = ref.watch(modelSelectionControllerProvider);
+    final selectionState = ref.watch(modelSelectionControllerProvider);
+    final selectedModel = selectionState.selectedModel;
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
