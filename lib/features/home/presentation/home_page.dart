@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_base_app/core/navigation/app_router.dart';
 import 'package:flutter_base_app/features/home/domain/chat_message.dart';
 import 'package:flutter_base_app/features/home/presentation/home_controller.dart';
@@ -259,7 +260,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'PocketLlama',
+                  'Pocket LLM',
                   style: TextStyle(
                     color: colorScheme.onPrimary,
                     fontSize: 22,
@@ -366,7 +367,7 @@ class _ChatBubble extends StatelessWidget {
                   ],
                 ),
               ),
-            Text(
+            SelectableText(
               message.text,
               style: textTheme.bodyMedium?.copyWith(
                 color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
