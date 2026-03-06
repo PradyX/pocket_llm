@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_base_app/features/model_selection/domain/llm_model.dart';
 import 'package:flutter_base_app/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -149,24 +150,48 @@ class ModelSelectionPage extends ConsumerWidget {
                             if (isDownloading) ...[
                               const SizedBox(height: 8),
                               LinearProgressIndicator(
-                                value: downloadProgress,
+                                value: downloadProgress.progress,
                                 backgroundColor:
                                     colorScheme.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(4),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${_formatBytes(downloadProgress.received)} / ${_formatBytes(downloadProgress.total)}',
+                                style: textTheme.labelSmall?.copyWith(
+                                  color: isSelected
+                                      ? colorScheme.onPrimaryContainer
+                                            .withValues(alpha: 0.7)
+                                      : colorScheme.onSurfaceVariant,
+                                  fontSize: 10,
+                                ),
                               ),
                             ],
                           ],
                         ),
                       ),
-                      // Download / Selection Indicator
+                      // Download / Selection / Delete Indicator
                       if (model.isDownloaded)
-                        Icon(
-                          isSelected
-                              ? Icons.check_circle_rounded
-                              : Icons.download_done_rounded,
-                          color: isSelected
-                              ? colorScheme.primary
-                              : colorScheme.primary.withValues(alpha: 0.5),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!isSelected)
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                color: colorScheme.error,
+                                onPressed: () {
+                                  _showDeleteConfirmation(context, ref, model);
+                                },
+                              ),
+                            Icon(
+                              isSelected
+                                  ? Icons.check_circle_rounded
+                                  : Icons.download_done_rounded,
+                              color: isSelected
+                                  ? colorScheme.primary
+                                  : colorScheme.primary.withValues(alpha: 0.5),
+                            ),
+                          ],
                         )
                       else if (isDownloading)
                         SizedBox(
@@ -174,9 +199,9 @@ class ModelSelectionPage extends ConsumerWidget {
                           height: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 3,
-                            value: downloadProgress == 0
+                            value: downloadProgress.progress == 0
                                 ? null
-                                : downloadProgress,
+                                : downloadProgress.progress,
                           ),
                         )
                       else
@@ -196,6 +221,50 @@ class ModelSelectionPage extends ConsumerWidget {
             ),
           );
         },
+      ),
+    );
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes <= 0) return '0 B';
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  void _showDeleteConfirmation(
+    BuildContext context,
+    WidgetRef ref,
+    LlmModel model,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Model?'),
+        content: Text(
+          'Are you sure you want to delete ${model.name}? This will free up storage space.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ref
+                  .read(modelSelectionControllerProvider.notifier)
+                  .deleteModel(model);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }
