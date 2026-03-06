@@ -75,12 +75,19 @@ class ModelSelectionController extends _$ModelSelectionController {
         downloadProgress: updatedProgress,
       );
     } catch (e) {
-      // Remove progress on error
+      // Remove progress on error and set error message
       final Map<String, double> updatedProgress = Map.of(
         state.downloadProgress,
       );
       updatedProgress.remove(model.id);
-      state = state.copyWith(downloadProgress: updatedProgress);
+      state = state.copyWith(
+        downloadProgress: updatedProgress,
+        error: 'Failed to download ${model.name}: ${e.toString()}',
+      );
     }
+  }
+
+  void clearError() {
+    state = state.copyWith(error: null);
   }
 }

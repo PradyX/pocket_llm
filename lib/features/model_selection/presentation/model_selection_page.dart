@@ -11,6 +11,33 @@ class ModelSelectionPage extends ConsumerWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
+    // Listen for errors and show SnackBar
+    ref.listen(modelSelectionControllerProvider.select((s) => s.error), (
+      previous,
+      next,
+    ) {
+      if (next != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next),
+            backgroundColor: colorScheme.error,
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: colorScheme.onError,
+              onPressed: () {
+                ref
+                    .read(modelSelectionControllerProvider.notifier)
+                    .clearError();
+              },
+            ),
+          ),
+        );
+        // Auto-clear error after showing
+        ref.read(modelSelectionControllerProvider.notifier).clearError();
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(title: const Text('Model Selection')),
       body: ListView.builder(
