@@ -34,7 +34,9 @@ class HomeController extends _$HomeController {
     final selectionState = ref.read(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
 
-    if (selectedModel.isDownloaded && selectedModel.localFileName != null) {
+    if (selectedModel != null &&
+        selectedModel.isDownloaded &&
+        selectedModel.localFileName != null) {
       await _generateNativeResponse(trimmed, selectedModel.localFileName!);
     } else {
       _addPlaceholderResponse(trimmed);

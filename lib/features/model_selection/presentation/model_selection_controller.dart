@@ -13,7 +13,7 @@ class ModelSelectionController extends _$ModelSelectionController {
   ModelSelectionState build() {
     state = ModelSelectionState(
       models: LlmModel.availableModels,
-      selectedModelId: LlmModel.availableModels.first.id,
+      selectedModelId: null, // Start with no selection
     );
     _init();
     return state;
@@ -28,7 +28,21 @@ class ModelSelectionController extends _$ModelSelectionController {
         return model.copyWith(isDownloaded: isDownloaded);
       }),
     );
-    state = state.copyWith(models: updatedModels);
+
+    String? newSelectedId = state.selectedModelId;
+    // If nothing is selected, try to pick the first downloaded one
+    if (newSelectedId == null) {
+      try {
+        newSelectedId = updatedModels.firstWhere((m) => m.isDownloaded).id;
+      } catch (_) {
+        newSelectedId = null;
+      }
+    }
+
+    state = state.copyWith(
+      models: updatedModels,
+      selectedModelId: newSelectedId,
+    );
   }
 
   /// Select a specific model.
@@ -73,6 +87,7 @@ class ModelSelectionController extends _$ModelSelectionController {
       state = state.copyWith(
         models: updatedModels,
         downloadProgress: updatedProgress,
+        selectedModelId: state.selectedModelId ?? model.id,
       );
     } catch (e) {
       // Remove progress on error and set error message
