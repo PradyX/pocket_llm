@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_base_app/core/services/model_storage_service.dart';
 import 'package:flutter_base_app/features/model_selection/domain/llm_model.dart';
 import 'package:flutter_base_app/features/model_selection/presentation/model_selection_state.dart';
@@ -8,6 +9,7 @@ part 'model_selection_controller.g.dart';
 @riverpod
 class ModelSelectionController extends _$ModelSelectionController {
   late final ModelStorageService _storageService = ModelStorageService();
+  final Map<String, CancelToken> _cancelTokens = {};
 
   @override
   ModelSelectionState build() {
@@ -55,18 +57,24 @@ class ModelSelectionController extends _$ModelSelectionController {
   Future<void> downloadModel(LlmModel model) async {
     if (model.downloadUrl == null || model.localFileName == null) return;
 
-    // Initialize progress at 0
-    state = state.copyWith(
-      downloadProgress: {
-        ...state.downloadProgress,
-        model.id: DownloadProgress(received: 0, total: 0),
-      },
-    );
+    // Initialize progress if it doesn't exist (to support resume)
+    if (!state.downloadProgress.containsKey(model.id)) {
+      state = state.copyWith(
+        downloadProgress: {
+          ...state.downloadProgress,
+          model.id: DownloadProgress(received: 0, total: 0),
+        },
+      );
+    }
+
+    final cancelToken = CancelToken();
+    _cancelTokens[model.id] = cancelToken;
 
     try {
       await _storageService.downloadModel(
         model.downloadUrl!,
         model.localFileName!,
+        cancelToken: cancelToken,
         onProgress: (received, total) {
           state = state.copyWith(
             downloadProgress: {
@@ -76,6 +84,8 @@ class ModelSelectionController extends _$ModelSelectionController {
           );
         },
       );
+
+      _cancelTokens.remove(model.id);
 
       // Download complete, update model status and remove progress
       final updatedModels = state.models
@@ -93,6 +103,13 @@ class ModelSelectionController extends _$ModelSelectionController {
         selectedModelId: state.selectedModelId ?? model.id,
       );
     } catch (e) {
+      _cancelTokens.remove(model.id);
+
+      if (e is DioException && CancelToken.isCancel(e)) {
+        // Just return, keep progress in state so it shows as paused
+        return;
+      }
+
       // Remove progress on error and set error message
       final Map<String, DownloadProgress> updatedProgress = Map.of(
         state.downloadProgress,
@@ -103,6 +120,11 @@ class ModelSelectionController extends _$ModelSelectionController {
         error: 'Failed to download ${model.name}: ${e.toString()}',
       );
     }
+  }
+
+  void pauseDownload(String modelId) {
+    _cancelTokens[modelId]?.cancel();
+    _cancelTokens.remove(modelId);
   }
 
   void clearError() {

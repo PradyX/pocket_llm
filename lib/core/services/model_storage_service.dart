@@ -76,6 +76,7 @@ class ModelStorageService {
     String url,
     String fileName, {
     void Function(int received, int total)? onProgress,
+    CancelToken? cancelToken,
   }) async {
     final dir = await getModelDir();
     final savePath = p.join(dir, fileName);
@@ -97,14 +98,19 @@ class ModelStorageService {
     }
 
     if (metadata == null) {
-      final headRes = await _dio.head(url);
+      final headRes = await _dio.head(url, cancelToken: cancelToken);
       final totalSize = int.parse(
         headRes.headers.value('content-length') ?? '-1',
       );
 
       if (totalSize <= 0) {
         // Fallback to standard download if range requests aren't supported
-        await _dio.download(url, savePath, onReceiveProgress: onProgress);
+        await _dio.download(
+          url,
+          savePath,
+          onReceiveProgress: onProgress,
+          cancelToken: cancelToken,
+        );
         return;
       }
 
@@ -170,6 +176,7 @@ class ModelStorageService {
           url: url,
           start: chunk.start + chunk.received,
           end: chunk.end,
+          cancelToken: cancelToken,
           onChunkData: (data, totalReceivedInChunk) async {
             await synchronizedWrite(chunk.start + chunk.received, data);
             chunk.received += data.length;
@@ -208,6 +215,7 @@ class ModelStorageService {
     required int end,
     required Future<void> Function(List<int> data, int totalReceivedInChunk)
     onChunkData,
+    CancelToken? cancelToken,
   }) async {
     // If range is invalid (already finished), skip
     if (start > end) return;
@@ -218,6 +226,7 @@ class ModelStorageService {
         responseType: ResponseType.stream,
         headers: {'range': 'bytes=$start-$end'},
       ),
+      cancelToken: cancelToken,
     );
 
     int receivedInSession = 0;

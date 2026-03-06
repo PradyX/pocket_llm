@@ -147,7 +147,7 @@ class ModelSelectionPage extends ConsumerWidget {
                                     : colorScheme.onSurfaceVariant,
                               ),
                             ),
-                            if (isDownloading) ...[
+                            if (downloadProgress != null) ...[
                               const SizedBox(height: 8),
                               LinearProgressIndicator(
                                 value: downloadProgress.progress,
@@ -194,19 +194,22 @@ class ModelSelectionPage extends ConsumerWidget {
                           ],
                         )
                       else if (isDownloading)
-                        SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            value: downloadProgress.progress == 0
-                                ? null
-                                : downloadProgress.progress,
-                          ),
+                        IconButton(
+                          icon: const Icon(Icons.pause_circle_outline_rounded),
+                          color: colorScheme.primary,
+                          onPressed: () {
+                            ref
+                                .read(modelSelectionControllerProvider.notifier)
+                                .pauseDownload(model.id);
+                          },
                         )
                       else
                         IconButton(
-                          icon: const Icon(Icons.download_rounded),
+                          icon: Icon(
+                            downloadProgress != null
+                                ? Icons.play_circle_outline_rounded
+                                : Icons.download_rounded,
+                          ),
                           onPressed: () {
                             ref
                                 .read(modelSelectionControllerProvider.notifier)

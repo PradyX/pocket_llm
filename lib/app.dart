@@ -15,7 +15,7 @@ class MyApp extends ConsumerWidget {
     final theme = MaterialTheme(textTheme);
 
     return MaterialApp.router(
-      title: 'PocketLlama',
+      title: 'Pocket LLM',
       debugShowCheckedModeBanner: false,
       theme: theme.light(),
       darkTheme: theme.dark(),

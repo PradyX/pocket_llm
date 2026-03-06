@@ -63,7 +63,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('PocketLlama'),
+            const Text('Pocket LLM'),
             if (selectedModel != null)
               Text(
                 '${selectedModel.name} · ${selectedModel.parameterSize}',
