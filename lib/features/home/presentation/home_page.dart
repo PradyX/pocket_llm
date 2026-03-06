@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_base_app/core/navigation/app_router.dart';
-import 'package:flutter_base_app/core/state/base_state.dart';
+import 'package:flutter_base_app/features/home/domain/chat_message.dart';
 import 'package:flutter_base_app/features/home/presentation/home_controller.dart';
+import 'package:flutter_base_app/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -13,298 +14,347 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  int _selectedIndex = 0;
+  final _messageController = TextEditingController();
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _sendMessage() {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
+    ref.read(homeControllerProvider.notifier).sendMessage(text);
+    _messageController.clear();
+
+    // Scroll to bottom after a brief delay to allow the list to update.
+    Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(homeControllerProvider);
+    final messages = ref.watch(homeControllerProvider);
+    final selectedModel = ref.watch(modelSelectionControllerProvider);
     final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    // Scroll to bottom when messages change.
+    ref.listen(homeControllerProvider, (_, _) {
+      Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+    });
 
     return Scaffold(
-      appBar: AppBar(title: Text(_selectedIndex == 0 ? 'Home' : 'Profile')),
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DrawerHeader(
-              decoration: BoxDecoration(color: colorScheme.primary),
-              child: switch (state) {
-                UiSuccess(:final data) when data != null => Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: colorScheme.onPrimary,
-                      backgroundImage: data.image.isNotEmpty
-                          ? NetworkImage(data.image)
-                          : null,
-                      child: data.image.isEmpty
-                          ? Icon(Icons.person, color: colorScheme.primary)
-                          : null,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Hi, ${data.username}',
-                      style: TextStyle(
-                        color: colorScheme.onPrimary,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                _ => Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: colorScheme.onPrimary,
-                      child: Icon(Icons.person, color: colorScheme.primary),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Hi, Guest',
-                      style: TextStyle(
-                        color: colorScheme.onPrimary,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
-              onTap: () {
-                Navigator.pop(context); // Close drawer
-                context.push(AppRoutes.settings);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Logout'),
-              onTap: () async {
-                // Close the drawer first
-                Navigator.pop(context);
-                await ref.read(homeControllerProvider.notifier).logout();
-                if (context.mounted) {
-                  context.go(AppRoutes.login);
-                }
-              },
+            const Text('PocketLlama'),
+            Text(
+              '${selectedModel.name} · ${selectedModel.parameterSize}',
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
+        actions: [
+          if (messages.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_outline_rounded),
+              tooltip: 'Clear chat',
+              onPressed: () {
+                ref.read(homeControllerProvider.notifier).clearChat();
+              },
+            ),
+        ],
       ),
-      body: _buildBody(context, state, colorScheme),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+      drawer: _buildDrawer(context, colorScheme, textTheme, selectedModel),
+      body: Column(
+        children: [
+          // Message list
+          Expanded(
+            child: messages.isEmpty
+                ? _buildEmptyState(context, colorScheme, textTheme)
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) {
+                      return _ChatBubble(message: messages[index]);
+                    },
+                  ),
+          ),
+          // Input bar
+          _buildInputBar(context, colorScheme),
         ],
       ),
     );
   }
 
-  Widget _buildBody(
+  Widget _buildEmptyState(
     BuildContext context,
-    UiState state,
     ColorScheme colorScheme,
+    TextTheme textTheme,
   ) {
-    if (_selectedIndex == 0) {
-      // Home Tab
-      return Center(
-        child: Text(
-          'Home Content Goes Here',
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-      );
-    }
-
-    // Profile Tab
-    return switch (state) {
-      UiLoading() => const Center(child: CircularProgressIndicator()),
-      UiError(:final message) => Center(
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: colorScheme.error),
-            const SizedBox(height: 16),
-            Text(message, style: TextStyle(color: colorScheme.error)),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => ref.invalidate(homeControllerProvider),
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
-      UiSuccess(:final data) when data != null => SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // Profile Card
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    CircleAvatar(
-                      radius: 50,
-                      backgroundColor: colorScheme.primaryContainer,
-                      backgroundImage: data.image.isNotEmpty
-                          ? NetworkImage(data.image)
-                          : null,
-                      child: data.image.isEmpty
-                          ? Icon(
-                              Icons.person,
-                              size: 50,
-                              color: colorScheme.onPrimaryContainer,
-                            )
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      '${data.firstName} ${data.lastName}',
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '@${data.username}',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      data.email,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Info Card
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Account Information',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Divider(),
-                    _buildInfoRow(context, 'User ID', data.id.toString()),
-                    _buildInfoRow(context, 'Gender', data.gender),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Welcome Message
             Container(
-              padding: const EdgeInsets.all(20),
+              width: 80,
+              height: 80,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    colorScheme.primaryContainer,
-                    colorScheme.secondaryContainer,
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(16),
+                color: colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(24),
               ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.celebration,
-                    size: 48,
-                    color: colorScheme.onPrimaryContainer,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Welcome to Flutter Base App!',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.onPrimaryContainer,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'This is your home page. Start building amazing features!',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onPrimaryContainer.withValues(
-                        alpha: 0.8,
-                      ),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+              child: Icon(
+                Icons.smart_toy_rounded,
+                size: 40,
+                color: colorScheme.onPrimaryContainer,
               ),
             ),
-          ],
-        ),
-      ),
-      _ => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.waving_hand, size: 64, color: colorScheme.primary),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             Text(
-              'Welcome, Guest!',
-              style: Theme.of(context).textTheme.headlineSmall,
+              'Start a conversation',
+              style: textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Sign in to see your profile',
-              style: TextStyle(color: colorScheme.onSurfaceVariant),
+              'Type a message below to chat with your local LLM.',
+              style: textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
       ),
-    };
+    );
   }
 
-  Widget _buildInfoRow(BuildContext context, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+  Widget _buildInputBar(BuildContext context, ColorScheme colorScheme) {
+    return Container(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 8,
+        top: 8,
+        bottom: MediaQuery.of(context).padding.bottom + 8,
+      ),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        border: Border(
+          top: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+          ),
+        ),
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+          Expanded(
+            child: TextField(
+              controller: _messageController,
+              maxLines: 5,
+              minLines: 1,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                hintText: 'Type a message...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor: colorScheme.surfaceContainerHighest,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+              ),
+              onSubmitted: (_) => _sendMessage(),
             ),
           ),
-          Text(
-            value,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: IconButton.filled(
+              onPressed: _sendMessage,
+              icon: const Icon(Icons.arrow_upward_rounded),
+              style: IconButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDrawer(
+    BuildContext context,
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+    dynamic selectedModel,
+  ) {
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          DrawerHeader(
+            decoration: BoxDecoration(color: colorScheme.primary),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: colorScheme.onPrimary,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    Icons.smart_toy_rounded,
+                    color: colorScheme.primary,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'PocketLlama',
+                  style: TextStyle(
+                    color: colorScheme.onPrimary,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'On-device AI Chat',
+                  style: TextStyle(
+                    color: colorScheme.onPrimary.withValues(alpha: 0.8),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.smart_toy_outlined),
+            title: const Text('Model Selection'),
+            subtitle: Text(
+              '${selectedModel.name} · ${selectedModel.parameterSize}',
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.modelSelection);
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('Settings'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.settings);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A single chat message bubble.
+class _ChatBubble extends StatelessWidget {
+  final ChatMessage message;
+
+  const _ChatBubble({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final isUser = message.isUser;
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: EdgeInsets.only(
+          top: 4,
+          bottom: 4,
+          left: isUser ? 64 : 0,
+          right: isUser ? 0 : 64,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isUser
+              ? colorScheme.primary
+              : colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(20),
+            topRight: const Radius.circular(20),
+            bottomLeft: Radius.circular(isUser ? 20 : 4),
+            bottomRight: Radius.circular(isUser ? 4 : 20),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!isUser)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.smart_toy_rounded,
+                      size: 14,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Assistant',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Text(
+              message.text,
+              style: textTheme.bodyMedium?.copyWith(
+                color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
