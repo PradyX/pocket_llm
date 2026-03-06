@@ -15,7 +15,7 @@ class MyApp extends ConsumerWidget {
     final theme = MaterialTheme(textTheme);
 
     return MaterialApp.router(
-      title: 'Flutter Base App',
+      title: 'PocketLlama',
       debugShowCheckedModeBanner: false,
       theme: theme.light(),
       darkTheme: theme.dark(),
