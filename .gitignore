@@ -62,3 +62,4 @@ lib/firebase_options.dart
 
 # Flutter plugin registrant (auto-generated)
 .flutter-plugins
+.aider*
