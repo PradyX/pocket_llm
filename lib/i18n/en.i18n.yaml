@@ -1,0 +1,27 @@
+# Base App English Strings
+# Generated via Slang: dart run slang
+login:
+  welcome: "Welcome Back"
+  subtitle: "Sign in to continue"
+  username: "Username"
+  password: "Password"
+  signIn: "Sign In"
+  forgotPassword: "Forgot Password?"
+  loginOtp: "Login via OTP"
+  createAccount: "Create Account"
+  noAccountLabel: "Don't have an account? "
+  emailOrPhoneRequired: "Email or Phone is required"
+  passwordRequired: "Password is required"
+
+home:
+  title: "Home"
+  settings: "Settings"
+  logout: "Logout"
+
+common:
+  error: "Error"
+  success: "Success"
+  close: "Close"
+  ok: "OK"
+  yes: "Yes"
+  no: "No"
