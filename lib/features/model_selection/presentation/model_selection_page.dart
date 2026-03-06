@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_base_app/features/model_selection/domain/llm_model.dart';
 import 'package:flutter_base_app/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,7 +7,7 @@ class ModelSelectionPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final selectedModel = ref.watch(modelSelectionControllerProvider);
+    final state = ref.watch(modelSelectionControllerProvider);
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
@@ -16,10 +15,12 @@ class ModelSelectionPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('Model Selection')),
       body: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: LlmModel.availableModels.length,
+        itemCount: state.models.length,
         itemBuilder: (context, index) {
-          final model = LlmModel.availableModels[index];
-          final isSelected = model.id == selectedModel.id;
+          final model = state.models[index];
+          final isSelected = model.id == state.selectedModelId;
+          final downloadProgress = state.downloadProgress[model.id];
+          final isDownloading = downloadProgress != null;
 
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -37,9 +38,11 @@ class ModelSelectionPage extends ConsumerWidget {
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: () {
-                  ref
-                      .read(modelSelectionControllerProvider.notifier)
-                      .selectModel(model);
+                  if (model.isDownloaded && !isDownloading) {
+                    ref
+                        .read(modelSelectionControllerProvider.notifier)
+                        .selectModel(model);
+                  }
                 },
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -116,19 +119,48 @@ class ModelSelectionPage extends ConsumerWidget {
                                     : colorScheme.onSurfaceVariant,
                               ),
                             ),
+                            if (isDownloading) ...[
+                              const SizedBox(height: 8),
+                              LinearProgressIndicator(
+                                value: downloadProgress,
+                                backgroundColor:
+                                    colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ],
                           ],
                         ),
                       ),
-                      // Selection indicator
-                      if (isSelected)
+                      // Download / Selection Indicator
+                      if (model.isDownloaded)
                         Icon(
-                          Icons.check_circle_rounded,
-                          color: colorScheme.primary,
+                          isSelected
+                              ? Icons.check_circle_rounded
+                              : Icons.download_done_rounded,
+                          color: isSelected
+                              ? colorScheme.primary
+                              : colorScheme.primary.withValues(alpha: 0.5),
+                        )
+                      else if (isDownloading)
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            value: downloadProgress == 0
+                                ? null
+                                : downloadProgress,
+                          ),
                         )
                       else
-                        Icon(
-                          Icons.radio_button_unchecked,
-                          color: colorScheme.outline,
+                        IconButton(
+                          icon: const Icon(Icons.download_rounded),
+                          onPressed: () {
+                            ref
+                                .read(modelSelectionControllerProvider.notifier)
+                                .downloadModel(model);
+                          },
+                          color: colorScheme.primary,
                         ),
                     ],
                   ),
