@@ -312,30 +312,56 @@ class HomeController extends _$HomeController {
 
       await emit(force: true);
       generationTimer.stop();
+      final elapsed = generationTimer.elapsed;
+      final elapsedSeconds = elapsed.inMilliseconds / 1000.0;
+      final averageTokensPerSecond = elapsedSeconds > 0
+          ? generatedTokenCount / elapsedSeconds
+          : 0.0;
 
       _recordAdaptivePerformance(
         generatedTokenCount: generatedTokenCount,
-        elapsed: generationTimer.elapsed,
+        elapsed: elapsed,
       );
 
       if (_stopRequestedByUser || _llmService.isStopRequested) {
         final partial = responseBuffer.toString();
         if (partial.trim().isEmpty) {
-          _replaceAiMessage(aiMessageId, 'Generation stopped.');
+          _replaceAiMessage(
+            aiMessageId,
+            'Generation stopped.',
+            generatedTokens: generatedTokenCount,
+            elapsed: elapsed,
+            tokensPerSecond: averageTokensPerSecond,
+          );
         } else {
           _replaceAiMessage(
             aiMessageId,
             '${_buildStreamingText(partial)}\n\n[Stopped]',
+            generatedTokens: generatedTokenCount,
+            elapsed: elapsed,
+            tokensPerSecond: averageTokensPerSecond,
           );
         }
         return;
       }
 
       if (!sawToken) {
-        _replaceAiMessage(aiMessageId, 'No response generated.');
+        _replaceAiMessage(
+          aiMessageId,
+          'No response generated.',
+          generatedTokens: generatedTokenCount,
+          elapsed: elapsed,
+          tokensPerSecond: averageTokensPerSecond,
+        );
       } else {
         final finalText = _buildFinalText(responseBuffer.toString());
-        _replaceAiMessage(aiMessageId, finalText);
+        _replaceAiMessage(
+          aiMessageId,
+          finalText,
+          generatedTokens: generatedTokenCount,
+          elapsed: elapsed,
+          tokensPerSecond: averageTokensPerSecond,
+        );
       }
     } catch (e) {
       final errorResponse = ChatMessage(
@@ -407,10 +433,24 @@ class HomeController extends _$HomeController {
     _llmService.stopGeneration();
   }
 
-  void _replaceAiMessage(String id, String text) {
+  void _replaceAiMessage(
+    String id,
+    String text, {
+    int? generatedTokens,
+    Duration? elapsed,
+    double? tokensPerSecond,
+  }) {
     state = [
       for (final msg in state)
-        if (msg.id == id) msg.copyWith(text: text) else msg,
+        if (msg.id == id)
+          msg.copyWith(
+            text: text,
+            generatedTokens: generatedTokens,
+            elapsedMs: elapsed?.inMilliseconds,
+            tokensPerSecond: tokensPerSecond,
+          )
+        else
+          msg,
     ];
   }
 

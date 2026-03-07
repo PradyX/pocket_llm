@@ -4,20 +4,34 @@ class ChatMessage {
   final String text;
   final bool isUser;
   final DateTime timestamp;
+  final int? generatedTokens;
+  final int? elapsedMs;
+  final double? tokensPerSecond;
 
   const ChatMessage({
     required this.id,
     required this.text,
     required this.isUser,
     required this.timestamp,
+    this.generatedTokens,
+    this.elapsedMs,
+    this.tokensPerSecond,
   });
 
-  ChatMessage copyWith({String? text}) {
+  ChatMessage copyWith({
+    String? text,
+    int? generatedTokens,
+    int? elapsedMs,
+    double? tokensPerSecond,
+  }) {
     return ChatMessage(
       id: id,
       text: text ?? this.text,
       isUser: isUser,
       timestamp: timestamp,
+      generatedTokens: generatedTokens ?? this.generatedTokens,
+      elapsedMs: elapsedMs ?? this.elapsedMs,
+      tokensPerSecond: tokensPerSecond ?? this.tokensPerSecond,
     );
   }
 
@@ -27,6 +41,9 @@ class ChatMessage {
       'text': text,
       'isUser': isUser,
       'timestamp': timestamp.toIso8601String(),
+      'generatedTokens': generatedTokens,
+      'elapsedMs': elapsedMs,
+      'tokensPerSecond': tokensPerSecond,
     };
   }
 
@@ -38,6 +55,9 @@ class ChatMessage {
       timestamp:
           DateTime.tryParse(json['timestamp'] as String? ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
+      generatedTokens: (json['generatedTokens'] as num?)?.toInt(),
+      elapsedMs: (json['elapsedMs'] as num?)?.toInt(),
+      tokensPerSecond: (json['tokensPerSecond'] as num?)?.toDouble(),
     );
   }
 }
