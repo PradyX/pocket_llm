@@ -16,6 +16,7 @@ class InferenceSettingsState {
   final bool advancedSamplingOverride;
   final double customTemperature;
   final double customTopP;
+  final int maxTokens;
 
   const InferenceSettingsState({
     this.adaptiveMode = false,
@@ -23,6 +24,7 @@ class InferenceSettingsState {
     this.advancedSamplingOverride = false,
     this.customTemperature = 0.7,
     this.customTopP = 0.9,
+    this.maxTokens = 512,
   });
 
   InferenceSettingsState copyWith({
@@ -31,6 +33,7 @@ class InferenceSettingsState {
     bool? advancedSamplingOverride,
     double? customTemperature,
     double? customTopP,
+    int? maxTokens,
   }) {
     return InferenceSettingsState(
       adaptiveMode: adaptiveMode ?? this.adaptiveMode,
@@ -39,6 +42,7 @@ class InferenceSettingsState {
           advancedSamplingOverride ?? this.advancedSamplingOverride,
       customTemperature: customTemperature ?? this.customTemperature,
       customTopP: customTopP ?? this.customTopP,
+      maxTokens: maxTokens ?? this.maxTokens,
     );
   }
 
@@ -102,6 +106,9 @@ class InferenceSettingsNotifier extends StateNotifier<InferenceSettingsState> {
         customTopP: customTopP is num
             ? customTopP.toDouble().clamp(0.1, 1.0)
             : null,
+        maxTokens: data['maxTokens'] is num
+            ? (data['maxTokens'] as num).toInt().clamp(64, 4096)
+            : null,
       );
     } catch (_) {
       // Keep defaults if storage read fails.
@@ -133,6 +140,11 @@ class InferenceSettingsNotifier extends StateNotifier<InferenceSettingsState> {
     await _persist();
   }
 
+  Future<void> setMaxTokens(int value) async {
+    state = state.copyWith(maxTokens: value);
+    await _persist();
+  }
+
   Future<void> _persist() async {
     await SecureStorage.instance.write(
       key: _settingsKey,
@@ -142,6 +154,7 @@ class InferenceSettingsNotifier extends StateNotifier<InferenceSettingsState> {
         'advancedSamplingOverride': state.advancedSamplingOverride,
         'customTemperature': state.customTemperature,
         'customTopP': state.customTopP,
+        'maxTokens': state.maxTokens,
       },
     );
   }

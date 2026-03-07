@@ -226,7 +226,7 @@ class HomeController extends _$HomeController {
 
       _setStatus(text: 'Loading model...', isGenerating: true);
       final path = await _storageService.getLocalFilePath(localFileName);
-      final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 1024 : 2048;
+      final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096;
 
       await _llmService.ensureModelLoaded(
         path,
@@ -497,8 +497,9 @@ class HomeController extends _$HomeController {
   }
 
   int _resolveMaxTokens({required bool adaptiveMode}) {
-    final defaultMaxTokens = (Platform.isAndroid || Platform.isIOS) ? 256 : 512;
-    if (!adaptiveMode) return defaultMaxTokens;
+    final inferenceSettings = ref.read(inferenceSettingsProvider);
+    final userMaxTokens = inferenceSettings.maxTokens;
+    if (!adaptiveMode) return userMaxTokens;
 
     final cpuCount = Platform.numberOfProcessors;
     final hardwareFactor = switch (cpuCount) {
@@ -510,9 +511,9 @@ class HomeController extends _$HomeController {
     };
 
     final perfFactor = _performanceFactor();
-    final boundedFactor = (hardwareFactor * perfFactor).clamp(0.5, 2.5);
-    final adaptiveMax = (defaultMaxTokens * boundedFactor).round();
-    final hardUpper = (Platform.isAndroid || Platform.isIOS) ? 1024 : 2048;
+    final boundedFactor = (hardwareFactor * perfFactor).clamp(0.5, 3.0);
+    final adaptiveMax = (userMaxTokens * boundedFactor).round();
+    final hardUpper = (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096;
 
     return math.max(96, math.min(hardUpper, adaptiveMax));
   }
