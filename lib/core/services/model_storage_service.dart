@@ -54,7 +54,12 @@ class ChunkState {
 }
 
 class ModelStorageService {
-  final Dio _dio = Dio();
+  final Dio _dio = Dio(
+    BaseOptions(
+      followRedirects: true,
+      headers: {'User-Agent': 'PocketLLM/1.0', 'Accept': '*/*'},
+    ),
+  );
 
   Future<String> getModelDir() async {
     final appDocDir = await getApplicationDocumentsDirectory();
@@ -98,17 +103,26 @@ class ModelStorageService {
     }
 
     if (metadata == null) {
-      final headRes = await _dio.head(url, cancelToken: cancelToken);
-      final totalSize = int.parse(
-        headRes.headers.value('content-length') ?? '-1',
-      );
+      int totalSize = -1;
+      try {
+        final headRes = await _dio.head(
+          url,
+          cancelToken: cancelToken,
+          options: Options(validateStatus: (status) => (status ?? 500) < 500),
+        );
+        if ((headRes.statusCode ?? 500) < 400) {
+          totalSize =
+              int.tryParse(headRes.headers.value('content-length') ?? '') ?? -1;
+        }
+      } on DioException {
+        // Some hosts reject HEAD for public files; fallback to regular download.
+      }
 
       if (totalSize <= 0) {
-        // Fallback to standard download if range requests aren't supported
-        await _dio.download(
-          url,
-          savePath,
-          onReceiveProgress: onProgress,
+        await _downloadSingleStream(
+          url: url,
+          savePath: savePath,
+          onProgress: onProgress,
           cancelToken: cancelToken,
         );
         return;
@@ -139,6 +153,7 @@ class ModelStorageService {
     // 2. Open shared handle
     final file = File(savePath);
     final raf = await file.open(mode: FileMode.append);
+    var rafClosed = false;
 
     // 3. Parallel Downloads with Resumption
     final List<Future<void>> chunkFutures = [];
@@ -203,9 +218,28 @@ class ModelStorageService {
       }
     } catch (e) {
       metadataTimer.cancel();
+      if (_shouldFallbackToSingleStream(e)) {
+        await raf.close();
+        rafClosed = true;
+        if (await metadataFile.exists()) {
+          await metadataFile.delete();
+        }
+        if (await file.exists()) {
+          await file.delete();
+        }
+        await _downloadSingleStream(
+          url: url,
+          savePath: savePath,
+          onProgress: onProgress,
+          cancelToken: cancelToken,
+        );
+        return;
+      }
       rethrow;
     } finally {
-      await raf.close();
+      if (!rafClosed) {
+        await raf.close();
+      }
     }
   }
 
@@ -225,9 +259,20 @@ class ModelStorageService {
       options: Options(
         responseType: ResponseType.stream,
         headers: {'range': 'bytes=$start-$end'},
+        validateStatus: (status) => (status ?? 500) < 400,
       ),
       cancelToken: cancelToken,
     );
+
+    // Host ignored range request for non-zero offset; chunk strategy is invalid.
+    if ((response.statusCode ?? 500) == 200 && start > 0) {
+      throw DioException(
+        requestOptions: response.requestOptions,
+        response: response,
+        type: DioExceptionType.badResponse,
+        error: 'Range not supported for chunked download.',
+      );
+    }
 
     int receivedInSession = 0;
     await for (final chunk in response.data!.stream) {
@@ -252,5 +297,32 @@ class ModelStorageService {
   Future<String> getLocalFilePath(String fileName) async {
     final dir = await getModelDir();
     return p.join(dir, fileName);
+  }
+
+  Future<void> _downloadSingleStream({
+    required String url,
+    required String savePath,
+    void Function(int received, int total)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    await _dio.download(
+      url,
+      savePath,
+      onReceiveProgress: onProgress,
+      cancelToken: cancelToken,
+      deleteOnError: true,
+      options: Options(validateStatus: (status) => (status ?? 500) < 400),
+    );
+  }
+
+  bool _shouldFallbackToSingleStream(Object error) {
+    if (error is! DioException) return false;
+    final status = error.response?.statusCode;
+    if (status == 401 || status == 403 || status == 405 || status == 416) {
+      return true;
+    }
+    // Range-not-supported path can come through as badResponse with 200.
+    return error.type == DioExceptionType.badResponse &&
+        (status == null || status == 200);
   }
 }

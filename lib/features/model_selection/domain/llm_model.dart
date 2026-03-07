@@ -7,6 +7,7 @@ class LlmModel {
   final String? downloadUrl;
   final String? localFileName;
   final bool isDownloaded;
+  final bool isCustom;
 
   const LlmModel({
     required this.id,
@@ -16,9 +17,14 @@ class LlmModel {
     this.downloadUrl,
     this.localFileName,
     this.isDownloaded = false,
+    this.isCustom = false,
   });
 
-  LlmModel copyWith({bool? isDownloaded, String? localFileName}) {
+  LlmModel copyWith({
+    bool? isDownloaded,
+    String? localFileName,
+    bool? isCustom,
+  }) {
     return LlmModel(
       id: id,
       name: name,
@@ -27,6 +33,34 @@ class LlmModel {
       downloadUrl: downloadUrl,
       localFileName: localFileName ?? this.localFileName,
       isDownloaded: isDownloaded ?? this.isDownloaded,
+      isCustom: isCustom ?? this.isCustom,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'parameterSize': parameterSize,
+      'description': description,
+      'downloadUrl': downloadUrl,
+      'localFileName': localFileName,
+      'isDownloaded': isDownloaded,
+      'isCustom': isCustom,
+    };
+  }
+
+  factory LlmModel.fromJson(Map<String, dynamic> json) {
+    return LlmModel(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? 'Custom Model',
+      parameterSize: json['parameterSize'] as String? ?? 'Unknown',
+      description:
+          json['description'] as String? ?? 'User-added model download link.',
+      downloadUrl: json['downloadUrl'] as String?,
+      localFileName: json['localFileName'] as String?,
+      isDownloaded: json['isDownloaded'] as bool? ?? false,
+      isCustom: json['isCustom'] as bool? ?? true,
     );
   }
 
@@ -74,8 +108,26 @@ class LlmModel {
       parameterSize: '1.1B',
       description: 'Ultra-compact model for minimal memory footprint.',
       downloadUrl:
-          'https://huggingface.co/bartowski/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf',
-      localFileName: 'tinyllama-1.1b-chat-v1.0-q4_k_m.gguf',
+          'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
+      localFileName: 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
+    ),
+    LlmModel(
+      id: 'smollm2-360m',
+      name: 'SmolLM2',
+      parameterSize: '360M',
+      description: 'Very small instruct model for ultra-fast local responses.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf',
+      localFileName: 'smollm2-360m-instruct-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'smollm2-1.7b',
+      name: 'SmolLM2',
+      parameterSize: '1.7B',
+      description: 'SmolLM2 variant with stronger quality while still mobile.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/SmolLM2-1.7B-Instruct-GGUF/resolve/main/SmolLM2-1.7B-Instruct-Q4_K_M.gguf',
+      localFileName: 'smollm2-1.7b-instruct-q4_k_m.gguf',
     ),
     LlmModel(
       id: 'qwen-2.5-1.5b',
@@ -110,8 +162,44 @@ class LlmModel {
       parameterSize: '2.7B',
       description: 'Microsoft\'s efficient model for complex reasoning.',
       downloadUrl:
-          'https://huggingface.co/bartowski/phi-2-GGUF/resolve/main/phi-2-Q4_K_M.gguf',
+          'https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_K_M.gguf',
       localFileName: 'phi-2-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen2.5-coder-1.5b',
+      name: 'Qwen Coder 2.5',
+      parameterSize: '1.5B',
+      description: 'Coding-focused Qwen model for better code generation.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf',
+      localFileName: 'qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen2.5-coder-3b',
+      name: 'Qwen Coder 2.5',
+      parameterSize: '3B',
+      description: 'Larger coder model for stronger coding quality.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf',
+      localFileName: 'qwen2.5-coder-3b-instruct-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen3.5-0.8b',
+      name: 'Qwen 3.5',
+      parameterSize: '0.8B',
+      description: 'Compact Qwen 3.5 base model.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf',
+      localFileName: 'qwen3.5-0.8b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen3.5-2b',
+      name: 'Qwen 3.5',
+      parameterSize: '2B',
+      description: 'Stronger Qwen 3.5 base model for reasoning quality.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf',
+      localFileName: 'qwen3.5-2b-q4_k_m.gguf',
     ),
     LlmModel(
       id: 'llama-3.2-3b',
@@ -124,7 +212,7 @@ class LlmModel {
     ),
     LlmModel(
       id: 'phi-3-mini',
-      name: 'Phi-3 Mini',
+      name: 'Phi-3 mini',
       parameterSize: '3.8B',
       description: 'Compact model with strong reasoning by Microsoft.',
       downloadUrl:
