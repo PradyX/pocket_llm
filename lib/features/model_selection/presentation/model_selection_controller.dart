@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:pocket_llm/core/services/local_notification_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/storage_info_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
@@ -15,6 +16,8 @@ class ModelSelectionController extends _$ModelSelectionController {
 
   late final ModelStorageService _storageService = ModelStorageService();
   late final StorageInfoService _storageInfoService = StorageInfoService();
+  late final LocalNotificationService _notificationService =
+      LocalNotificationService.instance;
   final Map<String, CancelToken> _cancelTokens = {};
 
   @override
@@ -147,6 +150,11 @@ class ModelSelectionController extends _$ModelSelectionController {
       );
       await _persistCustomModels(updatedModels);
       await _refreshStorageInfo();
+      try {
+        await _notificationService.showModelDownloadComplete(model.name);
+      } catch (_) {
+        // Notification failures should not affect download success.
+      }
     } catch (e) {
       _cancelTokens.remove(model.id);
 

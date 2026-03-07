@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pocket_llm/app.dart';
+import 'package:pocket_llm/core/services/local_notification_service.dart';
 import 'package:pocket_llm/core/utils/logger.dart';
 import 'package:pocket_llm/i18n/strings.g.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -30,6 +31,9 @@ Future<void> main() async {
 
   // Initialize i18n
   LocaleSettings.useDeviceLocale();
+
+  await LocalNotificationService.instance.initialize();
+  await LocalNotificationService.instance.requestPermissions();
 
   AppLogger.info('App started successfully');
   runApp(TranslationProvider(child: const ProviderScope(child: MyApp())));
