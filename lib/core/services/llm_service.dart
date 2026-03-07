@@ -6,13 +6,37 @@ class LlmService {
 
   bool get isLoaded => _llama != null;
 
-  Future<void> loadModel(String modelPath) async {
+  Future<void> loadModel(
+    String modelPath, {
+    int? nGpuLayers,
+    int? nCtx,
+    double? temperature,
+    double? topP,
+    int? topK,
+  }) async {
     if (_llama != null) {
       await unloadModel();
     }
 
+    final modelParams = ModelParams();
+    if (nGpuLayers != null) modelParams.nGpuLayers = nGpuLayers;
+
+    final contextParams = ContextParams();
+    if (nCtx != null) contextParams.nCtx = nCtx;
+
+    final samplerParams = SamplerParams();
+    if (temperature != null) samplerParams.temp = temperature;
+    if (topP != null) samplerParams.topP = topP;
+    if (topK != null) samplerParams.topK = topK;
+
     // llama_cpp_dart uses Llama class as the main entry point
-    _llama = Llama(modelPath, ModelParams(), ContextParams());
+    _llama = Llama(
+      modelPath,
+      modelParams,
+      contextParams,
+      samplerParams,
+      true, // verbose
+    );
   }
 
   Future<void> unloadModel() async {
@@ -25,6 +49,8 @@ class LlmService {
       throw Exception('Model not loaded');
     }
 
+    // Clear previous context as we send the full history in the prompt
+    _llama!.clear();
     // setPrompt prepares the model for generation
     _llama!.setPrompt(prompt);
 
