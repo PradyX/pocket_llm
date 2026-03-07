@@ -1,7 +1,7 @@
-import 'package:flutter_base_app/core/services/llm_service.dart';
-import 'package:flutter_base_app/core/services/model_storage_service.dart';
-import 'package:flutter_base_app/features/home/domain/chat_message.dart';
-import 'package:flutter_base_app/features/model_selection/presentation/model_selection_controller.dart';
+import 'package:pocket_llm/core/services/llm_service.dart';
+import 'package:pocket_llm/core/services/model_storage_service.dart';
+import 'package:pocket_llm/features/home/domain/chat_message.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'home_controller.g.dart';
@@ -53,6 +53,7 @@ class HomeController extends _$HomeController {
         // Load with better parameters for small models like Qwen 2.5 0.5B
         await _llmService.loadModel(
           path,
+          nPredict: 512, // Allow for longer responses (default was 32)
           temperature: 0.7,
           topP: 0.9,
           topK: 40,

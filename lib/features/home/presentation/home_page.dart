@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_base_app/core/navigation/app_router.dart';
-import 'package:flutter_base_app/features/home/domain/chat_message.dart';
-import 'package:flutter_base_app/features/home/presentation/home_controller.dart';
-import 'package:flutter_base_app/features/model_selection/presentation/model_selection_controller.dart';
+import 'package:pocket_llm/core/navigation/app_router.dart';
+import 'package:pocket_llm/core/utils/app_utils.dart';
+import 'package:pocket_llm/features/home/domain/chat_message.dart';
+import 'package:pocket_llm/features/home/presentation/home_controller.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -17,6 +18,7 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
+  final _sendDebouncer = Debouncer(milliseconds: 1000);
 
   @override
   void dispose() {
@@ -26,14 +28,16 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _sendMessage() {
-    final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    _sendDebouncer.run(() {
+      final text = _messageController.text.trim();
+      if (text.isEmpty) return;
 
-    ref.read(homeControllerProvider.notifier).sendMessage(text);
-    _messageController.clear();
+      ref.read(homeControllerProvider.notifier).sendMessage(text);
+      _messageController.clear();
 
-    // Scroll to bottom after a brief delay to allow the list to update.
-    Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+      // Scroll to bottom after a brief delay to allow the list to update.
+      Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
+    });
   }
 
   void _scrollToBottom() {
@@ -309,17 +313,29 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 }
 
-/// A single chat message bubble.
-class _ChatBubble extends StatelessWidget {
+class _ChatBubble extends StatefulWidget {
   final ChatMessage message;
 
   const _ChatBubble({required this.message});
 
   @override
+  State<_ChatBubble> createState() => _ChatBubbleState();
+}
+
+class _ChatBubbleState extends State<_ChatBubble> {
+  bool _isExpanded = false;
+
+  @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final isUser = message.isUser;
+    final isUser = widget.message.isUser;
+    final text = widget.message.text;
+
+    // Determine if we should show the expand/collapse button
+    // Threshold: 300 characters or more than 6 lines
+    final bool isLongMessage =
+        text.length > 300 || '\n'.allMatches(text).length > 6;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -344,6 +360,7 @@ class _ChatBubble extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (!isUser)
               Padding(
@@ -368,11 +385,46 @@ class _ChatBubble extends StatelessWidget {
                 ),
               ),
             SelectableText(
-              message.text,
+              text,
+              maxLines: (isLongMessage && !_isExpanded) ? 8 : null,
               style: textTheme.bodyMedium?.copyWith(
                 color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
               ),
             ),
+            if (isLongMessage)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: InkWell(
+                  onTap: () => setState(() => _isExpanded = !_isExpanded),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _isExpanded ? 'Show less' : 'Show more',
+                          style: textTheme.labelMedium?.copyWith(
+                            color: isUser
+                                ? colorScheme.onPrimary.withValues(alpha: 0.8)
+                                : colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Icon(
+                          _isExpanded
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          size: 16,
+                          color: isUser
+                              ? colorScheme.onPrimary.withValues(alpha: 0.8)
+                              : colorScheme.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

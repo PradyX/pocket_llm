@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_base_app/features/model_selection/domain/llm_model.dart';
-import 'package:flutter_base_app/features/model_selection/presentation/model_selection_controller.dart';
+import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class ModelSelectionPage extends ConsumerWidget {

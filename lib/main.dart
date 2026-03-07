@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_base_app/app.dart';
-import 'package:flutter_base_app/core/utils/logger.dart';
-import 'package:flutter_base_app/i18n/strings.g.dart';
+import 'package:pocket_llm/app.dart';
+import 'package:pocket_llm/core/utils/logger.dart';
+import 'package:pocket_llm/i18n/strings.g.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'firebase_initializer.dart';

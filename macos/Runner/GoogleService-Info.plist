@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.prady.flutterApplication1</string>
+	<string>com.prady.pocketllm</string>
 	<key>PROJECT_ID</key>
 	<string>flutter-projects-3a418</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:1013376549495:ios:851a9485ca06cd35243c72</string>
+	<string>1:1013376549495:ios:58d002227bda43ff243c72</string>
 </dict>
 </plist>
