@@ -1,321 +1,164 @@
-# Flutter Base App
+# Pocket LLM
 
-A production-grade Flutter starter template with a scalable, feature-first architecture. Clone this repo and start building immediately — theming, routing, networking, auth flows, logging, i18n, and essential utilities are all pre-configured.
+Pocket LLM is a **privacy-first mobile AI assistant that runs entirely on your device**.  
+It enables **on-device Local Language Model (LLM) inference using GGUF models** with `llama_cpp_dart`, allowing you to chat with AI **without sending your data to external servers**.
 
----
+Unlike most AI apps that rely on cloud APIs, **Pocket LLM performs all inference locally on your phone**. Your prompts, conversations, and models remain **fully under your control**, making it suitable for users who value **privacy, offline capability, and ownership of their data**.
 
-## Features
+The app is designed as a **mobile-first local AI runtime**, providing a smooth chat experience with model downloads, streaming responses, and per-model chat memory — all running directly **on-device**.
 
-- **Riverpod** state management with code generation (`riverpod_annotation`)
-- **GoRouter** for declarative, type-safe navigation
-- **Material 3** theming with dynamic Light/Dark mode switching
-- **Dio** HTTP client with pretty logging & token refresh interceptor skeleton
-- **Firebase** Core + Crashlytics integration
-- **Secure Storage** for persisting tokens and preferences
-- **Edge-to-Edge** display support for Android 15+
-- **Internationalization** via `slang` (strongly-typed, no build_runner needed)
-- **Structured Logging** via `talker_flutter` → console in debug, Crashlytics in release
-- **Environment Variables** via `flutter_dotenv`
-- **Splash Screen & App Icon** automation via `flutter_native_splash` & `flutter_launcher_icons`
-- **Utility Extensions** for Snackbars, Dialogs, Pickers, Clipboard, Validation, Masking, Debouncing, etc.
+Because inference happens locally:
 
----
+- No prompts leave your device
+- No cloud processing is required
+- No usage tracking of your conversations
+- Works even without an internet connection (after models are downloaded)
+
+Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, private, and fully local.
+
+## Highlights
+
+- Local inference with GGUF models (no server required for generation)
+- Live token streaming in chat with `Thinking...` + progressive output
+- Stop generation anytime
+- Per-model chat memory (switching models keeps separate threads)
+- Regenerate assistant reply + Edit & Resend user prompts
+- Generation stats per assistant message (`tok/s`, elapsed time, token count)
+- Markdown-like code fence rendering + one-tap copy for code blocks
+- Adaptive generation mode for mobile performance tuning
+- Sampling presets: `Precise`, `Balanced`, `Creative`
+- Advanced override for `temperature` and `top-p`
+- Built-in model catalog + custom model links
+- Chunked/resumable downloads with progress + pause
+- Local notification when a model download completes
+
+### Model Management
+
+- Built-in model list (Qwen, Qwen Coder, Llama 3.2, SmolLM2, Gemma, Phi, TinyLlama)
+- Add custom models from direct `.gguf` URL
+- Custom model validation:
+  - URL required (`http/https`)
+  - direct `.gguf` link required
+  - model name required
+  - parameter size required (format like `1.5B`, `800M`, `360M`)
+- Sort models by parameter size
+- Expand each model tile to inspect full metadata
+- Select active downloaded model from toolbar dropdown
+
+### Performance & Inference
+
+- Mobile-focused context setup (`nCtx`/`nBatch` tuned for device class)
+- Adaptive max-token behavior based on hardware + observed generation speed
+- Last 5 messages are sent as prompt context to keep runtime stable
+- GGUF signature checks to reject invalid/corrupt downloads
+
+## Tech Stack
+
+- Flutter + Material 3
+- Riverpod (`flutter_riverpod`, `riverpod_annotation`)
+- `llama_cpp_dart` for local LLM runtime
+- Dio for model downloads (chunked + resumable)
+- `flutter_secure_storage` for persisted app data
+- `flutter_local_notifications` for download-complete notifications
+- GoRouter for navigation
+- Firebase Core + Crashlytics
 
 ## Project Structure
 
-```
+```text
 lib/
-├── main.dart                          # App entry point
-├── app.dart                           # MaterialApp.router with theming
-├── firebase_initializer.dart          # Firebase setup
+├── main.dart
+├── app.dart
 ├── core/
-│   ├── error/
-│   │   └── app_exception.dart         # Custom exception classes
-│   ├── navigation/
-│   │   └── app_router.dart            # GoRouter + route constants
-│   ├── network/
-│   │   ├── api_client.dart            # API client abstraction
-│   │   ├── api_result.dart            # Result wrapper
-│   │   └── dio_provider.dart          # Dio setup, logger, auth interceptor
-│   ├── state/
-│   │   └── base_state.dart            # Sealed AsyncState<T> pattern
-│   ├── theme/
-│   │   ├── theme.dart                 # Material 3 theme (replaceable via Theme Builder)
-│   │   └── theme_provider.dart        # ThemeMode notifier + persistence
-│   └── utils/
-│       ├── app_utils.dart             # Extensions & utilities
-│       └── logger.dart                # AppLogger (Talker + Crashlytics)
+│   ├── navigation/app_router.dart
+│   ├── services/
+│   │   ├── llm_service.dart
+│   │   ├── model_storage_service.dart
+│   │   ├── storage_info_service.dart
+│   │   └── local_notification_service.dart
+│   ├── settings/inference_settings_provider.dart
+│   └── theme/
 ├── features/
 │   ├── home/
+│   │   ├── domain/chat_message.dart
 │   │   └── presentation/
-│   │       ├── home_page.dart         # Drawer + BottomNav + AppBar
-│   │       ├── home_controller.dart
-│   │       └── settings_page.dart     # Theme switching UI
-│   ├── login/
-│   │   ├── data/                      # API + Repository implementation
-│   │   ├── domain/                    # Repository interface + models
+│   │       ├── home_page.dart
+│   │       └── home_controller.dart
+│   ├── model_selection/
+│   │   ├── domain/llm_model.dart
 │   │   └── presentation/
-│   │       ├── login_page.dart
-│   │       ├── login_controller.dart
-│   │       ├── forgot_password_page.dart
-│   │       └── otp_login_page.dart
-│   └── sign_up/
-│       ├── data/
-│       ├── domain/
-│       └── presentation/
-├── i18n/
-│   ├── en.i18n.yaml                   # English strings
-│   ├── strings.g.dart                 # Generated translations
-│   └── strings_en.g.dart
-├── shared/
-│   └── providers.dart                 # Shared Riverpod providers
-└── storage/
-    └── secure_storage.dart            # SecureStorage wrapper
+│   │       ├── model_selection_page.dart
+│   │       ├── model_selection_controller.dart
+│   │       └── model_selection_state.dart
+│   └── settings/presentation/settings_page.dart
+├── storage/secure_storage.dart
+└── firebase_initializer.dart
 ```
-
----
 
 ## Getting Started
 
 ### Prerequisites
 
 - Flutter SDK `^3.10.8`
-- Firebase CLI (`flutterfire configure`)
+- Android Studio / Xcode toolchain
 
 ### Setup
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/PradyX/flutter_base_app.git
-cd flutter_base_app
-
-# 2. Install dependencies
+# 1) Install dependencies
 flutter pub get
 
-# 3. Create your .env file (copy from example)
+# 2) Ensure env file exists (required by startup)
 cp .env.example .env
 
-# 4. Configure Firebase
-flutterfire configure
-
-# 5. Run code generation (Riverpod + Freezed)
-dart run build_runner build --delete-conflicting-outputs
-
-# 6. Run the app
+# 3) Run app
 flutter run
 ```
 
----
+### If you change Riverpod annotations
 
-## Guides
-
-### 🎨 Theming (Material Theme Builder)
-
-This app is fully compatible with Google's [Material Theme Builder](https://material-foundation.github.io/material-theme-builder/).
-
-**To update your theme:**
-1. Go to the Theme Builder and customize your palette
-2. Export as **Flutter (Dart)**
-3. Replace the contents of `lib/core/theme/theme.dart` with the exported file
-4. Done! The app will pick up the new theme automatically
-
-**Theme switching** (System / Light / Dark) is available in the Navigation Drawer → Settings.
-
----
-
-### 🌐 Internationalization (i18n)
-
-This app uses [slang](https://pub.dev/packages/slang) for strongly-typed translations.
-
-**Adding a new language (e.g., Hindi):**
-
-1. Create `lib/i18n/hi.i18n.yaml`:
-```yaml
-login:
-  welcome: "वापसी पर स्वागत है"
-  subtitle: "जारी रखने के लिए साइन इन करें"
-  signIn: "साइन इन"
-  # ... add all keys from en.i18n.yaml
-```
-
-2. Regenerate:
-```bash
-dart run slang
-```
-
-3. Use in code:
-```dart
-import 'package:flutter_base_app/i18n/strings.g.dart';
-
-Text(t.login.welcome)  // Strongly typed!
-```
-
----
-
-### 🖼️ App Icon & Splash Screen
-
-Configurations are scaffolded in `pubspec.yaml` — just uncomment and set your images.
-
-**App Icon:**
-1. Place your icon at `assets/icon.png` (1024x1024 recommended)
-2. Uncomment `image_path` in the `flutter_launcher_icons` section of `pubspec.yaml`
-3. Run:
-```bash
-dart run flutter_launcher_icons
-```
-
-**Splash Screen:**
-1. Place your splash logo at `assets/splash.png`
-2. Uncomment `image` lines in the `flutter_native_splash` section of `pubspec.yaml`
-3. Run:
-```bash
-dart run flutter_native_splash:create
-```
-
----
-
-### 🔐 Environment Variables
-
-Environment variables are managed via `flutter_dotenv`.
-
-- `.env` — Your local environment (git-ignored)
-- `.env.example` — Committed template for team members
-
-**Available variables:**
-| Variable | Description | Default |
-|---|---|---|
-| `API_BASE_URL` | Backend API base URL | `https://dummyjson.com/auth` |
-
-**Accessing in code:**
-```dart
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-
-final baseUrl = dotenv.env['API_BASE_URL'];
-```
-
----
-
-### 🌐 Network Layer (Dio)
-
-The Dio HTTP client (`lib/core/network/dio_provider.dart`) comes pre-configured with:
-
-- **Pretty Dio Logger** — formatted request/response logs in the console
-- **Auth Interceptor Skeleton** — `TODO` placeholders for:
-  - Injecting Bearer tokens from Secure Storage
-  - Handling 401 responses with token refresh logic
-
----
-
-### 📊 Logging & Crash Reporting
-
-`lib/core/utils/logger.dart` provides `AppLogger`:
-
-```dart
-AppLogger.info('User logged in');
-AppLogger.debug('Fetching data...');
-AppLogger.warning('Rate limit approaching');
-AppLogger.error('API failed', exception, stackTrace);
-AppLogger.fatal('Critical failure', error, stackTrace);
-```
-
-| Mode | Behavior |
-|---|---|
-| **Debug** | Beautiful console logs via Talker |
-| **Release** | Errors routed to Firebase Crashlytics |
-
-Uncaught Flutter and async errors are automatically captured via `AppLogger.initCrashlytics()` in `main.dart`.
-
----
-
-### 🛠️ Utility Extensions (`app_utils.dart`)
-
-All utilities are in `lib/core/utils/app_utils.dart`:
-
-| Category | Usage |
-|---|---|
-| **Snackbars** | `context.showShortSnackBar('Saved!')` |
-| **Alert Dialogs** | `context.showAlertDialog(message: '...', onPositiveClick: () {})` |
-| **API Dialogs** | `context.showApiAlertDialog(isError: true, ...)` |
-| **Date Picker** | `DateTime? d = await context.openDateChooser()` |
-| **Time Picker** | `TimeOfDay? t = await context.openTimePicker()` |
-| **Clipboard** | `await context.copyToClipboard('text')` |
-| **Keyboard** | `context.hideKeyboard()` |
-| **String Validation** | `if (value.isValid) { ... }` |
-| **Mobile Validation** | `if (phone.isValidMobile) { ... }` |
-| **String Masking** | `'password'.mask()` → `pass****` |
-| **Color Hex** | `'#FF0000'.toColor()` / `Colors.red.toHexString()` |
-| **Date Formatting** | `DateUtilsExt.formatDateTime(...)` |
-| **Debouncer** | `Debouncer(milliseconds: 500).run(() => ...)` |
-| **Screen Size** | `context.screenWidth` / `context.screenHeight` |
-| **Theme Check** | `context.isDarkMode` |
-
-**Constants** (e.g., mobile number length) are centralized in `AppConstants` for easy modification across the entire app.
-
----
-
-### 🏗️ Code Generation
-
-This project uses code generation for Riverpod providers and Freezed models.
-
-**Run after modifying annotated files:**
 ```bash
 dart run build_runner build --delete-conflicting-outputs
 ```
 
-**Watch mode (auto-regenerate on save):**
-```bash
-dart run build_runner watch --delete-conflicting-outputs
-```
+## How To Use
 
----
+1. Open **Model Selection** from drawer.
+2. Download a built-in model or add your own GGUF link.
+3. Select a downloaded model.
+4. Start chatting on Home.
+5. Use `Stop`, `Regenerate`, or `Edit & Resend` for quick iteration.
 
-### 📱 Auth Flows
+## Troubleshooting
 
-Pre-built authentication screens:
+### `HTTP 401/403` while downloading model
 
-| Route | Page | Description |
-|---|---|---|
-| `/login` | `LoginPage` | Username/Password login |
-| `/login-otp` | `OtpLoginPage` | Mobile OTP-based login |
-| `/forgot-password` | `ForgotPasswordPage` | Password reset via OTP |
-| `/signup` | `SignUpPage` | New account registration |
-| `/home` | `HomePage` | Main app with Drawer + BottomNav |
-| `/settings` | `SettingsPage` | Theme switching |
+Your link is likely private/protected or not a direct public GGUF file.
+Use a public direct URL ending with `.gguf`.
 
----
+### `Prompt token count exceeds batch capacity`
 
-## Dependencies
+Your prompt/context is too large for current runtime settings.
+The app already limits history context, but very long prompts can still overflow.
+Use shorter prompts or a larger-capability model/runtime config.
 
-### Runtime
-| Package | Purpose |
-|---|---|
-| `flutter_riverpod` | State management |
-| `riverpod_annotation` | Provider code generation |
-| `dio` | HTTP client |
-| `go_router` | Declarative routing |
-| `flutter_secure_storage` | Encrypted key-value storage |
-| `freezed_annotation` | Immutable data classes |
-| `json_annotation` | JSON serialization |
-| `firebase_core` | Firebase SDK |
-| `firebase_crashlytics` | Crash reporting |
-| `intl` | Date/Number formatting |
-| `flutter_dotenv` | Environment variables |
-| `pretty_dio_logger` | Network request logging |
-| `slang` / `slang_flutter` | i18n translations |
-| `talker_flutter` | Structured logging |
+### `Failed to initialize model`
 
-### Dev
-| Package | Purpose |
-|---|---|
-| `build_runner` | Code generation runner |
-| `riverpod_generator` | Riverpod provider generation |
-| `freezed` | Immutable class generation |
-| `json_serializable` | JSON code generation |
-| `flutter_launcher_icons` | App icon automation |
-| `flutter_native_splash` | Splash screen automation |
+Usually indicates unsupported/corrupt GGUF or incomplete file.
+Delete and re-download the model.
 
----
+### iOS simulator model load failures
+
+Large model/runtime combinations may fail or behave differently on simulator.
+Test on a physical iOS device for reliable on-device inference behavior.
+
+## Privacy
+
+- Inference runs on-device
+- Chat threads and settings are persisted locally via secure storage
+- No cloud inference backend is required for chat generation
 
 ## License
 
-This project is open source. Feel free to use it as a template for your own projects.
+This project is licensed under **GNU GPL v3**.
+See [LICENSE](LICENSE).
