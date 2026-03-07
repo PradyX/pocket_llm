@@ -40,6 +40,34 @@ class LlmService {
     final cpuCount = Platform.numberOfProcessors;
     final defaultThreads = math.max(2, math.min(isMobile ? 4 : 8, cpuCount));
     final resolvedNCtx = nCtx ?? (isMobile ? 1024 : 2048);
+    final modelFile = File(modelPath);
+
+    if (!modelFile.existsSync()) {
+      throw Exception('Model file not found at $modelPath');
+    }
+
+    final modelSize = modelFile.lengthSync();
+    if (modelSize < 4) {
+      throw Exception(
+        'Model file appears invalid/incomplete. Please delete and re-download it.',
+      );
+    }
+
+    final header = modelFile.openSync(mode: FileMode.read);
+    try {
+      final magic = header.readSync(4);
+      if (magic.length != 4 ||
+          magic[0] != 0x47 ||
+          magic[1] != 0x47 ||
+          magic[2] != 0x55 ||
+          magic[3] != 0x46) {
+        throw Exception(
+          'Invalid GGUF file. Please delete and re-download the model.',
+        );
+      }
+    } finally {
+      header.closeSync();
+    }
 
     if (_llama != null) {
       await unloadModel();
@@ -69,14 +97,30 @@ class LlmService {
     if (topP != null) samplerParams.topP = topP;
     if (topK != null) samplerParams.topK = topK;
 
-    // llama_cpp_dart uses Llama class as the main entry point
-    _llama = Llama(
-      modelPath,
-      modelParams,
-      contextParams,
-      samplerParams,
-      false, // verbose
-    );
+    try {
+      // llama_cpp_dart uses Llama class as the main entry point
+      _llama = Llama(
+        modelPath,
+        modelParams,
+        contextParams,
+        samplerParams,
+        false, // verbose
+      );
+    } catch (e) {
+      final details = e.toString().toLowerCase();
+      if (details.contains('unknown') ||
+          details.contains('unsupported') ||
+          details.contains('architecture')) {
+        throw Exception(
+          'Model format is not supported by current llama runtime. '
+          'Try another GGUF model or update llama_cpp_dart.',
+        );
+      }
+      throw Exception(
+        'Failed to initialize model. The file may be corrupted or unsupported. '
+        'Please re-download and try again.',
+      );
+    }
     _loadedModelPath = modelPath;
     _configuredNCtx = contextParams.nCtx;
     _configuredNBatch = contextParams.nBatch;
