@@ -197,6 +197,14 @@ class ModelSelectionController extends _$ModelSelectionController {
       return;
     }
 
+    if (!uri.path.toLowerCase().endsWith('.gguf')) {
+      state = state.copyWith(
+        error:
+            'This app supports GGUF only. Please provide a direct .gguf file URL.',
+      );
+      return;
+    }
+
     if (normalizedName.isEmpty) {
       state = state.copyWith(error: 'Model name is required.');
       return;
