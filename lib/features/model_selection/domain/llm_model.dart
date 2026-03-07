@@ -175,6 +175,53 @@ class LlmModel {
       localFileName: 'qwen2.5-coder-1.5b-instruct-q4_k_m.gguf',
     ),
     LlmModel(
+      id: 'deepseek-r1-distill-qwen-1.5b',
+      name: 'DeepSeek R1 Distill Qwen',
+      parameterSize: '1.5B',
+      description: 'Compact DeepSeek reasoning model distilled from Qwen.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf',
+      localFileName: 'deepseek-r1-distill-qwen-1.5b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'deepseek-coder-1.3b',
+      name: 'DeepSeek Coder',
+      parameterSize: '1.3B',
+      description:
+          'Small DeepSeek coder model for lightweight on-device coding tasks.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/deepseek-coder-1.3B-kexer-GGUF/resolve/main/deepseek-coder-1.3B-kexer-Q4_K_M.gguf',
+      localFileName: 'deepseek-coder-1.3b-kexer-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'deepseek-coder-1.3b-base',
+      name: 'DeepSeek Coder (Base)',
+      parameterSize: '1.3B',
+      description: 'Base 1.3B DeepSeek coder model for custom prompting.',
+      downloadUrl:
+          'https://huggingface.co/TheBloke/deepseek-coder-1.3b-base-GGUF/resolve/main/deepseek-coder-1.3b-base.Q4_K_M.gguf',
+      localFileName: 'deepseek-coder-1.3b-base-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'deepseek-coder-1.3b-instruct',
+      name: 'DeepSeek Coder (Instruct)',
+      parameterSize: '1.3B',
+      description:
+          'Instruction-tuned 1.3B DeepSeek coder for chat-style coding tasks.',
+      downloadUrl:
+          'https://huggingface.co/TheBloke/deepseek-coder-1.3b-instruct-GGUF/resolve/main/deepseek-coder-1.3b-instruct.Q4_K_M.gguf',
+      localFileName: 'deepseek-coder-1.3b-instruct-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'deepseek-r1-redistill-qwen-1.5b',
+      name: 'DeepSeek R1 ReDistill Qwen',
+      parameterSize: '1.5B',
+      description: 'Refined 1.5B DeepSeek reasoning model (ReDistill v1.0).',
+      downloadUrl:
+          'https://huggingface.co/bartowski/DeepSeek-R1-ReDistill-Qwen-1.5B-v1.0-GGUF/resolve/main/DeepSeek-R1-ReDistill-Qwen-1.5B-v1.0-Q4_K_M.gguf',
+      localFileName: 'deepseek-r1-redistill-qwen-1.5b-v1.0-q4_k_m.gguf',
+    ),
+    LlmModel(
       id: 'qwen2.5-coder-3b',
       name: 'Qwen Coder 2.5',
       parameterSize: '3B',
@@ -183,24 +230,123 @@ class LlmModel {
           'https://huggingface.co/bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf',
       localFileName: 'qwen2.5-coder-3b-instruct-q4_k_m.gguf',
     ),
-    // LlmModel(
-    //   id: 'qwen3.5-0.8b',
-    //   name: 'Qwen 3.5',
-    //   parameterSize: '0.8B',
-    //   description: 'Compact Qwen 3.5 base model.',
-    //   downloadUrl:
-    //       'https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf',
-    //   localFileName: 'qwen3.5-0.8b-q4_k_m.gguf',
-    // ),
-    // LlmModel(
-    //   id: 'qwen3.5-2b',
-    //   name: 'Qwen 3.5',
-    //   parameterSize: '2B',
-    //   description: 'Stronger Qwen 3.5 base model for reasoning quality.',
-    //   downloadUrl:
-    //       'https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf',
-    //   localFileName: 'qwen3.5-2b-q4_k_m.gguf',
-    // ),
+    LlmModel(
+      id: 'qwen-2.5-3b',
+      name: 'Qwen 2.5',
+      parameterSize: '3B',
+      description: 'Mid-size Qwen variant for stronger quality.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf',
+      localFileName: 'qwen2.5-3b-instruct-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen3.5-0.8b',
+      name: 'Qwen 3.5',
+      parameterSize: '0.8B',
+      description: 'Compact Qwen 3.5 base model.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf',
+      localFileName: 'qwen3.5-0.8b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen3.5-2b',
+      name: 'Qwen 3.5',
+      parameterSize: '2B',
+      description: 'Stronger Qwen 3.5 base model for reasoning quality.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf',
+      localFileName: 'qwen3.5-2b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen-3-4b',
+      name: 'Qwen 3 (Thinking)',
+      parameterSize: '4B',
+      description: 'Larger Qwen 3 reasoning model with better output quality.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen_Qwen3-4B-GGUF/resolve/main/Qwen_Qwen3-4B-Q4_K_M.gguf',
+      localFileName: 'qwen3-4b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen-3.5-4b',
+      name: 'Qwen 3.5',
+      parameterSize: '4B',
+      description: 'Mid-size Qwen 3.5 model for better reasoning quality.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF/resolve/main/Qwen_Qwen3.5-4B-Q4_K_M.gguf',
+      localFileName: 'qwen3.5-4b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen-2.5-7b',
+      name: 'Qwen 2.5',
+      parameterSize: '7B',
+      description: 'High-quality Qwen 2.5 model for richer responses.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf',
+      localFileName: 'qwen2.5-7b-instruct-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'deepseek-r1-distill-qwen-7b',
+      name: 'DeepSeek R1 Distill Qwen',
+      parameterSize: '7B',
+      description: 'Stronger DeepSeek reasoning model distilled from Qwen.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf',
+      localFileName: 'deepseek-r1-distill-qwen-7b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen2.5-coder-7b',
+      name: 'Qwen Coder 2.5',
+      parameterSize: '7B',
+      description: 'Stronger coding model for longer and more accurate code.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf',
+      localFileName: 'qwen2.5-coder-7b-instruct-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'deepseek-r1-distill-llama-8b',
+      name: 'DeepSeek R1 Distill Llama',
+      parameterSize: '8B',
+      description: 'DeepSeek reasoning model distilled on Llama backbone.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/DeepSeek-R1-Distill-Llama-8B-GGUF/resolve/main/DeepSeek-R1-Distill-Llama-8B-Q4_K_M.gguf',
+      localFileName: 'deepseek-r1-distill-llama-8b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'qwen-3-8b',
+      name: 'Qwen 3 (Thinking)',
+      parameterSize: '8B',
+      description: 'Large Qwen 3 model for stronger reasoning and depth.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Qwen_Qwen3-8B-GGUF/resolve/main/Qwen_Qwen3-8B-Q4_K_M.gguf',
+      localFileName: 'qwen3-8b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'gemma-2-9b',
+      name: 'Gemma 2',
+      parameterSize: '9B',
+      description: 'Larger Gemma 2 model with improved quality and reasoning.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf',
+      localFileName: 'gemma-2-9b-it-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'mistral-nemo-12b',
+      name: 'Mistral Nemo Instruct',
+      parameterSize: '12B',
+      description: '12B Mistral Nemo instruct model for higher quality output.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Mistral-Nemo-Instruct-2407-GGUF/resolve/main/Mistral-Nemo-Instruct-2407-Q4_K_M.gguf',
+      localFileName: 'mistral-nemo-instruct-2407-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'ultra-instruct-12b',
+      name: 'Ultra Instruct',
+      parameterSize: '12B',
+      description: '12B instruct-tuned model optimized for richer responses.',
+      downloadUrl:
+          'https://huggingface.co/bartowski/Ultra-Instruct-12B-GGUF/resolve/main/Ultra-Instruct-12B-Q4_K_M.gguf',
+      localFileName: 'ultra-instruct-12b-q4_k_m.gguf',
+    ),
     LlmModel(
       id: 'llama-3.2-3b',
       name: 'Llama 3.2',
