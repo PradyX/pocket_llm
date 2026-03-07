@@ -183,24 +183,24 @@ class LlmModel {
           'https://huggingface.co/bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf',
       localFileName: 'qwen2.5-coder-3b-instruct-q4_k_m.gguf',
     ),
-    LlmModel(
-      id: 'qwen3.5-0.8b',
-      name: 'Qwen 3.5',
-      parameterSize: '0.8B',
-      description: 'Compact Qwen 3.5 base model.',
-      downloadUrl:
-          'https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf',
-      localFileName: 'qwen3.5-0.8b-q4_k_m.gguf',
-    ),
-    LlmModel(
-      id: 'qwen3.5-2b',
-      name: 'Qwen 3.5',
-      parameterSize: '2B',
-      description: 'Stronger Qwen 3.5 base model for reasoning quality.',
-      downloadUrl:
-          'https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf',
-      localFileName: 'qwen3.5-2b-q4_k_m.gguf',
-    ),
+    // LlmModel(
+    //   id: 'qwen3.5-0.8b',
+    //   name: 'Qwen 3.5',
+    //   parameterSize: '0.8B',
+    //   description: 'Compact Qwen 3.5 base model.',
+    //   downloadUrl:
+    //       'https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf',
+    //   localFileName: 'qwen3.5-0.8b-q4_k_m.gguf',
+    // ),
+    // LlmModel(
+    //   id: 'qwen3.5-2b',
+    //   name: 'Qwen 3.5',
+    //   parameterSize: '2B',
+    //   description: 'Stronger Qwen 3.5 base model for reasoning quality.',
+    //   downloadUrl:
+    //       'https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main/Qwen_Qwen3.5-2B-Q4_K_M.gguf',
+    //   localFileName: 'qwen3.5-2b-q4_k_m.gguf',
+    // ),
     LlmModel(
       id: 'llama-3.2-3b',
       name: 'Llama 3.2',
