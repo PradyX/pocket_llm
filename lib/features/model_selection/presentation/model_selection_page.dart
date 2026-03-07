@@ -373,65 +373,52 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     final hasInfo = free != null && total != null && total > 0;
     final used = hasInfo ? (total - free).clamp(0, total) : 0;
     final usedRatio = hasInfo ? (used / total).clamp(0.0, 1.0) : 0.0;
+    final progressColor = usedRatio >= 0.9
+        ? colorScheme.error
+        : usedRatio >= 0.7
+        ? Colors.amber.shade700
+        : colorScheme.primary;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.sd_storage_rounded,
-                    color: colorScheme.primary,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Device Storage',
-                    style: textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'Refresh storage',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () {
-                      ref
-                          .read(modelSelectionControllerProvider.notifier)
-                          .refreshStorageInfo();
-                    },
-                    icon: const Icon(Icons.refresh_rounded),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              if (hasInfo) ...[
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasInfo) ...[
+            Row(
+              children: [
                 Text(
-                  'Free ${_formatBytes(free)} of ${_formatBytes(total)}',
-                  style: textTheme.bodyMedium,
+                  'Storage',
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: usedRatio,
-                  borderRadius: BorderRadius.circular(4),
-                  backgroundColor: colorScheme.surfaceContainerHighest,
-                ),
-              ] else
+                const Spacer(),
                 Text(
-                  'Storage info unavailable on this device.',
-                  style: textTheme.bodySmall?.copyWith(
+                  '${_formatBytes(used)} used • ${_formatBytes(free)} free',
+                  style: textTheme.titleSmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-            ],
-          ),
-        ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            LinearProgressIndicator(
+              value: usedRatio,
+              minHeight: 12,
+              borderRadius: BorderRadius.circular(8),
+              color: progressColor,
+              backgroundColor: colorScheme.surfaceContainerHighest,
+            ),
+          ] else
+            Text(
+              'Storage info unavailable on this device.',
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+        ],
       ),
     );
   }
