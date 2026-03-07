@@ -10,6 +10,8 @@ class DownloadProgress {
 }
 
 class ModelSelectionState {
+  static const _unset = Object();
+
   final List<LlmModel> models;
   final String? selectedModelId;
   final Map<String, DownloadProgress> downloadProgress;
@@ -33,15 +35,17 @@ class ModelSelectionState {
 
   ModelSelectionState copyWith({
     List<LlmModel>? models,
-    String? selectedModelId,
+    Object? selectedModelId = _unset,
     Map<String, DownloadProgress>? downloadProgress,
-    String? error,
+    Object? error = _unset,
   }) {
     return ModelSelectionState(
       models: models ?? this.models,
-      selectedModelId: selectedModelId ?? this.selectedModelId,
+      selectedModelId: selectedModelId == _unset
+          ? this.selectedModelId
+          : selectedModelId as String?,
       downloadProgress: downloadProgress ?? this.downloadProgress,
-      error: error,
+      error: error == _unset ? this.error : error as String?,
     );
   }
 }
