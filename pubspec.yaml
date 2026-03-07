@@ -51,15 +51,15 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/icons/pocketllm_square.png"
+  image_path: "assets/icons/pocketllm_new.png"
   color: "#FFFFFF"
 
 flutter_native_splash:
   color: "#FFFFFF"
-  image: "assets/icons/pocketllm_square.png"
+  image: "assets/icons/pocketllm_new.png"
   android_12:
     color: "#FFFFFF"
-    image: "assets/icons/pocketllm_square.png"
+    image: "assets/icons/pocketllm_new.png"
 
 slang:
   base_locale: en
