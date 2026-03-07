@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_base_app/core/navigation/app_router.dart';
-import 'package:flutter_base_app/core/theme/theme.dart';
-import 'package:flutter_base_app/core/theme/theme_provider.dart';
+import 'package:pocket_llm/core/navigation/app_router.dart';
+import 'package:pocket_llm/core/theme/theme.dart';
+import 'package:pocket_llm/core/theme/theme_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class MyApp extends ConsumerWidget {

@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
-import 'package:flutter_base_app/core/services/model_storage_service.dart';
-import 'package:flutter_base_app/features/model_selection/domain/llm_model.dart';
-import 'package:flutter_base_app/features/model_selection/presentation/model_selection_state.dart';
+import 'package:pocket_llm/core/services/model_storage_service.dart';
+import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'model_selection_controller.g.dart';

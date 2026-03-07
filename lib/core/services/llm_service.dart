@@ -10,6 +10,7 @@ class LlmService {
     String modelPath, {
     int? nGpuLayers,
     int? nCtx,
+    int? nPredict,
     double? temperature,
     double? topP,
     int? topK,
@@ -22,7 +23,8 @@ class LlmService {
     if (nGpuLayers != null) modelParams.nGpuLayers = nGpuLayers;
 
     final contextParams = ContextParams();
-    if (nCtx != null) contextParams.nCtx = nCtx;
+    contextParams.nCtx = nCtx ?? 512;
+    if (nPredict != null) contextParams.nPredict = nPredict;
 
     final samplerParams = SamplerParams();
     if (temperature != null) samplerParams.temp = temperature;

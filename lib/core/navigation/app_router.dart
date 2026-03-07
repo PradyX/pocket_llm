@@ -1,6 +1,6 @@
-import 'package:flutter_base_app/features/home/presentation/home_page.dart';
-import 'package:flutter_base_app/features/model_selection/presentation/model_selection_page.dart';
-import 'package:flutter_base_app/features/settings/presentation/settings_page.dart';
+import 'package:pocket_llm/features/home/presentation/home_page.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_page.dart';
+import 'package:pocket_llm/features/settings/presentation/settings_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';

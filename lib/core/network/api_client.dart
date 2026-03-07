@@ -1,5 +1,5 @@
 import 'package:dio/dio.dart';
-import 'package:flutter_base_app/core/network/api_result.dart';
+import 'package:pocket_llm/core/network/api_result.dart';
 
 class ApiClient {
   final Dio dio;

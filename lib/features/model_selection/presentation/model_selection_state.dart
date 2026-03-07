@@ -1,4 +1,4 @@
-import 'package:flutter_base_app/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 
 class DownloadProgress {
   final int received;
