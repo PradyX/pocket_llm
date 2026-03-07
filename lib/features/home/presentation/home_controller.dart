@@ -50,8 +50,38 @@ class HomeController extends _$HomeController {
     try {
       if (!_llmService.isLoaded) {
         final path = await _storageService.getLocalFilePath(localFileName);
-        await _llmService.loadModel(path);
+        // Load with better parameters for small models like Qwen 2.5 0.5B
+        await _llmService.loadModel(
+          path,
+          temperature: 0.7,
+          topP: 0.9,
+          topK: 40,
+        );
       }
+
+      // Build ChatML prompt with history (last 5 messages for context)
+      final history = state.length > 5
+          ? state.sublist(state.length - 5)
+          : state;
+      final promptBuffer = StringBuffer();
+
+      promptBuffer.writeln(
+        '<|im_start|>system\nYou are a helpful and concise assistant.<|im_end|>',
+      );
+
+      for (final msg in history) {
+        if (msg.isUser) {
+          promptBuffer.writeln('<|im_start|>user\n${msg.text}<|im_end|>');
+        } else if (msg.text.isNotEmpty) {
+          // Only add previous assistant messages if they have text
+          promptBuffer.writeln('<|im_start|>assistant\n${msg.text}<|im_end|>');
+        }
+      }
+
+      // Start the latest assistant response
+      promptBuffer.write('<|im_start|>assistant\n');
+
+      final formattedPrompt = promptBuffer.toString();
 
       final aiMessageId = '${DateTime.now().millisecondsSinceEpoch}_ai';
       final initialAiMessage = ChatMessage(
@@ -63,7 +93,10 @@ class HomeController extends _$HomeController {
 
       state = [...state, initialAiMessage];
 
-      await for (final token in _llmService.generateResponse(userText)) {
+      await for (final token in _llmService.generateResponse(formattedPrompt)) {
+        // Stop if we see the end marker
+        if (token.contains('<|im_end|>')) break;
+
         state = [
           for (final msg in state)
             if (msg.id == aiMessageId)
