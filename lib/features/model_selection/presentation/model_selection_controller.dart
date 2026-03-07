@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
+import 'package:pocket_llm/core/services/storage_info_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
 import 'package:pocket_llm/storage/secure_storage.dart';
@@ -10,8 +11,10 @@ part 'model_selection_controller.g.dart';
 @riverpod
 class ModelSelectionController extends _$ModelSelectionController {
   static const _customModelsStorageKey = 'custom_models_v1';
+  static const _downloadSafetyBytes = 128 * 1024 * 1024;
 
   late final ModelStorageService _storageService = ModelStorageService();
+  late final StorageInfoService _storageInfoService = StorageInfoService();
   final Map<String, CancelToken> _cancelTokens = {};
 
   @override
@@ -55,6 +58,7 @@ class ModelSelectionController extends _$ModelSelectionController {
       models: updatedModels,
       selectedModelId: newSelectedId,
     );
+    await _refreshStorageInfo();
   }
 
   /// Select a specific model.
@@ -81,6 +85,35 @@ class ModelSelectionController extends _$ModelSelectionController {
     _cancelTokens[model.id] = cancelToken;
 
     try {
+      final storageInfo = await _refreshStorageInfo();
+      final remoteSize = await _storageService.getRemoteFileSize(
+        model.downloadUrl!,
+        cancelToken: cancelToken,
+      );
+      if (storageInfo != null && remoteSize != null) {
+        final existingSize = await _storageService.getLocalFileSize(
+          model.localFileName!,
+        );
+        final remainingBytes = remoteSize > existingSize
+            ? remoteSize - existingSize
+            : 0;
+        final requiredBytes = remainingBytes + _downloadSafetyBytes;
+        if (storageInfo.freeBytes < requiredBytes) {
+          _cancelTokens.remove(model.id);
+          final updatedProgress = Map<String, DownloadProgress>.from(
+            state.downloadProgress,
+          )..remove(model.id);
+          state = state.copyWith(
+            downloadProgress: updatedProgress,
+            error:
+                'Not enough free storage for ${model.name}. '
+                'Need ${_formatBytes(requiredBytes)} (including safety buffer), '
+                'free ${_formatBytes(storageInfo.freeBytes)}.',
+          );
+          return;
+        }
+      }
+
       await _storageService.downloadModel(
         model.downloadUrl!,
         model.localFileName!,
@@ -113,6 +146,7 @@ class ModelSelectionController extends _$ModelSelectionController {
         selectedModelId: state.selectedModelId ?? model.id,
       );
       await _persistCustomModels(updatedModels);
+      await _refreshStorageInfo();
     } catch (e) {
       _cancelTokens.remove(model.id);
 
@@ -238,11 +272,16 @@ class ModelSelectionController extends _$ModelSelectionController {
         selectedModelId: newSelectedId,
       );
       await _persistCustomModels(updatedModels);
+      await _refreshStorageInfo();
     } catch (e) {
       state = state.copyWith(
         error: 'Failed to delete ${model.name}: ${_friendlyDownloadError(e)}',
       );
     }
+  }
+
+  Future<void> refreshStorageInfo() async {
+    await _refreshStorageInfo();
   }
 
   Future<List<LlmModel>> _loadCustomModels() async {
@@ -324,5 +363,24 @@ class ModelSelectionController extends _$ModelSelectionController {
 
   bool _isValidParameterSize(String value) {
     return RegExp(r'^[0-9]*\.?[0-9]+\s*[KMBT]$').hasMatch(value);
+  }
+
+  Future<StorageInfo?> _refreshStorageInfo() async {
+    final info = await _storageInfoService.getStorageInfo();
+    state = state.copyWith(
+      freeStorageBytes: info?.freeBytes,
+      totalStorageBytes: info?.totalBytes,
+    );
+    return info;
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes <= 0) return '0 B';
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 }

@@ -16,12 +16,16 @@ class ModelSelectionState {
   final String? selectedModelId;
   final Map<String, DownloadProgress> downloadProgress;
   final String? error;
+  final int? freeStorageBytes;
+  final int? totalStorageBytes;
 
   ModelSelectionState({
     required this.models,
     this.selectedModelId,
     this.downloadProgress = const {},
     this.error,
+    this.freeStorageBytes,
+    this.totalStorageBytes,
   });
 
   LlmModel? get selectedModel {
@@ -38,6 +42,8 @@ class ModelSelectionState {
     Object? selectedModelId = _unset,
     Map<String, DownloadProgress>? downloadProgress,
     Object? error = _unset,
+    Object? freeStorageBytes = _unset,
+    Object? totalStorageBytes = _unset,
   }) {
     return ModelSelectionState(
       models: models ?? this.models,
@@ -46,6 +52,12 @@ class ModelSelectionState {
           : selectedModelId as String?,
       downloadProgress: downloadProgress ?? this.downloadProgress,
       error: error == _unset ? this.error : error as String?,
+      freeStorageBytes: freeStorageBytes == _unset
+          ? this.freeStorageBytes
+          : freeStorageBytes as int?,
+      totalStorageBytes: totalStorageBytes == _unset
+          ? this.totalStorageBytes
+          : totalStorageBytes as int?,
     );
   }
 }

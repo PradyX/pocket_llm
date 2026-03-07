@@ -73,7 +73,90 @@ class ModelStorageService {
   Future<bool> isModelDownloaded(String fileName) async {
     final dir = await getModelDir();
     final file = File(p.join(dir, fileName));
-    return file.existsSync();
+    if (!file.existsSync()) return false;
+
+    // Presence of metadata means chunked download is incomplete/resumable.
+    final metadataFile = File('${file.path}.json');
+    if (metadataFile.existsSync()) return false;
+
+    // Validate GGUF magic bytes to avoid marking HTML/error files as models.
+    if (file.lengthSync() < 4) return false;
+    final raf = file.openSync(mode: FileMode.read);
+    try {
+      final magic = raf.readSync(4);
+      if (magic.length != 4 ||
+          magic[0] != 0x47 ||
+          magic[1] != 0x47 ||
+          magic[2] != 0x55 ||
+          magic[3] != 0x46) {
+        return false;
+      }
+    } finally {
+      raf.closeSync();
+    }
+
+    return true;
+  }
+
+  Future<int> getLocalFileSize(String fileName) async {
+    final dir = await getModelDir();
+    final file = File(p.join(dir, fileName));
+    if (!file.existsSync()) return 0;
+    return file.lengthSync();
+  }
+
+  Future<int?> getRemoteFileSize(String url, {CancelToken? cancelToken}) async {
+    try {
+      final headRes = await _dio.head(
+        url,
+        cancelToken: cancelToken,
+        options: Options(validateStatus: (status) => (status ?? 500) < 500),
+      );
+      if ((headRes.statusCode ?? 500) < 400) {
+        final contentLength = int.tryParse(
+          headRes.headers.value('content-length') ?? '',
+        );
+        if (contentLength != null && contentLength > 0) return contentLength;
+      }
+    } on DioException {
+      // Fall through to range probe.
+    }
+
+    try {
+      final probe = await _dio.get<ResponseBody>(
+        url,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {'range': 'bytes=0-0'},
+          validateStatus: (status) => (status ?? 500) < 500,
+        ),
+        cancelToken: cancelToken,
+      );
+      try {
+        final contentRange = probe.headers.value('content-range');
+        if (contentRange != null) {
+          final match = RegExp(
+            r'bytes\s+\d+-\d+/(\d+)',
+          ).firstMatch(contentRange);
+          final total = int.tryParse(match?.group(1) ?? '');
+          if (total != null && total > 0) return total;
+        }
+
+        final contentLength = int.tryParse(
+          probe.headers.value('content-length') ?? '',
+        );
+        if (contentLength != null && contentLength > 0) {
+          // 200 can be full body length; 206 may only report ranged bytes.
+          if ((probe.statusCode ?? 0) == 200) return contentLength;
+        }
+      } finally {
+        await probe.data?.stream.drain<void>();
+      }
+    } on DioException {
+      // Ignore, unknown size.
+    }
+
+    return null;
   }
 
   /// Downloads a model using parallel chunked streams with resumption support.

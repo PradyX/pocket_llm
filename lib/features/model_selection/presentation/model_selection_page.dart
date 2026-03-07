@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class ModelSelectionPage extends ConsumerStatefulWidget {
@@ -12,6 +13,14 @@ class ModelSelectionPage extends ConsumerStatefulWidget {
 
 class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   final Set<String> _expandedModelIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(modelSelectionControllerProvider.notifier).refreshStorageInfo();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,9 +65,13 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
       ),
       body: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: sortedModels.length,
+        itemCount: sortedModels.length + 1,
         itemBuilder: (context, index) {
-          final model = sortedModels[index];
+          if (index == 0) {
+            return _buildStorageCard(context, state);
+          }
+
+          final model = sortedModels[index - 1];
           final isSelected = model.id == state.selectedModelId;
           final downloadProgress = state.downloadProgress[model.id];
           final isDownloading = downloadProgress != null;
@@ -348,6 +361,77 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildStorageCard(BuildContext context, ModelSelectionState state) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final free = state.freeStorageBytes;
+    final total = state.totalStorageBytes;
+    final hasInfo = free != null && total != null && total > 0;
+    final used = hasInfo ? (total - free).clamp(0, total) : 0;
+    final usedRatio = hasInfo ? (used / total).clamp(0.0, 1.0) : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.sd_storage_rounded,
+                    color: colorScheme.primary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Device Storage',
+                    style: textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Refresh storage',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      ref
+                          .read(modelSelectionControllerProvider.notifier)
+                          .refreshStorageInfo();
+                    },
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (hasInfo) ...[
+                Text(
+                  'Free ${_formatBytes(free)} of ${_formatBytes(total)}',
+                  style: textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(
+                  value: usedRatio,
+                  borderRadius: BorderRadius.circular(4),
+                  backgroundColor: colorScheme.surfaceContainerHighest,
+                ),
+              ] else
+                Text(
+                  'Storage info unavailable on this device.',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
