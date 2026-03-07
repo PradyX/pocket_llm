@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
 import 'package:pocket_llm/core/theme/theme_provider.dart';
@@ -127,6 +128,49 @@ class SettingsPage extends ConsumerWidget {
                   const SizedBox(height: 8),
                   Text(
                     'Resolved: temp ${sampling.temperature.toStringAsFixed(2)} · top-p ${sampling.topP.toStringAsFixed(2)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Max Output Tokens'),
+                      Text(
+                        '${inferenceSettings.maxTokens.round()}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Slider(
+                    value: inferenceSettings.maxTokens.toDouble(),
+                    min: 64,
+                    max: (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096,
+                    divisions: (Platform.isAndroid || Platform.isIOS) ? 31 : 63,
+                    onChanged: (value) {
+                      ref
+                          .read(inferenceSettingsProvider.notifier)
+                          .setMaxTokens(value.round());
+                    },
+                  ),
+                  Text(
+                    'Higher values allow longer responses but may be slower or use more memory.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
