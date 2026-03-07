@@ -30,6 +30,8 @@ final homeGenerationStatusProvider = StateProvider<HomeGenerationStatus>(
 
 @riverpod
 class HomeController extends _$HomeController {
+  static const _systemPrompt = 'You are a helpful and concise assistant.';
+
   late final LlmService _llmService = LlmService();
   late final ModelStorageService _storageService = ModelStorageService();
   bool _stopRequestedByUser = false;
@@ -112,16 +114,16 @@ class HomeController extends _$HomeController {
       );
 
       _setStatus('Building prompt...');
+      final historyCandidates = state
+          .where((m) => m.id != aiMessageId && m.text.trim().isNotEmpty)
+          .toList();
+      final history = historyCandidates.length > 5
+          ? historyCandidates.sublist(historyCandidates.length - 5)
+          : historyCandidates;
 
-      // Build ChatML prompt with history (last 5 messages for context)
-      final history = state.length > 5
-          ? state.sublist(state.length - 5)
-          : state;
       final promptBuffer = StringBuffer();
 
-      promptBuffer.writeln(
-        '<|im_start|>system\nYou are a helpful and concise assistant.<|im_end|>',
-      );
+      promptBuffer.writeln('<|im_start|>system\n$_systemPrompt<|im_end|>');
 
       for (final msg in history) {
         if (msg.isUser) {

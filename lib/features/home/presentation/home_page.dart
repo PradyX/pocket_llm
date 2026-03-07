@@ -477,7 +477,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
               ),
             SelectableText(
               text,
-              maxLines: (isLongMessage && !_isExpanded) ? 8 : null,
+              maxLines: (isLongMessage && !_isExpanded) ? 15 : null,
               style: textTheme.bodyMedium?.copyWith(
                 color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
               ),
