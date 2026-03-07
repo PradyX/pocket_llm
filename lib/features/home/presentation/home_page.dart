@@ -160,12 +160,33 @@ class _HomePageState extends ConsumerState<HomePage> {
                         : downloadedModels.first.id,
                     isExpanded: true,
                     isDense: true,
-                    iconSize: 18,
+                    iconSize: 0,
+                    icon: const SizedBox.shrink(),
                     style: textTheme.labelSmall?.copyWith(
                       color: colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
                     ),
                     dropdownColor: colorScheme.surfaceContainerHigh,
+                    selectedItemBuilder: (context) => downloadedModels
+                        .map(
+                          (model) => Row(
+                            children: [
+                              Icon(
+                                Icons.expand_more_rounded,
+                                size: 16,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 2),
+                              Expanded(
+                                child: Text(
+                                  '${model.name} · ${model.parameterSize}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                        .toList(),
                     items: downloadedModels
                         .map(
                           (model) => DropdownMenuItem<String>(
@@ -532,6 +553,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isUser = widget.message.isUser;
+    final hasExternalUserEdit = isUser && widget.onEditResend != null;
     final text = widget.message.text;
     final actionForeground = isUser
         ? colorScheme.onPrimary
@@ -544,138 +566,145 @@ class _ChatBubbleState extends State<_ChatBubble> {
         !hasCodeFences &&
         (text.length > 1000 || '\n'.allMatches(text).length > 50);
 
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: EdgeInsets.only(
-          top: 4,
-          bottom: 4,
-          left: isUser ? 64 : 0,
-          right: isUser ? 0 : 64,
+    final bubble = Container(
+      margin: EdgeInsets.only(
+        top: 4,
+        bottom: 4,
+        left: isUser ? (hasExternalUserEdit ? 0 : 64) : 0,
+        right: isUser ? 0 : 64,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isUser
+            ? colorScheme.primary
+            : colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(20),
+          topRight: const Radius.circular(20),
+          bottomLeft: Radius.circular(isUser ? 20 : 4),
+          bottomRight: Radius.circular(isUser ? 4 : 20),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isUser
-              ? colorScheme.primary
-              : colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(20),
-            topRight: const Radius.circular(20),
-            bottomLeft: Radius.circular(isUser ? 20 : 4),
-            bottomRight: Radius.circular(isUser ? 4 : 20),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isUser)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.smart_toy_rounded,
-                      size: 14,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!isUser)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.smart_toy_rounded,
+                    size: 14,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Assistant',
+                    style: textTheme.labelSmall?.copyWith(
                       color: colorScheme.primary,
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Assistant',
-                      style: textTheme.labelSmall?.copyWith(
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            if (hasCodeFences)
-              _MarkdownCodeMessage(
-                text: text,
-                textColor: isUser
-                    ? colorScheme.onPrimary
-                    : colorScheme.onSurface,
-                textTheme: textTheme,
-                colorScheme: colorScheme,
-              )
-            else
-              SelectableText(
-                text,
-                maxLines: (isLongMessage && !_isExpanded) ? 15 : null,
-                style: textTheme.bodyMedium?.copyWith(
-                  color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
-                ),
+            ),
+          if (hasCodeFences)
+            _MarkdownCodeMessage(
+              text: text,
+              textColor: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
+              textTheme: textTheme,
+              colorScheme: colorScheme,
+            )
+          else
+            SelectableText(
+              text,
+              maxLines: (isLongMessage && !_isExpanded) ? 15 : null,
+              style: textTheme.bodyMedium?.copyWith(
+                color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
               ),
-            if (isLongMessage)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: InkWell(
-                  onTap: () => setState(() => _isExpanded = !_isExpanded),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _isExpanded ? 'Show less' : 'Show more',
-                          style: textTheme.labelMedium?.copyWith(
-                            color: isUser
-                                ? colorScheme.onPrimary.withValues(alpha: 0.8)
-                                : colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Icon(
-                          _isExpanded
-                              ? Icons.expand_less_rounded
-                              : Icons.expand_more_rounded,
-                          size: 16,
+            ),
+          if (isLongMessage)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: InkWell(
+                onTap: () => setState(() => _isExpanded = !_isExpanded),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _isExpanded ? 'Show less' : 'Show more',
+                        style: textTheme.labelMedium?.copyWith(
                           color: isUser
                               ? colorScheme.onPrimary.withValues(alpha: 0.8)
                               : colorScheme.primary,
+                          fontWeight: FontWeight.bold,
                         ),
-                      ],
-                    ),
+                      ),
+                      Icon(
+                        _isExpanded
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        size: 16,
+                        color: isUser
+                            ? colorScheme.onPrimary.withValues(alpha: 0.8)
+                            : colorScheme.primary,
+                      ),
+                    ],
                   ),
                 ),
               ),
-            if (widget.onRegenerate != null || widget.onEditResend != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Wrap(
-                  spacing: 8,
-                  children: [
-                    if (widget.onRegenerate != null)
-                      OutlinedButton.icon(
-                        onPressed: widget.onRegenerate,
-                        icon: const Icon(Icons.refresh_rounded, size: 16),
-                        label: const Text('Regenerate'),
-                        style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          foregroundColor: actionForeground,
-                          side: BorderSide(color: actionBorder),
-                        ),
-                      ),
-                    if (widget.onEditResend != null)
-                      OutlinedButton.icon(
-                        onPressed: widget.onEditResend,
-                        icon: const Icon(Icons.edit_rounded, size: 16),
-                        label: const Text('Edit & Resend'),
-                        style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          foregroundColor: actionForeground,
-                          side: BorderSide(color: actionBorder),
-                        ),
-                      ),
-                  ],
+            ),
+          if (widget.onRegenerate != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: OutlinedButton.icon(
+                onPressed: widget.onRegenerate,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Regenerate'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: actionForeground,
+                  side: BorderSide(color: actionBorder),
                 ),
               ),
+            ),
+        ],
+      ),
+    );
+
+    if (hasExternalUserEdit) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            IconButton(
+              tooltip: 'Edit & Resend',
+              onPressed: widget.onEditResend,
+              icon: const Icon(Icons.edit_outlined),
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: const EdgeInsets.all(6),
+              color: colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Flexible(child: bubble),
           ],
         ),
-      ),
+      );
+    }
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: bubble,
     );
   }
 }
