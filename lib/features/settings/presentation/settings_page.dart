@@ -65,7 +65,7 @@ class SettingsPage extends ConsumerWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            'Inference',
+            'LLM Inference',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
               color: Theme.of(context).colorScheme.primary,

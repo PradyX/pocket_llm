@@ -485,10 +485,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                     color: colorScheme.onPrimary,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(
-                    Icons.smart_toy_rounded,
-                    color: colorScheme.primary,
-                    size: 28,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Image.asset(
+                      'assets/icons/pocketllm.png',
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
