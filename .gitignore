@@ -66,3 +66,5 @@ lib/firebase_options.dart
 
 # Llama prebuilt binaries
 /android/app/src/main/jniLibs/*
+/ios/libllama.dylib
+/ios/Frameworks/*

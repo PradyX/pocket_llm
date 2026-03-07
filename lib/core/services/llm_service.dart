@@ -77,7 +77,8 @@ class LlmService {
     _isGenerating = false;
 
     final modelParams = ModelParams();
-    modelParams.nGpuLayers = nGpuLayers ?? (isMobile ? 0 : 99);
+    modelParams.nGpuLayers =
+        nGpuLayers ?? (Platform.isIOS ? 99 : (Platform.isAndroid ? 0 : 99));
 
     final contextParams = ContextParams();
     contextParams.nCtx = resolvedNCtx;
