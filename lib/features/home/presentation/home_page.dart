@@ -482,13 +482,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: colorScheme.onPrimary,
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(8),
                     child: Image.asset(
-                      'assets/icons/pocketllm.png',
+                      'assets/icons/pocketllm_new.png',
                       fit: BoxFit.contain,
                     ),
                   ),

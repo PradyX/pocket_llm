@@ -103,15 +103,18 @@ class SettingsPage extends ConsumerWidget {
                     segments: const [
                       ButtonSegment(
                         value: SamplingPreset.precise,
-                        label: Text('Precise'),
+                        label: Text('Precise', style: TextStyle(fontSize: 13)),
                       ),
                       ButtonSegment(
                         value: SamplingPreset.balanced,
-                        label: Text('Balanced'),
+                        label: Text(
+                          'Balanced',
+                          style: TextStyle(fontSize: 11.5),
+                        ),
                       ),
                       ButtonSegment(
                         value: SamplingPreset.creative,
-                        label: Text('Creative'),
+                        label: Text('Creative', style: TextStyle(fontSize: 13)),
                       ),
                     ],
                     selected: {inferenceSettings.samplingPreset},
