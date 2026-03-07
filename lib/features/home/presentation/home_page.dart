@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/home/domain/chat_message.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
@@ -41,6 +42,52 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     if (!mounted) return;
     _scheduleScrollToBottom(animated: true);
+  }
+
+  Future<void> _regenerateMessage(ChatMessage message) async {
+    await ref
+        .read(homeControllerProvider.notifier)
+        .regenerateAssistantMessage(message.id);
+  }
+
+  Future<void> _editAndResendMessage(ChatMessage message) async {
+    var draftText = message.text;
+    final updatedText = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit & Resend'),
+          content: TextFormField(
+            initialValue: message.text,
+            autofocus: true,
+            minLines: 2,
+            maxLines: 8,
+            onChanged: (value) => draftText = value,
+            decoration: const InputDecoration(
+              hintText: 'Edit your message...',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, draftText.trim()),
+              child: const Text('Resend'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (updatedText == null || updatedText.isEmpty) return;
+
+    await ref
+        .read(homeControllerProvider.notifier)
+        .editAndResendMessage(message.id, updatedText);
   }
 
   void _scrollToBottom({bool animated = false}) {
@@ -181,7 +228,16 @@ class _HomePageState extends ConsumerState<HomePage> {
                     ),
                     itemCount: messages.length,
                     itemBuilder: (context, index) {
-                      return _ChatBubble(message: messages[index]);
+                      final message = messages[index];
+                      return _ChatBubble(
+                        message: message,
+                        onRegenerate: (!isGenerating && !message.isUser)
+                            ? () => _regenerateMessage(message)
+                            : null,
+                        onEditResend: (!isGenerating && message.isUser)
+                            ? () => _editAndResendMessage(message)
+                            : null,
+                      );
                     },
                   ),
           ),
@@ -455,8 +511,14 @@ class _HomePageState extends ConsumerState<HomePage> {
 
 class _ChatBubble extends StatefulWidget {
   final ChatMessage message;
+  final VoidCallback? onRegenerate;
+  final VoidCallback? onEditResend;
 
-  const _ChatBubble({required this.message});
+  const _ChatBubble({
+    required this.message,
+    this.onRegenerate,
+    this.onEditResend,
+  });
 
   @override
   State<_ChatBubble> createState() => _ChatBubbleState();
@@ -471,11 +533,16 @@ class _ChatBubbleState extends State<_ChatBubble> {
     final textTheme = Theme.of(context).textTheme;
     final isUser = widget.message.isUser;
     final text = widget.message.text;
-
-    // Determine if we should show the expand/collapse button
-    // Threshold: 300 characters or more than 6 lines
-    final bool isLongMessage =
-        text.length > 1000 || '\n'.allMatches(text).length > 50;
+    final actionForeground = isUser
+        ? colorScheme.onPrimary
+        : colorScheme.primary;
+    final actionBorder = isUser
+        ? colorScheme.onPrimary.withValues(alpha: 0.45)
+        : colorScheme.outline;
+    final hasCodeFences = !isUser && text.contains('```');
+    final isLongMessage =
+        !hasCodeFences &&
+        (text.length > 1000 || '\n'.allMatches(text).length > 50);
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -524,13 +591,23 @@ class _ChatBubbleState extends State<_ChatBubble> {
                   ],
                 ),
               ),
-            SelectableText(
-              text,
-              maxLines: (isLongMessage && !_isExpanded) ? 15 : null,
-              style: textTheme.bodyMedium?.copyWith(
-                color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
+            if (hasCodeFences)
+              _MarkdownCodeMessage(
+                text: text,
+                textColor: isUser
+                    ? colorScheme.onPrimary
+                    : colorScheme.onSurface,
+                textTheme: textTheme,
+                colorScheme: colorScheme,
+              )
+            else
+              SelectableText(
+                text,
+                maxLines: (isLongMessage && !_isExpanded) ? 15 : null,
+                style: textTheme.bodyMedium?.copyWith(
+                  color: isUser ? colorScheme.onPrimary : colorScheme.onSurface,
+                ),
               ),
-            ),
             if (isLongMessage)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -565,9 +642,199 @@ class _ChatBubbleState extends State<_ChatBubble> {
                   ),
                 ),
               ),
+            if (widget.onRegenerate != null || widget.onEditResend != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    if (widget.onRegenerate != null)
+                      OutlinedButton.icon(
+                        onPressed: widget.onRegenerate,
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('Regenerate'),
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          foregroundColor: actionForeground,
+                          side: BorderSide(color: actionBorder),
+                        ),
+                      ),
+                    if (widget.onEditResend != null)
+                      OutlinedButton.icon(
+                        onPressed: widget.onEditResend,
+                        icon: const Icon(Icons.edit_rounded, size: 16),
+                        label: const Text('Edit & Resend'),
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          foregroundColor: actionForeground,
+                          side: BorderSide(color: actionBorder),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
     );
   }
+}
+
+class _MarkdownCodeMessage extends StatelessWidget {
+  final String text;
+  final Color textColor;
+  final TextTheme textTheme;
+  final ColorScheme colorScheme;
+
+  const _MarkdownCodeMessage({
+    required this.text,
+    required this.textColor,
+    required this.textTheme,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = _parseSegments(text);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final segment in segments)
+          if (segment.isCode)
+            _buildCodeBlock(context, segment)
+          else if (segment.text.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: SelectableText(
+                segment.text,
+                style: textTheme.bodyMedium?.copyWith(color: textColor),
+              ),
+            ),
+      ],
+    );
+  }
+
+  Widget _buildCodeBlock(BuildContext context, _MarkdownSegment segment) {
+    final codeBackground = colorScheme.surfaceContainerHigh;
+    final languageLabel = segment.language?.isNotEmpty == true
+        ? segment.language!
+        : 'code';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: codeBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(11),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    languageLabel,
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () async {
+                    await Clipboard.setData(ClipboardData(text: segment.text));
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Code copied'),
+                        duration: Duration(milliseconds: 900),
+                      ),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.content_copy_rounded,
+                      size: 16,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SelectableText(
+              segment.text,
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurface,
+                fontFamily: 'monospace',
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<_MarkdownSegment> _parseSegments(String source) {
+    final regex = RegExp(r'```([^\n`]*)\r?\n([\s\S]*?)```');
+    final segments = <_MarkdownSegment>[];
+
+    var cursor = 0;
+    for (final match in regex.allMatches(source)) {
+      if (match.start > cursor) {
+        segments.add(
+          _MarkdownSegment(text: source.substring(cursor, match.start)),
+        );
+      }
+
+      final language = (match.group(1) ?? '').trim();
+      final code = (match.group(2) ?? '').trimRight();
+      segments.add(
+        _MarkdownSegment(
+          text: code,
+          isCode: true,
+          language: language.isEmpty ? null : language,
+        ),
+      );
+
+      cursor = match.end;
+    }
+
+    if (cursor < source.length) {
+      segments.add(_MarkdownSegment(text: source.substring(cursor)));
+    }
+
+    if (segments.isEmpty) {
+      segments.add(_MarkdownSegment(text: source));
+    }
+
+    return segments;
+  }
+}
+
+class _MarkdownSegment {
+  final String text;
+  final bool isCode;
+  final String? language;
+
+  const _MarkdownSegment({
+    required this.text,
+    this.isCode = false,
+    this.language,
+  });
 }
