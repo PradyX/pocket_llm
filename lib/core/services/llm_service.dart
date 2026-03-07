@@ -8,6 +8,8 @@ class LlmService {
   String? _loadedModelPath;
   bool _isGenerating = false;
   bool _stopRequested = false;
+  int _configuredNCtx = 0;
+  int _configuredNBatch = 0;
 
   bool get isLoaded => _llama != null;
   bool get isGenerating => _isGenerating;
@@ -30,6 +32,7 @@ class LlmService {
     final isMobile = Platform.isAndroid || Platform.isIOS;
     final cpuCount = Platform.numberOfProcessors;
     final defaultThreads = math.max(2, math.min(isMobile ? 4 : 8, cpuCount));
+    final resolvedNCtx = nCtx ?? (isMobile ? 1024 : 2048);
 
     if (_llama != null) {
       await unloadModel();
@@ -42,10 +45,11 @@ class LlmService {
     modelParams.nGpuLayers = nGpuLayers ?? (isMobile ? 0 : 99);
 
     final contextParams = ContextParams();
-    contextParams.nCtx = nCtx ?? (isMobile ? 1024 : 2048);
+    contextParams.nCtx = resolvedNCtx;
     if (nBatch != null) {
-      contextParams.nBatch = nBatch;
-      contextParams.nUbatch = nBatch;
+      final resolvedNBatch = math.min(nBatch, resolvedNCtx);
+      contextParams.nBatch = resolvedNBatch;
+      contextParams.nUbatch = resolvedNBatch;
     }
     contextParams.nThreads = nThreads ?? defaultThreads;
     contextParams.nThreadsBatch = nThreadsBatch ?? defaultThreads;
@@ -67,6 +71,8 @@ class LlmService {
       false, // verbose
     );
     _loadedModelPath = modelPath;
+    _configuredNCtx = contextParams.nCtx;
+    _configuredNBatch = contextParams.nBatch;
   }
 
   Future<void> unloadModel() async {
@@ -75,6 +81,8 @@ class LlmService {
     _loadedModelPath = null;
     _isGenerating = false;
     _stopRequested = false;
+    _configuredNCtx = 0;
+    _configuredNBatch = 0;
   }
 
   Future<void> ensureModelLoaded(
@@ -90,7 +98,12 @@ class LlmService {
     double? topP,
     int? topK,
   }) async {
-    if (isLoaded && _loadedModelPath == modelPath) return;
+    final requiresReloadForConfig =
+        (nCtx != null && nCtx != _configuredNCtx) ||
+        (nBatch != null && nBatch != _configuredNBatch);
+    if (isLoaded && _loadedModelPath == modelPath && !requiresReloadForConfig) {
+      return;
+    }
 
     await loadModel(
       modelPath,

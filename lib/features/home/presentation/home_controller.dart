@@ -64,6 +64,9 @@ class HomeController extends _$HomeController {
 
     state = [...state, userMessage];
 
+    // Give UI/keyboard animations time to settle before heavy model work.
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+
     // Get selected model
     final selectionState = ref.read(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
@@ -102,12 +105,15 @@ class HomeController extends _$HomeController {
         ),
       ];
       _setStatus('Preparing response...');
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await Future<void>.delayed(const Duration(milliseconds: 180));
 
       _setStatus('Loading model...');
       final path = await _storageService.getLocalFilePath(localFileName);
+      final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 1024 : 2048;
       await _llmService.ensureModelLoaded(
         path,
+        nCtx: targetNCtx,
+        nBatch: targetNCtx,
         temperature: 0.7,
         topP: 0.9,
         topK: 40,
