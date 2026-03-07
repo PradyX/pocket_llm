@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icons/pocketllm_new.png" width="120" alt="Pocket LLM Logo">
+</p>
+
 # Pocket LLM
 
 Pocket LLM is a **privacy-first mobile AI assistant that runs entirely on your device**.  
@@ -15,6 +19,14 @@ Because inference happens locally:
 - Works even without an internet connection (after models are downloaded)
 
 Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, private, and fully local.
+
+<p align="center">
+  <img src="screens/1.png" width="18%" />
+  <img src="screens/2.png" width="18%" />
+  <img src="screens/3.png" width="18%" />
+  <img src="screens/4.png" width="18%" />
+  <img src="screens/5.png" width="18%" />
+</p>
 
 ## Highlights
 
