@@ -4,12 +4,19 @@ import 'dart:math' as math;
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 
 class LlmService {
+  static const _defaultTemperature = 0.8;
+  static const _defaultTopP = 0.95;
+  static const _defaultTopK = 40;
+
   Llama? _llama;
   String? _loadedModelPath;
   bool _isGenerating = false;
   bool _stopRequested = false;
   int _configuredNCtx = 0;
   int _configuredNBatch = 0;
+  double _configuredTemperature = _defaultTemperature;
+  double _configuredTopP = _defaultTopP;
+  int _configuredTopK = _defaultTopK;
 
   bool get isLoaded => _llama != null;
   bool get isGenerating => _isGenerating;
@@ -73,6 +80,9 @@ class LlmService {
     _loadedModelPath = modelPath;
     _configuredNCtx = contextParams.nCtx;
     _configuredNBatch = contextParams.nBatch;
+    _configuredTemperature = samplerParams.temp;
+    _configuredTopP = samplerParams.topP;
+    _configuredTopK = samplerParams.topK;
   }
 
   Future<void> unloadModel() async {
@@ -83,6 +93,9 @@ class LlmService {
     _stopRequested = false;
     _configuredNCtx = 0;
     _configuredNBatch = 0;
+    _configuredTemperature = _defaultTemperature;
+    _configuredTopP = _defaultTopP;
+    _configuredTopK = _defaultTopK;
   }
 
   Future<void> ensureModelLoaded(
@@ -98,9 +111,16 @@ class LlmService {
     double? topP,
     int? topK,
   }) async {
+    final resolvedTemperature = temperature ?? _defaultTemperature;
+    final resolvedTopP = topP ?? _defaultTopP;
+    final resolvedTopK = topK ?? _defaultTopK;
+
     final requiresReloadForConfig =
         (nCtx != null && nCtx != _configuredNCtx) ||
-        (nBatch != null && nBatch != _configuredNBatch);
+        (nBatch != null && nBatch != _configuredNBatch) ||
+        (resolvedTopK != _configuredTopK) ||
+        (resolvedTemperature - _configuredTemperature).abs() > 0.001 ||
+        (resolvedTopP - _configuredTopP).abs() > 0.001;
     if (isLoaded && _loadedModelPath == modelPath && !requiresReloadForConfig) {
       return;
     }
