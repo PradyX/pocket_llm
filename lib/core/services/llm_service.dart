@@ -43,12 +43,15 @@ class LlmService {
 
     final contextParams = ContextParams();
     contextParams.nCtx = nCtx ?? (isMobile ? 1024 : 2048);
-    contextParams.nBatch = nBatch ?? (isMobile ? 128 : 512);
-    contextParams.nUbatch = contextParams.nBatch;
+    if (nBatch != null) {
+      contextParams.nBatch = nBatch;
+      contextParams.nUbatch = nBatch;
+    }
     contextParams.nThreads = nThreads ?? defaultThreads;
     contextParams.nThreadsBatch = nThreadsBatch ?? defaultThreads;
     contextParams.offloadKqv = offloadKqv ?? !isMobile;
-    contextParams.nPredict = nPredict ?? (isMobile ? 1024 : 2048);
+    // Unlimited unless caller explicitly wants a cap.
+    contextParams.nPredict = nPredict ?? -1;
 
     final samplerParams = SamplerParams();
     if (temperature != null) samplerParams.temp = temperature;
