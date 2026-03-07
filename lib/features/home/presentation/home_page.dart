@@ -84,6 +84,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     final generationStatus = ref.watch(homeGenerationStatusProvider);
     final selectionState = ref.watch(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
+    final downloadedModels = selectionState.models
+        .where((model) => model.isDownloaded)
+        .toList();
+    final hasModelDropdown = downloadedModels.length > 1;
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isGenerating = generationStatus.isGenerating;
@@ -95,7 +99,52 @@ class _HomePageState extends ConsumerState<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Pocket LLM'),
-            if (selectedModel != null)
+            if (hasModelDropdown)
+              SizedBox(
+                height: 22,
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value:
+                        selectedModel != null &&
+                            downloadedModels.any(
+                              (m) => m.id == selectedModel.id,
+                            )
+                        ? selectedModel.id
+                        : downloadedModels.first.id,
+                    isExpanded: true,
+                    isDense: true,
+                    iconSize: 18,
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    dropdownColor: colorScheme.surfaceContainerHigh,
+                    items: downloadedModels
+                        .map(
+                          (model) => DropdownMenuItem<String>(
+                            value: model.id,
+                            child: Text(
+                              '${model.name} · ${model.parameterSize}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: isGenerating
+                        ? null
+                        : (modelId) {
+                            if (modelId == null) return;
+                            final selected = downloadedModels.firstWhere(
+                              (model) => model.id == modelId,
+                            );
+                            ref
+                                .read(modelSelectionControllerProvider.notifier)
+                                .selectModel(selected);
+                          },
+                  ),
+                ),
+              )
+            else if (selectedModel != null)
               Text(
                 '${selectedModel.name} · ${selectedModel.parameterSize}',
                 style: textTheme.labelSmall?.copyWith(
@@ -426,7 +475,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
     // Determine if we should show the expand/collapse button
     // Threshold: 300 characters or more than 6 lines
     final bool isLongMessage =
-        text.length > 300 || '\n'.allMatches(text).length > 6;
+        text.length > 1000 || '\n'.allMatches(text).length > 50;
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
