@@ -46,21 +46,20 @@ flutter:
 
   assets:
     - .env
+    - assets/icons/
 
 flutter_launcher_icons:
   android: true
   ios: true
-  # Change this to your actual app logo when ready
-  # image_path: "assets/icon.png"
+  image_path: "assets/icons/pocketllm_square.png"
   color: "#FFFFFF"
 
 flutter_native_splash:
   color: "#FFFFFF"
-  # Change this to your actual splash logo when ready
-  # image: "assets/splash.png"
+  image: "assets/icons/pocketllm_square.png"
   android_12:
     color: "#FFFFFF"
-    # image: "assets/splash.png"
+    image: "assets/icons/pocketllm_square.png"
 
 slang:
   base_locale: en
