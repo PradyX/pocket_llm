@@ -687,6 +687,19 @@ class _ChatBubbleState extends State<_ChatBubble> {
                 ),
               ),
             ),
+          if (!isUser &&
+              widget.message.tokensPerSecond != null &&
+              widget.message.elapsedMs != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _formatAssistantStats(widget.message),
+                style: textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           if (widget.onRegenerate != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -733,6 +746,16 @@ class _ChatBubbleState extends State<_ChatBubble> {
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: bubble,
     );
+  }
+
+  String _formatAssistantStats(ChatMessage message) {
+    final tps = message.tokensPerSecond ?? 0;
+    final elapsedMs = message.elapsedMs ?? 0;
+    final seconds = elapsedMs / 1000.0;
+    final tokenPart = message.generatedTokens != null
+        ? ' · ${message.generatedTokens} tok'
+        : '';
+    return '${tps.toStringAsFixed(1)} tok/s · ${seconds.toStringAsFixed(1)}s$tokenPart';
   }
 }
 
