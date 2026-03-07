@@ -32,6 +32,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _sendMessage() async {
     final generationStatus = ref.read(homeGenerationStatusProvider);
     if (generationStatus.isGenerating) return;
+    final hasDownloadedModel = ref
+        .read(modelSelectionControllerProvider)
+        .models
+        .any((m) => m.isDownloaded);
+    if (!hasDownloadedModel) return;
 
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
@@ -135,6 +140,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final downloadedModels =
         selectionState.models.where((model) => model.isDownloaded).toList()
           ..sort(_compareModelsByParamSize);
+    final hasDownloadedModel = downloadedModels.isNotEmpty;
     final hasModelDropdown = downloadedModels.length > 1;
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
@@ -270,6 +276,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             textTheme,
             isGenerating,
             generationText,
+            hasDownloadedModel,
           ),
         ],
       ),
@@ -342,7 +349,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     TextTheme textTheme,
     bool isGenerating,
     String generationText,
+    bool hasDownloadedModel,
   ) {
+    final canCompose = hasDownloadedModel && !isGenerating;
     final progressText = generationText.isEmpty
         ? 'Assistant is responding...'
         : generationText;
@@ -409,13 +418,15 @@ class _HomePageState extends ConsumerState<HomePage> {
               Expanded(
                 child: TextField(
                   controller: _messageController,
-                  enabled: !isGenerating,
-                  readOnly: isGenerating,
+                  enabled: canCompose,
+                  readOnly: !canCompose,
                   maxLines: 5,
                   minLines: 1,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
-                    hintText: isGenerating
+                    hintText: !hasDownloadedModel
+                        ? 'Download a model to start chatting...'
+                        : isGenerating
                         ? 'Wait for current response...'
                         : 'Type a message...',
                     border: OutlineInputBorder(
@@ -429,14 +440,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                       vertical: 12,
                     ),
                   ),
-                  onSubmitted: isGenerating ? null : (_) => _sendMessage(),
+                  onSubmitted: canCompose ? (_) => _sendMessage() : null,
                 ),
               ),
               const SizedBox(width: 8),
               Padding(
                 padding: const EdgeInsets.only(bottom: 2),
                 child: IconButton.filled(
-                  onPressed: isGenerating ? null : _sendMessage,
+                  onPressed: canCompose ? _sendMessage : null,
                   icon: const Icon(Icons.arrow_upward_rounded),
                   style: IconButton.styleFrom(
                     backgroundColor: colorScheme.primary,
