@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:pocket_llm/core/navigation/app_router.dart';
-import 'package:pocket_llm/core/utils/app_utils.dart';
 import 'package:pocket_llm/features/home/domain/chat_message.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
@@ -18,50 +16,78 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
-  final _sendDebouncer = Debouncer(milliseconds: 1000);
+  bool _scrollScheduled = false;
+  ProviderSubscription<List<ChatMessage>>? _messagesSubscription;
 
   @override
   void dispose() {
+    _messagesSubscription?.close();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _sendMessage() {
-    _sendDebouncer.run(() {
-      final text = _messageController.text.trim();
-      if (text.isEmpty) return;
+  Future<void> _sendMessage() async {
+    final generationStatus = ref.read(homeGenerationStatusProvider);
+    if (generationStatus.isGenerating) return;
 
-      ref.read(homeControllerProvider.notifier).sendMessage(text);
-      _messageController.clear();
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
 
-      // Scroll to bottom after a brief delay to allow the list to update.
-      Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
-    });
+    FocusScope.of(context).unfocus();
+    _messageController.clear();
+    _scheduleScrollToBottom(animated: true);
+    await ref.read(homeControllerProvider.notifier).sendMessage(text);
+
+    if (!mounted) return;
+    _scheduleScrollToBottom(animated: true);
   }
 
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
+  void _scrollToBottom({bool animated = false}) {
+    if (!_scrollController.hasClients) return;
+
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    if (animated) {
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
+        maxExtent,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
+    } else {
+      _scrollController.jumpTo(maxExtent);
     }
+  }
+
+  void _scheduleScrollToBottom({bool animated = false}) {
+    if (_scrollScheduled) return;
+    _scrollScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollScheduled = false;
+      if (!mounted) return;
+      _scrollToBottom(animated: animated);
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    _messagesSubscription = ref.listenManual(homeControllerProvider, (_, next) {
+      _scheduleScrollToBottom();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final messages = ref.watch(homeControllerProvider);
+    final generationStatus = ref.watch(homeGenerationStatusProvider);
     final selectionState = ref.watch(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-
-    // Scroll to bottom when messages change.
-    ref.listen(homeControllerProvider, (_, _) {
-      Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
-    });
+    final isGenerating = generationStatus.isGenerating;
+    final generationText = generationStatus.statusText;
 
     return Scaffold(
       appBar: AppBar(
@@ -83,9 +109,11 @@ class _HomePageState extends ConsumerState<HomePage> {
             IconButton(
               icon: const Icon(Icons.delete_outline_rounded),
               tooltip: 'Clear chat',
-              onPressed: () {
-                ref.read(homeControllerProvider.notifier).clearChat();
-              },
+              onPressed: isGenerating
+                  ? null
+                  : () {
+                      ref.read(homeControllerProvider.notifier).clearChat();
+                    },
             ),
         ],
       ),
@@ -109,7 +137,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
           ),
           // Input bar
-          _buildInputBar(context, colorScheme),
+          _buildInputBar(
+            context,
+            colorScheme,
+            textTheme,
+            isGenerating,
+            generationText,
+          ),
         ],
       ),
     );
@@ -175,7 +209,17 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _buildInputBar(BuildContext context, ColorScheme colorScheme) {
+  Widget _buildInputBar(
+    BuildContext context,
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+    bool isGenerating,
+    String generationText,
+  ) {
+    final progressText = generationText.isEmpty
+        ? 'Assistant is responding...'
+        : generationText;
+
     return Container(
       padding: EdgeInsets.only(
         left: 16,
@@ -191,42 +235,89 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              maxLines: 5,
-              minLines: 1,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: colorScheme.surfaceContainerHighest,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
+          if (isGenerating)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      progressText,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      ref
+                          .read(homeControllerProvider.notifier)
+                          .stopGeneration();
+                    },
+                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                    label: const Text('Stop'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: colorScheme.error,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _messageController,
+                  enabled: !isGenerating,
+                  readOnly: isGenerating,
+                  maxLines: 5,
+                  minLines: 1,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText: isGenerating
+                        ? 'Wait for current response...'
+                        : 'Type a message...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainerHighest,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                  ),
+                  onSubmitted: isGenerating ? null : (_) => _sendMessage(),
                 ),
               ),
-              onSubmitted: (_) => _sendMessage(),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 2),
-            child: IconButton.filled(
-              onPressed: _sendMessage,
-              icon: const Icon(Icons.arrow_upward_rounded),
-              style: IconButton.styleFrom(
-                backgroundColor: colorScheme.primary,
-                foregroundColor: colorScheme.onPrimary,
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: IconButton.filled(
+                  onPressed: isGenerating ? null : _sendMessage,
+                  icon: const Icon(Icons.arrow_upward_rounded),
+                  style: IconButton.styleFrom(
+                    backgroundColor: colorScheme.primary,
+                    foregroundColor: colorScheme.onPrimary,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),

@@ -1,30 +1,54 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 
 class LlmService {
   Llama? _llama;
+  String? _loadedModelPath;
+  bool _isGenerating = false;
+  bool _stopRequested = false;
 
   bool get isLoaded => _llama != null;
+  bool get isGenerating => _isGenerating;
+  bool get isStopRequested => _stopRequested;
+  String? get loadedModelPath => _loadedModelPath;
 
   Future<void> loadModel(
     String modelPath, {
     int? nGpuLayers,
     int? nCtx,
+    int? nBatch,
+    int? nThreads,
+    int? nThreadsBatch,
+    bool? offloadKqv,
     int? nPredict,
     double? temperature,
     double? topP,
     int? topK,
   }) async {
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    final cpuCount = Platform.numberOfProcessors;
+    final defaultThreads = math.max(2, math.min(isMobile ? 4 : 8, cpuCount));
+
     if (_llama != null) {
       await unloadModel();
     }
 
+    _stopRequested = false;
+    _isGenerating = false;
+
     final modelParams = ModelParams();
-    if (nGpuLayers != null) modelParams.nGpuLayers = nGpuLayers;
+    modelParams.nGpuLayers = nGpuLayers ?? (isMobile ? 0 : 99);
 
     final contextParams = ContextParams();
-    contextParams.nCtx = nCtx ?? 512;
-    if (nPredict != null) contextParams.nPredict = nPredict;
+    contextParams.nCtx = nCtx ?? (isMobile ? 1024 : 2048);
+    contextParams.nBatch = nBatch ?? (isMobile ? 128 : 512);
+    contextParams.nUbatch = contextParams.nBatch;
+    contextParams.nThreads = nThreads ?? defaultThreads;
+    contextParams.nThreadsBatch = nThreadsBatch ?? defaultThreads;
+    contextParams.offloadKqv = offloadKqv ?? !isMobile;
+    contextParams.nPredict = nPredict ?? (isMobile ? 1024 : 2048);
 
     final samplerParams = SamplerParams();
     if (temperature != null) samplerParams.temp = temperature;
@@ -37,26 +61,90 @@ class LlmService {
       modelParams,
       contextParams,
       samplerParams,
-      true, // verbose
+      false, // verbose
     );
+    _loadedModelPath = modelPath;
   }
 
   Future<void> unloadModel() async {
     _llama?.dispose();
     _llama = null;
+    _loadedModelPath = null;
+    _isGenerating = false;
+    _stopRequested = false;
   }
 
-  Stream<String> generateResponse(String prompt) {
+  Future<void> ensureModelLoaded(
+    String modelPath, {
+    int? nGpuLayers,
+    int? nCtx,
+    int? nBatch,
+    int? nThreads,
+    int? nThreadsBatch,
+    bool? offloadKqv,
+    int? nPredict,
+    double? temperature,
+    double? topP,
+    int? topK,
+  }) async {
+    if (isLoaded && _loadedModelPath == modelPath) return;
+
+    await loadModel(
+      modelPath,
+      nGpuLayers: nGpuLayers,
+      nCtx: nCtx,
+      nBatch: nBatch,
+      nThreads: nThreads,
+      nThreadsBatch: nThreadsBatch,
+      offloadKqv: offloadKqv,
+      nPredict: nPredict,
+      temperature: temperature,
+      topP: topP,
+      topK: topK,
+    );
+  }
+
+  Stream<String> generateResponse(String prompt, {int? maxTokens}) async* {
     if (_llama == null) {
       throw Exception('Model not loaded');
     }
 
-    // Clear previous context as we send the full history in the prompt
-    _llama!.clear();
-    // setPrompt prepares the model for generation
-    _llama!.setPrompt(prompt);
+    _stopRequested = false;
+    _isGenerating = true;
+    var generatedTokenCount = 0;
 
-    // generateText returns a Stream<String> of tokens
-    return _llama!.generateText();
+    final llama = _llama!;
+
+    // Clear previous context as we send the full history in the prompt
+    llama.clear();
+    // setPrompt prepares the model for generation
+    llama.setPrompt(prompt);
+
+    try {
+      while (true) {
+        if (_stopRequested) break;
+
+        final (token, isDone, contextLimitReached) = llama.getNextWithStatus();
+        if (token.isNotEmpty) {
+          yield token;
+          generatedTokenCount++;
+        }
+
+        if (maxTokens != null && generatedTokenCount >= maxTokens) break;
+        if (isDone || contextLimitReached) break;
+
+        // Cooperative yielding keeps Flutter responsive on slower phones.
+        if (generatedTokenCount % 8 == 0) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
+    } finally {
+      _isGenerating = false;
+    }
+  }
+
+  void stopGeneration() {
+    if (!_isGenerating) return;
+    _stopRequested = true;
   }
 }
