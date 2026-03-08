@@ -238,12 +238,49 @@ class HomeController extends _$HomeController {
       );
 
       _setStatus(text: 'Building prompt...', isGenerating: true);
-      final historyCandidates = state
+
+      // final historyCandidates = state
+      //     .where((m) => m.id != aiMessageId && m.text.trim().isNotEmpty)
+      //     .toList();
+      // final history = historyCandidates.length > 5
+      //     ? historyCandidates.sublist(historyCandidates.length - 5)
+      //     : historyCandidates;
+
+      // History strategy:
+      // 1. Walk conversation from newest → oldest.
+      // 2. Compress long messages (keep start + end).
+      // 3. Stop when token budget is reached.
+      // This keeps prompts small while preserving important context.
+
+      const maxHistoryTokens = 500;
+      const maxMessageChars = 800;
+
+      final history = <ChatMessage>[];
+      int usedTokens = 0;
+
+      final candidates = state
           .where((m) => m.id != aiMessageId && m.text.trim().isNotEmpty)
-          .toList();
-      final history = historyCandidates.length > 5
-          ? historyCandidates.sublist(historyCandidates.length - 5)
-          : historyCandidates;
+          .toList()
+          .reversed;
+
+      for (final msg in candidates) {
+        var text = msg.text;
+
+        // Compress long messages to keep important context.
+        if (text.length > maxMessageChars) {
+          final head = text.substring(0, 300);
+          final tail = text.substring(text.length - 200);
+          text = '$head ... $tail';
+        }
+
+        final estimatedTokens = (text.length / 4).ceil();
+
+        if (usedTokens + estimatedTokens > maxHistoryTokens) break;
+
+        history.insert(0, msg.copyWith(text: text));
+
+        usedTokens += estimatedTokens;
+      }
 
       final promptBuffer = StringBuffer();
       promptBuffer.writeln('<|im_start|>system\n$_systemPrompt<|im_end|>');
