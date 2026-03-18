@@ -21,13 +21,26 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		2D4A4CCA2F6A493F0069EDF6 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B36155097A1B6E5FB5E81EB2 /* Pods_Runner.framework */; };
+		2D4A4CCB2F6A493F0069EDF6 /* Pods_Runner.framework in Bundle Framework */ = {isa = PBXBuildFile; fileRef = B36155097A1B6E5FB5E81EB2 /* Pods_Runner.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		2D4A4CD22F6A4B7D0069EDF6 /* libggml.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D4A4CCC2F6A4B7C0069EDF6 /* libggml.dylib */; };
+		2D4A4CD32F6A4B7D0069EDF6 /* libggml.dylib in Bundle Framework */ = {isa = PBXBuildFile; fileRef = 2D4A4CCC2F6A4B7C0069EDF6 /* libggml.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		2D4A4CD42F6A4B7D0069EDF6 /* libggml-blas.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D4A4CCD2F6A4B7D0069EDF6 /* libggml-blas.dylib */; };
+		2D4A4CD52F6A4B7D0069EDF6 /* libggml-blas.dylib in Bundle Framework */ = {isa = PBXBuildFile; fileRef = 2D4A4CCD2F6A4B7D0069EDF6 /* libggml-blas.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		2D4A4CD62F6A4B7D0069EDF6 /* libggml-cpu.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D4A4CCE2F6A4B7D0069EDF6 /* libggml-cpu.dylib */; };
+		2D4A4CD72F6A4B7D0069EDF6 /* libggml-cpu.dylib in Bundle Framework */ = {isa = PBXBuildFile; fileRef = 2D4A4CCE2F6A4B7D0069EDF6 /* libggml-cpu.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		2D4A4CD82F6A4B7D0069EDF6 /* libllama.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D4A4CCF2F6A4B7D0069EDF6 /* libllama.dylib */; };
+		2D4A4CD92F6A4B7D0069EDF6 /* libllama.dylib in Bundle Framework */ = {isa = PBXBuildFile; fileRef = 2D4A4CCF2F6A4B7D0069EDF6 /* libllama.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		2D4A4CDA2F6A4B7D0069EDF6 /* libggml-metal.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D4A4CD02F6A4B7D0069EDF6 /* libggml-metal.dylib */; };
+		2D4A4CDB2F6A4B7D0069EDF6 /* libggml-metal.dylib in Bundle Framework */ = {isa = PBXBuildFile; fileRef = 2D4A4CD02F6A4B7D0069EDF6 /* libggml-metal.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		2D4A4CDC2F6A4B7D0069EDF6 /* libggml-base.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D4A4CD12F6A4B7D0069EDF6 /* libggml-base.dylib */; };
+		2D4A4CDD2F6A4B7D0069EDF6 /* libggml-base.dylib in Bundle Framework */ = {isa = PBXBuildFile; fileRef = 2D4A4CD12F6A4B7D0069EDF6 /* libggml-base.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
 		335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */; };
 		33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC10F02044A3C60003C045 /* AppDelegate.swift */; };
 		33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F22044A3C60003C045 /* Assets.xcassets */; };
 		33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F42044A3C60003C045 /* MainMenu.xib */; };
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
-		3A9A72109B1B1DEA60CC204E /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B36155097A1B6E5FB5E81EB2 /* Pods_Runner.framework */; };
 		719FE1A07B8648C47ABC37EC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 02BBC18609EA6F0FA2B962BF /* GoogleService-Info.plist */; };
 		74274F452E4E51393758E05C /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 86EA71BFE44075D448D6C2D4 /* Pods_RunnerTests.framework */; };
 /* End PBXBuildFile section */
@@ -56,6 +69,13 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				2D4A4CD52F6A4B7D0069EDF6 /* libggml-blas.dylib in Bundle Framework */,
+				2D4A4CD92F6A4B7D0069EDF6 /* libllama.dylib in Bundle Framework */,
+				2D4A4CCB2F6A493F0069EDF6 /* Pods_Runner.framework in Bundle Framework */,
+				2D4A4CD72F6A4B7D0069EDF6 /* libggml-cpu.dylib in Bundle Framework */,
+				2D4A4CD32F6A4B7D0069EDF6 /* libggml.dylib in Bundle Framework */,
+				2D4A4CDD2F6A4B7D0069EDF6 /* libggml-base.dylib in Bundle Framework */,
+				2D4A4CDB2F6A4B7D0069EDF6 /* libggml-metal.dylib in Bundle Framework */,
 			);
 			name = "Bundle Framework";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -68,11 +88,17 @@
 		0A052053A3198951B02430B0 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 		1648499798A73CF1F6CA66D8 /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
 		1AEEF4283A6C7A56AD141962 /* Pods-RunnerTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.debug.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig"; sourceTree = "<group>"; };
+		2D4A4CCC2F6A4B7C0069EDF6 /* libggml.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libggml.dylib; path = Runner/Frameworks/libggml.dylib; sourceTree = "<group>"; };
+		2D4A4CCD2F6A4B7D0069EDF6 /* libggml-blas.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libggml-blas.dylib"; path = "Runner/Frameworks/libggml-blas.dylib"; sourceTree = "<group>"; };
+		2D4A4CCE2F6A4B7D0069EDF6 /* libggml-cpu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libggml-cpu.dylib"; path = "Runner/Frameworks/libggml-cpu.dylib"; sourceTree = "<group>"; };
+		2D4A4CCF2F6A4B7D0069EDF6 /* libllama.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libllama.dylib; path = Runner/Frameworks/libllama.dylib; sourceTree = "<group>"; };
+		2D4A4CD02F6A4B7D0069EDF6 /* libggml-metal.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libggml-metal.dylib"; path = "Runner/Frameworks/libggml-metal.dylib"; sourceTree = "<group>"; };
+		2D4A4CD12F6A4B7D0069EDF6 /* libggml-base.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libggml-base.dylib"; path = "Runner/Frameworks/libggml-base.dylib"; sourceTree = "<group>"; };
 		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		333000ED22D3DE5D00554162 /* Warnings.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Warnings.xcconfig; sourceTree = "<group>"; };
 		335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GeneratedPluginRegistrant.swift; sourceTree = "<group>"; };
-		33CC10ED2044A3C60003C045 /* flutter_application_1.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = flutter_application_1.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		33CC10ED2044A3C60003C045 /* Pocket LLM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Pocket LLM.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		33CC10F02044A3C60003C045 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		33CC10F22044A3C60003C045 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Runner/Assets.xcassets; sourceTree = "<group>"; };
 		33CC10F52044A3C60003C045 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
@@ -105,7 +131,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				3A9A72109B1B1DEA60CC204E /* Pods_Runner.framework in Frameworks */,
+				2D4A4CD42F6A4B7D0069EDF6 /* libggml-blas.dylib in Frameworks */,
+				2D4A4CD82F6A4B7D0069EDF6 /* libllama.dylib in Frameworks */,
+				2D4A4CCA2F6A493F0069EDF6 /* Pods_Runner.framework in Frameworks */,
+				2D4A4CD62F6A4B7D0069EDF6 /* libggml-cpu.dylib in Frameworks */,
+				2D4A4CD22F6A4B7D0069EDF6 /* libggml.dylib in Frameworks */,
+				2D4A4CDC2F6A4B7D0069EDF6 /* libggml-base.dylib in Frameworks */,
+				2D4A4CDA2F6A4B7D0069EDF6 /* libggml-metal.dylib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -122,7 +154,6 @@
 				1648499798A73CF1F6CA66D8 /* Pods-RunnerTests.release.xcconfig */,
 				9A1C64F9990D5FA576C4C157 /* Pods-RunnerTests.profile.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -161,7 +192,7 @@
 		33CC10EE2044A3C60003C045 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				33CC10ED2044A3C60003C045 /* flutter_application_1.app */,
+				33CC10ED2044A3C60003C045 /* Pocket LLM.app */,
 				331C80D5294CF71000263BE5 /* RunnerTests.xctest */,
 			);
 			name = Products;
@@ -205,6 +236,12 @@
 		D73912EC22F37F3D000D13A0 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				2D4A4CCC2F6A4B7C0069EDF6 /* libggml.dylib */,
+				2D4A4CD12F6A4B7D0069EDF6 /* libggml-base.dylib */,
+				2D4A4CCD2F6A4B7D0069EDF6 /* libggml-blas.dylib */,
+				2D4A4CCE2F6A4B7D0069EDF6 /* libggml-cpu.dylib */,
+				2D4A4CD02F6A4B7D0069EDF6 /* libggml-metal.dylib */,
+				2D4A4CCF2F6A4B7D0069EDF6 /* libllama.dylib */,
 				B36155097A1B6E5FB5E81EB2 /* Pods_Runner.framework */,
 				86EA71BFE44075D448D6C2D4 /* Pods_RunnerTests.framework */,
 			);
@@ -253,7 +290,7 @@
 			);
 			name = Runner;
 			productName = Runner;
-			productReference = 33CC10ED2044A3C60003C045 /* flutter_application_1.app */;
+			productReference = 33CC10ED2044A3C60003C045 /* Pocket LLM.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -501,6 +538,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.prady.flutterApplication1.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -516,6 +554,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.prady.flutterApplication1.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -531,6 +570,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.prady.flutterApplication1.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -595,13 +635,20 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = KLZ47H8M5D;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Runner/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
 			};
@@ -611,6 +658,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Manual;
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Profile;
@@ -727,13 +775,20 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = KLZ47H8M5D;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Runner/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -747,13 +802,20 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = KLZ47H8M5D;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Runner/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
 			};
@@ -763,6 +825,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Manual;
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -771,6 +834,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 11.0;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
