@@ -7,6 +7,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val storageChannel = "pocket_llm/storage_info"
+    private val runtimePathsChannel = "pocket_llm/runtime_paths"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -27,6 +28,21 @@ class MainActivity : FlutterActivity() {
                             )
                         } catch (e: Exception) {
                             result.error("storage_error", e.message, null)
+                        }
+                    }
+
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, runtimePathsChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getAndroidNativeLibraryDir" -> {
+                        try {
+                            result.success(applicationInfo.nativeLibraryDir)
+                        } catch (e: Exception) {
+                            result.error("runtime_paths_error", e.message, null)
                         }
                     }
 

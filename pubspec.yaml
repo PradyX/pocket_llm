@@ -47,6 +47,10 @@ flutter:
   assets:
     - .env
     - assets/icons/
+    - assets/tools/llmfit/LICENSE
+    - assets/tools/llmfit/README.md
+    - assets/tools/llmfit/macos/arm64/llmfit
+    - assets/tools/llmfit/android/arm64-v8a/llmfit
 
 flutter_launcher_icons:
   android: true

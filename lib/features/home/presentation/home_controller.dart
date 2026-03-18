@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
-import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
+import 'package:pocket_llm/core/services/service_providers.dart';
+import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/features/home/domain/chat_message.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:pocket_llm/storage/secure_storage.dart';
@@ -53,14 +55,15 @@ class HomeController extends _$HomeController {
   static const _systemPrompt = 'You are a helpful and concise assistant.';
   static const _chatStorageKey = 'model_chat_threads_v1';
 
-  late final LlmService _llmService = LlmService();
-  late final ModelStorageService _storageService = ModelStorageService();
-
   final Map<String, List<ChatMessage>> _modelChats = {};
   String? _activeModelId;
   bool _hydrated = false;
   bool _stopRequestedByUser = false;
   double? _adaptiveTokensPerSecondEma;
+
+  LlmService get _llmService => ref.read(llmServiceProvider);
+  ModelStorageService get _storageService =>
+      ref.read(modelStorageServiceProvider);
 
   @override
   List<ChatMessage> build() {
@@ -282,19 +285,16 @@ class HomeController extends _$HomeController {
         usedTokens += estimatedTokens;
       }
 
-      final promptBuffer = StringBuffer();
-      promptBuffer.writeln('<|im_start|>system\n$_systemPrompt<|im_end|>');
-
-      for (final msg in history) {
-        if (msg.isUser) {
-          promptBuffer.writeln('<|im_start|>user\n${msg.text}<|im_end|>');
-        } else {
-          promptBuffer.writeln('<|im_start|>assistant\n${msg.text}<|im_end|>');
-        }
-      }
-
-      promptBuffer.write('<|im_start|>assistant\n');
-      final formattedPrompt = promptBuffer.toString();
+      final formattedPrompt = buildLlmChatPrompt(
+        history
+            .map(
+              (msg) => msg.isUser
+                  ? LlmPromptMessage.user(msg.text)
+                  : LlmPromptMessage.assistant(msg.text),
+            )
+            .toList(),
+        systemPrompt: _systemPrompt,
+      );
 
       final responseBuffer = StringBuffer();
       var sawToken = false;
@@ -310,7 +310,7 @@ class HomeController extends _$HomeController {
         if (!force && now.difference(lastEmitAt) < minEmitGap) return;
         lastEmitAt = now;
 
-        final text = _buildStreamingText(responseBuffer.toString());
+        final text = buildStreamingResponseText(responseBuffer.toString());
         _replaceAiMessage(
           aiMessageId,
           text.trim().isEmpty ? 'Thinking...' : text,
@@ -373,7 +373,7 @@ class HomeController extends _$HomeController {
         } else {
           _replaceAiMessage(
             aiMessageId,
-            '${_buildStreamingText(partial)}\n\n[Stopped]',
+            '${buildStreamingResponseText(partial)}\n\n[Stopped]',
             generatedTokens: generatedTokenCount,
             elapsed: elapsed,
             tokensPerSecond: averageTokensPerSecond,
@@ -391,7 +391,7 @@ class HomeController extends _$HomeController {
           tokensPerSecond: averageTokensPerSecond,
         );
       } else {
-        final finalText = _buildFinalText(responseBuffer.toString());
+        final finalText = buildFinalResponseText(responseBuffer.toString());
         _replaceAiMessage(
           aiMessageId,
           finalText,
@@ -489,48 +489,6 @@ class HomeController extends _$HomeController {
         else
           msg,
     ];
-  }
-
-  String _buildStreamingText(String raw) {
-    if (raw.isEmpty) return '';
-
-    final thinkStart = raw.indexOf('<think>');
-    if (thinkStart == -1) return raw;
-
-    final thinkContentStart = thinkStart + '<think>'.length;
-    final thinkEnd = raw.indexOf('</think>', thinkContentStart);
-
-    if (thinkEnd == -1) {
-      final thinking = raw.substring(thinkContentStart).trimLeft();
-      if (thinking.isEmpty) return 'Thinking...';
-      return 'Thinking...\n$thinking';
-    }
-
-    final thinking = raw.substring(thinkContentStart, thinkEnd).trim();
-    final answerStart = thinkEnd + '</think>'.length;
-    final answer = raw.substring(answerStart).trimLeft();
-
-    if (answer.isEmpty) {
-      return thinking.isEmpty ? 'Thinking...' : 'Thinking...\n$thinking';
-    }
-
-    if (thinking.isEmpty) return answer;
-    return 'Thinking...\n$thinking\n\n$answer';
-  }
-
-  String _buildFinalText(String raw) {
-    final withoutThinking = raw.replaceAll(
-      RegExp(r'<think>[\s\S]*?</think>'),
-      '',
-    );
-    final normalized = withoutThinking.trim();
-    if (normalized.isNotEmpty) return normalized;
-
-    final fallback = raw
-        .replaceAll('<think>', '')
-        .replaceAll('</think>', '')
-        .trim();
-    return fallback.isEmpty ? 'No response generated.' : fallback;
   }
 
   int _resolveMaxTokens({required bool adaptiveMode}) {
