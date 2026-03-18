@@ -51,6 +51,9 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
+  macos:
+    generate: true
+    image_path: "assets/icons/pocketllm_new.png"
   image_path: "assets/icons/pocketllm_new.png"
   color: "#FFFFFF"
 
