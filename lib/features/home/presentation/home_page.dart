@@ -529,6 +529,15 @@ class _HomePageState extends ConsumerState<HomePage> {
               context.push(AppRoutes.modelSelection);
             },
           ),
+          ListTile(
+            leading: const Icon(Icons.speed_outlined),
+            title: const Text('Benchmark'),
+            subtitle: const Text('Compare local models and run llmfit'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.benchmark);
+            },
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.settings_outlined),

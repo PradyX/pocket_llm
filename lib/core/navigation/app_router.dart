@@ -1,3 +1,4 @@
+import 'package:pocket_llm/features/benchmark/presentation/benchmark_screen.dart';
 import 'package:pocket_llm/features/home/presentation/home_page.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_page.dart';
 import 'package:pocket_llm/features/settings/presentation/settings_page.dart';
@@ -12,6 +13,7 @@ abstract class AppRoutes {
   static const home = '/';
   static const settings = '/settings';
   static const modelSelection = '/model-selection';
+  static const benchmark = '/benchmark';
 }
 
 @riverpod
@@ -30,6 +32,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.modelSelection,
         builder: (context, state) => const ModelSelectionPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.benchmark,
+        builder: (context, state) => const BenchmarkScreen(),
       ),
     ],
   );
