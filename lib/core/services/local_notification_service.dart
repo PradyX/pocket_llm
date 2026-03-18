@@ -26,6 +26,7 @@ class LocalNotificationService {
     const settings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
+      macOS: iosSettings,
     );
     await _plugin.initialize(settings: settings);
     _isInitialized = true;
@@ -50,6 +51,18 @@ class LocalNotificationService {
           >();
       await iosImpl?.requestPermissions(alert: true, badge: true, sound: true);
     }
+
+    if (Platform.isMacOS) {
+      final macOsImpl = _plugin
+          .resolvePlatformSpecificImplementation<
+            MacOSFlutterLocalNotificationsPlugin
+          >();
+      await macOsImpl?.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    }
   }
 
   Future<void> showModelDownloadComplete(String modelName) async {
@@ -73,6 +86,7 @@ class LocalNotificationService {
     const details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
+      macOS: iosDetails,
     );
 
     await _plugin.show(
