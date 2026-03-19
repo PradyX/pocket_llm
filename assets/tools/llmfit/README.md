@@ -25,6 +25,7 @@ Android arm64 source build script:
 - Run `./scripts/build_llmfit_android.sh`
 - It will:
   clone upstream `llmfit`
+  apply `scripts/patches/llmfit-android-hardware-detection.patch`
   install/prepare Rust target tooling if needed
   cross-compile `llmfit` for `arm64-v8a`
   copy the result to `assets/tools/llmfit/android/arm64-v8a/llmfit`
@@ -32,5 +33,6 @@ Android arm64 source build script:
 
 Notes:
 - On Android, the app resolves the packaged binary from the native library directory.
+- The Android bundled build carries a local patch that improves CPU name/core detection inside app sandboxes.
 - On macOS and desktop-style targets, the app extracts bundled binaries to app support storage and runs them from there.
 - iOS is intentionally excluded because the app hides the LLMFit tab on iOS and simulator targets.

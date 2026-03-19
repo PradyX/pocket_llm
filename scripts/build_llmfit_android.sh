@@ -11,6 +11,7 @@ ANDROID_PLATFORM="${ANDROID_PLATFORM:-24}"
 ANDROID_TARGET="${ANDROID_TARGET:-arm64-v8a}"
 RUST_TARGET="aarch64-linux-android"
 OUTPUT_ASSET="${REPO_ROOT}/assets/tools/llmfit/android/arm64-v8a/llmfit"
+LLMFIT_PATCH="${REPO_ROOT}/scripts/patches/llmfit-android-hardware-detection.patch"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "git is required." >&2
@@ -68,6 +69,11 @@ echo "Cloning llmfit from ${LLMFIT_REPO_URL} (${LLMFIT_REF})..."
 git clone --depth 1 --branch "${LLMFIT_REF}" "${LLMFIT_REPO_URL}" "${WORK_DIR}/llmfit-src"
 
 pushd "${WORK_DIR}/llmfit-src" >/dev/null
+if [[ -f "${LLMFIT_PATCH}" ]]; then
+  echo "Applying PocketLlama Android hardware-detection patch..."
+  git apply "${LLMFIT_PATCH}"
+fi
+
 echo "Building llmfit for Android ${ANDROID_TARGET} (API ${ANDROID_PLATFORM})..."
 cargo ndk -t "${ANDROID_TARGET}" --platform "${ANDROID_PLATFORM}" build --release -p llmfit
 popd >/dev/null

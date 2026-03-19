@@ -1,0 +1,228 @@
+diff --git a/llmfit-core/src/hardware.rs b/llmfit-core/src/hardware.rs
+--- a/llmfit-core/src/hardware.rs
++++ b/llmfit-core/src/hardware.rs
+@@ -75,7 +75,7 @@
+             available_ram_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+         };
+ 
+-        let total_cpu_cores = sys.cpus().len();
++        let total_cpu_cores = Self::detect_total_cpu_cores(&sys);
+         let cpu_name = Self::detect_cpu_name(&sys);
+ 
+         let gpus = Self::detect_all_gpus(total_ram_gb, &cpu_name);
+@@ -1292,8 +1292,83 @@
+             .trim_end_matches('.')
+             .parse()
+             .ok()
++    }
++
++    fn detect_total_cpu_cores(sys: &System) -> usize {
++        let sysinfo_count = sys.cpus().len();
++        if sysinfo_count > 0 {
++            return sysinfo_count;
++        }
++
++        if let Ok(parallelism) = std::thread::available_parallelism() {
++            let count = parallelism.get();
++            if count > 0 {
++                return count;
++            }
++        }
++
++        if let Some(cpu_count) = Self::read_cpu_count_from_sysfs() {
++            return cpu_count;
++        }
++
++        if let Some(cpu_count) = Self::read_cpu_count_from_proc_cpuinfo() {
++            return cpu_count;
++        }
++
++        0
+     }
+ 
++    fn read_cpu_count_from_sysfs() -> Option<usize> {
++        #[cfg(any(target_os = "linux", target_os = "android"))]
++        {
++            if let Ok(text) = std::fs::read_to_string("/sys/devices/system/cpu/present") {
++                if let Some(count) = Self::parse_cpu_range_count(&text) {
++                    return Some(count);
++                }
++            }
++
++            let entries = std::fs::read_dir("/sys/devices/system/cpu").ok()?;
++            let mut count = 0usize;
++            for entry in entries.flatten() {
++                let file_name = entry.file_name();
++                let name = file_name.to_string_lossy();
++                let Some(suffix) = name.strip_prefix("cpu") else {
++                    continue;
++                };
++                if !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
++                    count += 1;
++                }
++            }
++
++            return (count > 0).then_some(count);
++        }
++
++        #[cfg(not(any(target_os = "linux", target_os = "android")))]
++        {
++            None
++        }
++    }
++
++    fn parse_cpu_range_count(text: &str) -> Option<usize> {
++        let mut count = 0usize;
++
++        for part in text.trim().split(',').map(str::trim).filter(|part| !part.is_empty()) {
++            if let Some((start, end)) = part.split_once('-') {
++                let start = start.trim().parse::<usize>().ok()?;
++                let end = end.trim().parse::<usize>().ok()?;
++                if end < start {
++                    return None;
++                }
++                count += end - start + 1;
++            } else {
++                part.parse::<usize>().ok()?;
++                count += 1;
++            }
++        }
++
++        (count > 0).then_some(count)
++    }
++
+     fn detect_cpu_name(sys: &System) -> String {
+         if let Some(cpu_name) = sys
+             .cpus()
+@@ -1304,11 +1379,15 @@
+             return cpu_name.to_string();
+         }
+ 
++        if let Some(cpu_name) = Self::read_android_soc_name() {
++            return cpu_name;
++        }
++
+         if let Some(cpu_name) = Self::read_cpu_name_from_proc_cpuinfo() {
+             return cpu_name;
+         }
+ 
+-        if let Some(cpu_name) = Self::read_android_soc_name() {
++        if let Some(cpu_name) = Self::read_cpu_name_from_android_properties() {
+             return cpu_name;
+         }
+ 
+@@ -1316,14 +1395,35 @@
+     }
+ 
+     fn read_cpu_name_from_proc_cpuinfo() -> Option<String> {
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         {
+             let text = std::fs::read_to_string("/proc/cpuinfo").ok()?;
+             return Self::parse_cpu_name_from_cpuinfo(&text);
+         }
+ 
+-        #[cfg(not(target_os = "linux"))]
++        #[cfg(not(any(target_os = "linux", target_os = "android")))]
++        {
++            None
++        }
++    }
++
++    fn read_cpu_count_from_proc_cpuinfo() -> Option<usize> {
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         {
++            let text = std::fs::read_to_string("/proc/cpuinfo").ok()?;
++            let count = text
++                .lines()
++                .filter(|line| {
++                    line.split_once(':')
++                        .map(|(lhs, _)| lhs.trim().eq_ignore_ascii_case("processor"))
++                        .unwrap_or(false)
++                })
++                .count();
++            return (count > 0).then_some(count);
++        }
++
++        #[cfg(not(any(target_os = "linux", target_os = "android")))]
++        {
+             None
+         }
+     }
+@@ -1347,26 +1447,60 @@
+     }
+ 
+     fn read_android_soc_name() -> Option<String> {
+-        #[cfg(target_os = "linux")]
+-        {
+-            let output = std::process::Command::new("getprop")
+-                .arg("ro.soc.model")
+-                .output()
+-                .ok()?;
+-            if !output.status.success() {
+-                return None;
+-            }
++        const PROPERTIES: &[&str] = &[
++            "ro.soc.model",
++            "ro.product.soc_model",
++            "ro.hardware.chipname",
++            "ro.board.platform",
++        ];
+ 
+-            let model = String::from_utf8(output.stdout).ok()?;
+-            let model = model.trim();
+-            if model.is_empty() {
+-                return None;
++        for property in PROPERTIES {
++            if let Some(value) = Self::read_android_system_property(property) {
++                return Some(value);
++            }
++        }
++
++        None
++    }
++
++    fn read_cpu_name_from_android_properties() -> Option<String> {
++        const PROPERTIES: &[&str] = &[
++            "ro.hardware",
++            "ro.product.board",
++            "ro.board.platform",
++        ];
++
++        for property in PROPERTIES {
++            if let Some(value) = Self::read_android_system_property(property) {
++                return Some(value);
+             }
+-
+-            return Some(model.to_string());
+         }
+ 
+-        #[cfg(not(target_os = "linux"))]
++        None
++    }
++
++    fn read_android_system_property(property: &str) -> Option<String> {
++        #[cfg(any(target_os = "linux", target_os = "android"))]
++        {
++            for command in ["/system/bin/getprop", "getprop"] {
++                let output = std::process::Command::new(command).arg(property).output().ok();
++                let Some(output) = output else {
++                    continue;
++                };
++                if !output.status.success() {
++                    continue;
++                }
++
++                let value = String::from_utf8(output.stdout).ok()?;
++                let value = value.trim();
++                if !value.is_empty() && !value.eq_ignore_ascii_case("unknown") {
++                    return Some(value.to_string());
++                }
++            }
++            None
++        }
++
++        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+         {
+             None
+         }
