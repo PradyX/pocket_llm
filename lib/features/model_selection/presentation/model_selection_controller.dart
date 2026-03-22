@@ -12,6 +12,13 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'model_selection_controller.g.dart';
 
+class _ModelDownloadAsset {
+  final String url;
+  final String fileName;
+
+  const _ModelDownloadAsset({required this.url, required this.fileName});
+}
+
 @riverpod
 class ModelSelectionController extends _$ModelSelectionController {
   static const _customModelsStorageKey = 'custom_models_v1';
@@ -29,7 +36,7 @@ class ModelSelectionController extends _$ModelSelectionController {
   ModelSelectionState build() {
     state = ModelSelectionState(
       models: LlmModel.availableModels,
-      selectedModelId: null, // Start with no selection
+      selectedModelId: null,
     );
     unawaited(_init());
     return state;
@@ -41,9 +48,7 @@ class ModelSelectionController extends _$ModelSelectionController {
 
     final updatedModels = await Future.wait(
       combinedModels.map((model) async {
-        final fileName = model.localFileName;
-        if (fileName == null || fileName.isEmpty) return model;
-        final isDownloaded = await _storageService.isModelDownloaded(fileName);
+        final isDownloaded = await _isModelBundleDownloaded(model);
         return model.copyWith(isDownloaded: isDownloaded);
       }),
     );
@@ -56,7 +61,6 @@ class ModelSelectionController extends _$ModelSelectionController {
         !modelsWithCachedCapabilities.any((m) => m.id == newSelectedId)) {
       newSelectedId = null;
     }
-    // If nothing is selected, try to pick the first downloaded one
     if (newSelectedId == null) {
       try {
         newSelectedId = modelsWithCachedCapabilities
@@ -75,7 +79,6 @@ class ModelSelectionController extends _$ModelSelectionController {
     unawaited(_refreshModelCapabilities(modelsWithCachedCapabilities));
   }
 
-  /// Select a specific model.
   void selectModel(LlmModel model) {
     if (model.isDownloaded) {
       state = state.copyWith(selectedModelId: model.id);
@@ -100,9 +103,9 @@ class ModelSelectionController extends _$ModelSelectionController {
   }
 
   Future<void> downloadModel(LlmModel model) async {
-    if (model.downloadUrl == null || model.localFileName == null) return;
+    final assets = _downloadAssetsForModel(model);
+    if (assets.isEmpty) return;
 
-    // Initialize progress if it doesn't exist (to support resume)
     if (!state.downloadProgress.containsKey(model.id)) {
       state = state.copyWith(
         downloadProgress: {
@@ -117,17 +120,30 @@ class ModelSelectionController extends _$ModelSelectionController {
 
     try {
       final storageInfo = await _refreshStorageInfo();
-      final remoteSize = await _storageService.getRemoteFileSize(
-        model.downloadUrl!,
-        cancelToken: cancelToken,
+      final remoteSizes = await Future.wait(
+        assets.map(
+          (asset) => _storageService.getRemoteFileSize(
+            asset.url,
+            cancelToken: cancelToken,
+          ),
+        ),
       );
-      if (storageInfo != null && remoteSize != null) {
-        final existingSize = await _storageService.getLocalFileSize(
-          model.localFileName!,
-        );
-        final remainingBytes = remoteSize > existingSize
-            ? remoteSize - existingSize
-            : 0;
+      final existingSizes = await Future.wait(
+        assets.map((asset) => _storageService.getLocalFileSize(asset.fileName)),
+      );
+
+      final totalRemoteBytes = remoteSizes.whereType<int>().fold<int>(
+        0,
+        (sum, size) => sum + size,
+      );
+      final remainingBytes = List.generate(assets.length, (index) {
+        final remoteSize = remoteSizes[index];
+        if (remoteSize == null) return 0;
+        final existingSize = existingSizes[index];
+        return remoteSize > existingSize ? remoteSize - existingSize : 0;
+      }).fold<int>(0, (sum, size) => sum + size);
+
+      if (storageInfo != null && remainingBytes > 0) {
         final requiredBytes = remainingBytes + _downloadSafetyBytes;
         if (storageInfo.freeBytes < requiredBytes) {
           _cancelTokens.remove(model.id);
@@ -145,36 +161,88 @@ class ModelSelectionController extends _$ModelSelectionController {
         }
       }
 
-      await _storageService.downloadModel(
-        model.downloadUrl!,
-        model.localFileName!,
-        cancelToken: cancelToken,
-        onProgress: (received, total) {
-          state = state.copyWith(
-            downloadProgress: {
-              ...state.downloadProgress,
-              model.id: DownloadProgress(received: received, total: total),
-            },
-          );
-        },
-      );
+      var completedBytes = List.generate(assets.length, (index) {
+        final remoteSize = remoteSizes[index];
+        final existingSize = existingSizes[index];
+        if (remoteSize == null) return 0;
+        return existingSize > remoteSize ? remoteSize : existingSize;
+      }).fold<int>(0, (sum, size) => sum + size);
+
+      if (completedBytes > 0) {
+        state = state.copyWith(
+          downloadProgress: {
+            ...state.downloadProgress,
+            model.id: DownloadProgress(
+              received: completedBytes,
+              total: totalRemoteBytes > 0 ? totalRemoteBytes : completedBytes,
+            ),
+          },
+        );
+      }
+
+      for (var index = 0; index < assets.length; index++) {
+        final asset = assets[index];
+        final knownRemoteSize = remoteSizes[index];
+        final currentLocalSize = await _storageService.getLocalFileSize(
+          asset.fileName,
+        );
+        final isAlreadyComplete =
+            knownRemoteSize != null &&
+            currentLocalSize >= knownRemoteSize &&
+            await _storageService.isModelDownloaded(asset.fileName);
+        if (isAlreadyComplete) {
+          continue;
+        }
+
+        final completedBeforeAsset = completedBytes;
+        await _storageService.downloadModel(
+          asset.url,
+          asset.fileName,
+          cancelToken: cancelToken,
+          onProgress: (received, total) {
+            final resolvedTotal = totalRemoteBytes > 0
+                ? totalRemoteBytes
+                : completedBeforeAsset + total;
+            final resolvedReceived = completedBeforeAsset + received;
+            final safeTotal = resolvedTotal > 0
+                ? resolvedTotal
+                : resolvedReceived;
+            state = state.copyWith(
+              downloadProgress: {
+                ...state.downloadProgress,
+                model.id: DownloadProgress(
+                  received: resolvedReceived,
+                  total: safeTotal,
+                ),
+              },
+            );
+          },
+        );
+
+        completedBytes +=
+            knownRemoteSize ??
+            await _storageService.getLocalFileSize(asset.fileName);
+      }
 
       _cancelTokens.remove(model.id);
 
-      // Download complete, update model status and remove progress
+      final isDownloaded = await _isModelBundleDownloaded(model);
       final updatedModels = state.models
-          .map((m) => m.id == model.id ? m.copyWith(isDownloaded: true) : m)
+          .map(
+            (m) =>
+                m.id == model.id ? m.copyWith(isDownloaded: isDownloaded) : m,
+          )
           .toList();
 
-      final Map<String, DownloadProgress> updatedProgress = Map.of(
+      final updatedProgress = Map<String, DownloadProgress>.from(
         state.downloadProgress,
-      );
-      updatedProgress.remove(model.id);
+      )..remove(model.id);
 
       state = state.copyWith(
         models: updatedModels,
         downloadProgress: updatedProgress,
-        selectedModelId: state.selectedModelId ?? model.id,
+        selectedModelId:
+            state.selectedModelId ?? (isDownloaded ? model.id : null),
       );
       await _persistCustomModels(updatedModels);
       await _refreshStorageInfo();
@@ -187,15 +255,12 @@ class ModelSelectionController extends _$ModelSelectionController {
       _cancelTokens.remove(model.id);
 
       if (e is DioException && CancelToken.isCancel(e)) {
-        // Just return, keep progress in state so it shows as paused
         return;
       }
 
-      // Remove progress on error and set error message
-      final Map<String, DownloadProgress> updatedProgress = Map.of(
+      final updatedProgress = Map<String, DownloadProgress>.from(
         state.downloadProgress,
-      );
-      updatedProgress.remove(model.id);
+      )..remove(model.id);
       state = state.copyWith(
         downloadProgress: updatedProgress,
         error: 'Failed to download ${model.name}: ${_friendlyDownloadError(e)}',
@@ -264,19 +329,17 @@ class ModelSelectionController extends _$ModelSelectionController {
       return;
     }
 
-    final resolvedName = normalizedName;
-    final resolvedParamSize = normalizedSize;
     final resolvedDescription = (description ?? '').trim().isNotEmpty
         ? description!.trim()
         : 'User-added model from custom download link.';
     final id =
-        'custom-${_slugify(resolvedName)}-${DateTime.now().millisecondsSinceEpoch}';
+        'custom-${_slugify(normalizedName)}-${DateTime.now().millisecondsSinceEpoch}';
 
     final isDownloaded = await _storageService.isModelDownloaded(localFileName);
     final model = LlmModel(
       id: id,
-      name: resolvedName,
-      parameterSize: resolvedParamSize,
+      name: normalizedName,
+      parameterSize: normalizedSize,
       description: resolvedDescription,
       capabilities: capabilities,
       downloadUrl: normalizedUrl,
@@ -294,21 +357,21 @@ class ModelSelectionController extends _$ModelSelectionController {
   }
 
   Future<void> deleteModel(LlmModel model) async {
-    if (model.localFileName == null) return;
+    final assets = _downloadAssetsForModel(model);
+    if (assets.isEmpty) return;
 
     try {
-      await _storageService.deleteModel(model.localFileName!);
+      await Future.wait(
+        assets.map((asset) => _storageService.deleteModel(asset.fileName)),
+      );
 
-      // Update model status in state
       final updatedModels = state.models
           .map((m) => m.id == model.id ? m.copyWith(isDownloaded: false) : m)
           .toList();
 
-      // If the deleted model was selected, clear selection
       String? newSelectedId = state.selectedModelId;
       if (newSelectedId == model.id) {
         newSelectedId = null;
-        // Try to auto-select another downloaded model
         try {
           newSelectedId = updatedModels.firstWhere((m) => m.isDownloaded).id;
         } catch (_) {
@@ -446,6 +509,46 @@ class ModelSelectionController extends _$ModelSelectionController {
     if (first.length != second.length) return false;
     for (var index = 0; index < first.length; index++) {
       if (first[index] != second[index]) return false;
+    }
+    return true;
+  }
+
+  List<_ModelDownloadAsset> _downloadAssetsForModel(LlmModel model) {
+    final assets = <_ModelDownloadAsset>[];
+    if (model.downloadUrl != null &&
+        model.downloadUrl!.trim().isNotEmpty &&
+        model.localFileName != null &&
+        model.localFileName!.trim().isNotEmpty) {
+      assets.add(
+        _ModelDownloadAsset(
+          url: model.downloadUrl!.trim(),
+          fileName: model.localFileName!.trim(),
+        ),
+      );
+    }
+    if (model.supportsVision &&
+        model.mmprojDownloadUrl != null &&
+        model.mmprojDownloadUrl!.trim().isNotEmpty &&
+        model.mmprojLocalFileName != null &&
+        model.mmprojLocalFileName!.trim().isNotEmpty) {
+      assets.add(
+        _ModelDownloadAsset(
+          url: model.mmprojDownloadUrl!.trim(),
+          fileName: model.mmprojLocalFileName!.trim(),
+        ),
+      );
+    }
+    return assets;
+  }
+
+  Future<bool> _isModelBundleDownloaded(LlmModel model) async {
+    final assets = _downloadAssetsForModel(model);
+    if (assets.isEmpty) return false;
+
+    for (final asset in assets) {
+      if (!await _storageService.isModelDownloaded(asset.fileName)) {
+        return false;
+      }
     }
     return true;
   }

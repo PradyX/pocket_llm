@@ -6,7 +6,9 @@ import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
 
 final llmServiceProvider = Provider<LlmService>((ref) {
-  final service = LlmService();
+  final service = LlmService(
+    platformRuntimePathsService: ref.read(platformRuntimePathsServiceProvider),
+  );
   ref.onDispose(() {
     unawaited(service.unloadModel());
   });

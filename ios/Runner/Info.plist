@@ -45,6 +45,8 @@
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Select an image to ask your local model questions about it.</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>

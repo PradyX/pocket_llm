@@ -23,4 +23,19 @@ class PlatformRuntimePathsService {
       return null;
     }
   }
+
+  Future<String?> getAppleFrameworksDir() async {
+    if (!Platform.isIOS && !Platform.isMacOS) return null;
+
+    try {
+      final path = await _channel.invokeMethod<String>('getAppleFrameworksDir');
+      if (path == null) return null;
+
+      final normalized = path.trim();
+      if (normalized.isEmpty) return null;
+      return normalized;
+    } catch (_) {
+      return null;
+    }
+  }
 }

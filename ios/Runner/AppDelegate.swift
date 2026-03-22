@@ -5,6 +5,7 @@ import UserNotifications
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private let storageChannel = "pocket_llm/storage_info"
+  private let runtimePathsChannel = "pocket_llm/runtime_paths"
 
   override func application(
     _ application: UIApplication,
@@ -14,14 +15,27 @@ import UserNotifications
     UNUserNotificationCenter.current().delegate = self
 
     if let controller = window?.rootViewController as? FlutterViewController {
-      let channel = FlutterMethodChannel(
+      let storageInfo = FlutterMethodChannel(
         name: storageChannel,
         binaryMessenger: controller.binaryMessenger
       )
-      channel.setMethodCallHandler { [weak self] call, result in
+      storageInfo.setMethodCallHandler { [weak self] call, result in
         switch call.method {
         case "getStorageInfo":
           self?.getStorageInfo(result: result)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
+
+      let runtimePaths = FlutterMethodChannel(
+        name: runtimePathsChannel,
+        binaryMessenger: controller.binaryMessenger
+      )
+      runtimePaths.setMethodCallHandler { call, result in
+        switch call.method {
+        case "getAppleFrameworksDir":
+          result(Bundle.main.privateFrameworksPath)
         default:
           result(FlutterMethodNotImplemented)
         }

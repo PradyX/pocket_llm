@@ -70,6 +70,64 @@ class ModelStorageService {
     return modelDir.path;
   }
 
+  Future<String> getAttachmentsDir() async {
+    final appDocDir = await getApplicationDocumentsDirectory();
+    final attachmentsDir = Directory(p.join(appDocDir.path, 'attachments'));
+    if (!attachmentsDir.existsSync()) {
+      attachmentsDir.createSync(recursive: true);
+    }
+    return attachmentsDir.path;
+  }
+
+  Future<String> copyAttachmentToChat({
+    required String modelId,
+    required String messageId,
+    required String sourcePath,
+    String? preferredFileName,
+  }) async {
+    final sourceFile = File(sourcePath);
+    if (!sourceFile.existsSync()) {
+      throw Exception('Selected image could not be found.');
+    }
+
+    final attachmentsDir = await getAttachmentsDir();
+    final modelDir = Directory(p.join(attachmentsDir, modelId));
+    if (!modelDir.existsSync()) {
+      modelDir.createSync(recursive: true);
+    }
+
+    final originalName = (preferredFileName ?? p.basename(sourcePath)).trim();
+    final normalizedName = originalName.isEmpty ? 'image' : originalName;
+    final sanitizedBase = _sanitizeFileName(
+      p.basenameWithoutExtension(normalizedName),
+    );
+    final extension = p.extension(normalizedName).toLowerCase();
+    final targetPath = p.join(
+      modelDir.path,
+      '${messageId}_${sanitizedBase.isEmpty ? 'image' : sanitizedBase}$extension',
+    );
+
+    final copiedFile = await sourceFile.copy(targetPath);
+    return copiedFile.path;
+  }
+
+  Future<void> deleteFileIfExists(String path) async {
+    if (path.trim().isEmpty) return;
+    final file = File(path);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
+  Future<void> deleteFiles(Iterable<String> paths) async {
+    final seen = <String>{};
+    for (final path in paths) {
+      final normalized = path.trim();
+      if (normalized.isEmpty || !seen.add(normalized)) continue;
+      await deleteFileIfExists(normalized);
+    }
+  }
+
   Future<bool> isModelDownloaded(String fileName) async {
     final dir = await getModelDir();
     final file = File(p.join(dir, fileName));
@@ -407,5 +465,12 @@ class ModelStorageService {
     // Range-not-supported path can come through as badResponse with 200.
     return error.type == DioExceptionType.badResponse &&
         (status == null || status == 200);
+  }
+
+  String _sanitizeFileName(String value) {
+    return value
+        .trim()
+        .replaceAll(RegExp(r'[^a-zA-Z0-9._-]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
   }
 }

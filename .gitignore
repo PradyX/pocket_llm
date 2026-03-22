@@ -69,5 +69,6 @@ lib/firebase_options.dart
 /android/app/src/main/jniLibs/*
 /ios/libllama.dylib
 /ios/Frameworks/*
+/ios/lib*
 /macos/Runner/Frameworks/*
 /PocketLLM.dmg

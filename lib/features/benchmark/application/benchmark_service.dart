@@ -167,24 +167,29 @@ class BenchmarkService {
         topK: _benchmarkTopK,
       );
 
-      final prompt = buildLlmChatPrompt(const [
-        LlmPromptMessage.user(benchmarkPrompt),
-      ], systemPrompt: benchmarkSystemPrompt);
+      final promptBundle = buildModelChatPrompt(
+        const [LlmPromptMessage.user(benchmarkPrompt)],
+        systemPrompt: benchmarkSystemPrompt,
+        promptFormatId: model.promptFormatId,
+      );
       final responseBuffer = StringBuffer();
       var generatedTokenCount = 0;
       final stopwatch = Stopwatch()..start();
 
       await for (final token in llmService.generateResponse(
-        prompt,
+        promptBundle.prompt,
         maxTokens: benchmarkMaxTokens,
       )) {
-        final cleanToken = token.replaceAll('<|im_end|>', '');
+        final cleanToken = token.replaceAll(
+          modelStopToken(model.promptFormatId),
+          '',
+        );
         if (cleanToken.isNotEmpty) {
           responseBuffer.write(cleanToken);
           generatedTokenCount++;
         }
 
-        if (token.contains('<|im_end|>')) {
+        if (token.contains(modelStopToken(model.promptFormatId))) {
           break;
         }
       }

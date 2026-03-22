@@ -1,12 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/home/domain/chat_message.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -18,36 +23,114 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
+  final _imagePicker = ImagePicker();
   bool _scrollScheduled = false;
   ProviderSubscription<List<ChatMessage>>? _messagesSubscription;
+  ProviderSubscription<ModelSelectionState>? _modelSelectionSubscription;
+  XFile? _draftImage;
 
   @override
   void dispose() {
     _messagesSubscription?.close();
+    _modelSelectionSubscription?.close();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
+  @override
+  void initState() {
+    super.initState();
+
+    _messagesSubscription = ref.listenManual(homeControllerProvider, (_, next) {
+      _scheduleScrollToBottom();
+    });
+    _modelSelectionSubscription = ref.listenManual(
+      modelSelectionControllerProvider,
+      (_, next) {
+        if (_draftImage == null) return;
+        if (_isVisionReady(next.selectedModel)) return;
+
+        setState(() => _draftImage = null);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Image attachment cleared because the selected model does not support vision chat.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      },
+    );
+  }
+
+  bool _isVisionReady(LlmModel? model) {
+    return model != null && model.isDownloaded && model.supportsVision;
+  }
+
   Future<void> _sendMessage() async {
     final generationStatus = ref.read(homeGenerationStatusProvider);
     if (generationStatus.isGenerating) return;
-    final hasDownloadedModel = ref
-        .read(modelSelectionControllerProvider)
-        .models
-        .any((m) => m.isDownloaded);
+
+    final selectionState = ref.read(modelSelectionControllerProvider);
+    final hasDownloadedModel = selectionState.models.any((m) => m.isDownloaded);
     if (!hasDownloadedModel) return;
 
+    final selectedModel = selectionState.selectedModel;
     final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    final draftImage = _draftImage;
+
+    if (draftImage != null && !_isVisionReady(selectedModel)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Choose a downloaded vision-capable model before sending an image.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (text.isEmpty) {
+      if (draftImage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Add a question before sending the image.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
 
     FocusScope.of(context).unfocus();
     _messageController.clear();
+    setState(() => _draftImage = null);
     _scheduleScrollToBottom(animated: true);
-    await ref.read(homeControllerProvider.notifier).sendMessage(text);
+
+    await ref
+        .read(homeControllerProvider.notifier)
+        .sendMessage(
+          text,
+          imagePath: draftImage?.path,
+          imageLabel: draftImage != null ? p.basename(draftImage.path) : null,
+        );
 
     if (!mounted) return;
     _scheduleScrollToBottom(animated: true);
+  }
+
+  Future<void> _pickImage(LlmModel? selectedModel) async {
+    if (!_isVisionReady(selectedModel)) return;
+
+    final pickedFile = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+    );
+    if (pickedFile == null) return;
+
+    setState(() => _draftImage = pickedFile);
   }
 
   Future<void> _regenerateMessage(ChatMessage message) async {
@@ -123,15 +206,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   @override
-  void initState() {
-    super.initState();
-
-    _messagesSubscription = ref.listenManual(homeControllerProvider, (_, next) {
-      _scheduleScrollToBottom();
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     final messages = ref.watch(homeControllerProvider);
     final generationStatus = ref.watch(homeGenerationStatusProvider);
@@ -142,6 +216,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           ..sort(_compareModelsByParamSize);
     final hasDownloadedModel = downloadedModels.isNotEmpty;
     final hasModelDropdown = downloadedModels.length > 1;
+    final canAttachImage = _isVisionReady(selectedModel);
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isGenerating = generationStatus.isGenerating;
@@ -244,7 +319,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       drawer: _buildDrawer(context, colorScheme, textTheme, selectedModel),
       body: Column(
         children: [
-          // Message list
           Expanded(
             child: messages.isEmpty
                 ? _buildEmptyState(context, colorScheme, textTheme)
@@ -262,14 +336,16 @@ class _HomePageState extends ConsumerState<HomePage> {
                         onRegenerate: (!isGenerating && !message.isUser)
                             ? () => _regenerateMessage(message)
                             : null,
-                        onEditResend: (!isGenerating && message.isUser)
+                        onEditResend:
+                            (!isGenerating &&
+                                message.isUser &&
+                                message.imagePath == null)
                             ? () => _editAndResendMessage(message)
                             : null,
                       );
                     },
                   ),
           ),
-          // Input bar
           _buildInputBar(
             context,
             colorScheme,
@@ -277,6 +353,8 @@ class _HomePageState extends ConsumerState<HomePage> {
             isGenerating,
             generationText,
             hasDownloadedModel,
+            canAttachImage,
+            selectedModel,
           ),
         ],
       ),
@@ -350,6 +428,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     bool isGenerating,
     String generationText,
     bool hasDownloadedModel,
+    bool canAttachImage,
+    LlmModel? selectedModel,
   ) {
     final canCompose = hasDownloadedModel && !isGenerating;
     final progressText = generationText.isEmpty
@@ -412,9 +492,29 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ],
               ),
             ),
+          if (_draftImage != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _buildDraftImagePreview(context, colorScheme, textTheme),
+            ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              if (canAttachImage)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8, bottom: 2),
+                  child: IconButton(
+                    tooltip: 'Add image',
+                    onPressed: canCompose
+                        ? () => _pickImage(selectedModel)
+                        : null,
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    style: IconButton.styleFrom(
+                      backgroundColor: colorScheme.surfaceContainerHighest,
+                      foregroundColor: colorScheme.primary,
+                    ),
+                  ),
+                ),
               Expanded(
                 child: TextField(
                   controller: _messageController,
@@ -428,6 +528,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                         ? 'Download a model to start chatting...'
                         : isGenerating
                         ? 'Wait for current response...'
+                        : canAttachImage
+                        ? 'Ask about your image or start a chat...'
                         : 'Type a message...',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
@@ -456,6 +558,75 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDraftImagePreview(
+    BuildContext context,
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+  ) {
+    final draftImage = _draftImage;
+    final imageFile = draftImage != null ? File(draftImage.path) : null;
+    final imageExists = imageFile?.existsSync() ?? false;
+    final label = draftImage != null ? p.basename(draftImage.path) : 'Image';
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: imageExists
+                  ? Image.file(imageFile!, fit: BoxFit.cover)
+                  : DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHigh,
+                      ),
+                      child: Icon(
+                        Icons.image_not_supported_outlined,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '1 image attached',
+                  style: textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Remove image',
+            onPressed: () => setState(() => _draftImage = null),
+            icon: const Icon(Icons.close_rounded),
           ),
         ],
       ),
@@ -602,7 +773,10 @@ class _ChatBubbleState extends State<_ChatBubble> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isUser = widget.message.isUser;
-    final hasExternalUserEdit = isUser && widget.onEditResend != null;
+    final hasExternalUserEdit =
+        isUser &&
+        widget.onEditResend != null &&
+        widget.message.imagePath == null;
     final text = widget.message.text;
     final actionForeground = isUser
         ? colorScheme.onPrimary
@@ -660,6 +834,14 @@ class _ChatBubbleState extends State<_ChatBubble> {
                 ],
               ),
             ),
+          if (widget.message.imagePath != null) ...[
+            _MessageImage(
+              imagePath: widget.message.imagePath!,
+              imageLabel: widget.message.imageLabel,
+              isUser: isUser,
+            ),
+            if (text.trim().isNotEmpty) const SizedBox(height: 12),
+          ],
           if (hasCodeFences)
             _MarkdownCodeMessage(
               text: text,
@@ -667,7 +849,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
               textTheme: textTheme,
               colorScheme: colorScheme,
             )
-          else
+          else if (text.trim().isNotEmpty)
             SelectableText(
               text,
               maxLines: (isLongMessage && !_isExpanded) ? 15 : null,
@@ -778,6 +960,67 @@ class _ChatBubbleState extends State<_ChatBubble> {
         ? ' · ${message.generatedTokens} tok'
         : '';
     return '${tps.toStringAsFixed(1)} tok/s · ${seconds.toStringAsFixed(1)}s$tokenPart';
+  }
+}
+
+class _MessageImage extends StatelessWidget {
+  final String imagePath;
+  final String? imageLabel;
+  final bool isUser;
+
+  const _MessageImage({
+    required this.imagePath,
+    required this.imageLabel,
+    required this.isUser,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final imageFile = File(imagePath);
+    final imageExists = imageFile.existsSync();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 220, maxWidth: 280),
+            child: imageExists
+                ? Image.file(imageFile, fit: BoxFit.cover)
+                : Container(
+                    width: 220,
+                    height: 140,
+                    color: isUser
+                        ? Colors.white.withValues(alpha: 0.12)
+                        : colorScheme.surfaceContainerHigh,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      size: 30,
+                      color: isUser
+                          ? colorScheme.onPrimary.withValues(alpha: 0.8)
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+          ),
+        ),
+        if (imageLabel != null && imageLabel!.trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              imageLabel!,
+              style: textTheme.labelSmall?.copyWith(
+                color: isUser
+                    ? colorScheme.onPrimary.withValues(alpha: 0.82)
+                    : colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 
@@ -902,26 +1145,18 @@ class _MarkdownCodeMessage extends StatelessWidget {
           _MarkdownSegment(text: source.substring(cursor, match.start)),
         );
       }
-
-      final language = (match.group(1) ?? '').trim();
-      final code = (match.group(2) ?? '').trimRight();
       segments.add(
         _MarkdownSegment(
-          text: code,
+          text: match.group(2) ?? '',
           isCode: true,
-          language: language.isEmpty ? null : language,
+          language: (match.group(1) ?? '').trim(),
         ),
       );
-
       cursor = match.end;
     }
 
     if (cursor < source.length) {
       segments.add(_MarkdownSegment(text: source.substring(cursor)));
-    }
-
-    if (segments.isEmpty) {
-      segments.add(_MarkdownSegment(text: source));
     }
 
     return segments;
