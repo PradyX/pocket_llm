@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
+import 'package:pocket_llm/core/services/hugging_face_model_capability_service.dart';
 import 'package:pocket_llm/core/services/local_notification_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/storage_info_service.dart';
@@ -18,6 +21,8 @@ class ModelSelectionController extends _$ModelSelectionController {
   late final StorageInfoService _storageInfoService = StorageInfoService();
   late final LocalNotificationService _notificationService =
       LocalNotificationService.instance;
+  late final HuggingFaceModelCapabilityService _capabilityService =
+      HuggingFaceModelCapabilityService();
   final Map<String, CancelToken> _cancelTokens = {};
 
   @override
@@ -26,7 +31,7 @@ class ModelSelectionController extends _$ModelSelectionController {
       models: LlmModel.availableModels,
       selectedModelId: null, // Start with no selection
     );
-    _init();
+    unawaited(_init());
     return state;
   }
 
@@ -42,26 +47,32 @@ class ModelSelectionController extends _$ModelSelectionController {
         return model.copyWith(isDownloaded: isDownloaded);
       }),
     );
+    final modelsWithCachedCapabilities = await _applyCachedCapabilities(
+      updatedModels,
+    );
 
     String? newSelectedId = state.selectedModelId;
     if (newSelectedId != null &&
-        !updatedModels.any((m) => m.id == newSelectedId)) {
+        !modelsWithCachedCapabilities.any((m) => m.id == newSelectedId)) {
       newSelectedId = null;
     }
     // If nothing is selected, try to pick the first downloaded one
     if (newSelectedId == null) {
       try {
-        newSelectedId = updatedModels.firstWhere((m) => m.isDownloaded).id;
+        newSelectedId = modelsWithCachedCapabilities
+            .firstWhere((m) => m.isDownloaded)
+            .id;
       } catch (_) {
         newSelectedId = null;
       }
     }
 
     state = state.copyWith(
-      models: updatedModels,
+      models: modelsWithCachedCapabilities,
       selectedModelId: newSelectedId,
     );
     await _refreshStorageInfo();
+    unawaited(_refreshModelCapabilities(modelsWithCachedCapabilities));
   }
 
   /// Select a specific model.
@@ -69,6 +80,23 @@ class ModelSelectionController extends _$ModelSelectionController {
     if (model.isDownloaded) {
       state = state.copyWith(selectedModelId: model.id);
     }
+  }
+
+  void toggleCapabilityFilter(ModelCapability capability) {
+    final updatedFilters = Set<ModelCapability>.from(
+      state.selectedCapabilityFilters,
+    );
+
+    if (!updatedFilters.add(capability)) {
+      updatedFilters.remove(capability);
+    }
+
+    state = state.copyWith(selectedCapabilityFilters: updatedFilters);
+  }
+
+  void clearCapabilityFilters() {
+    if (state.selectedCapabilityFilters.isEmpty) return;
+    state = state.copyWith(selectedCapabilityFilters: <ModelCapability>{});
   }
 
   Future<void> downloadModel(LlmModel model) async {
@@ -189,6 +217,7 @@ class ModelSelectionController extends _$ModelSelectionController {
     required String name,
     required String parameterSize,
     String? description,
+    List<ModelCapability> capabilities = const [],
   }) async {
     final normalizedUrl = downloadUrl.trim();
     final uri = Uri.tryParse(normalizedUrl);
@@ -249,6 +278,7 @@ class ModelSelectionController extends _$ModelSelectionController {
       name: resolvedName,
       parameterSize: resolvedParamSize,
       description: resolvedDescription,
+      capabilities: capabilities,
       downloadUrl: normalizedUrl,
       localFileName: localFileName,
       isDownloaded: isDownloaded,
@@ -258,6 +288,9 @@ class ModelSelectionController extends _$ModelSelectionController {
     final updatedModels = [...state.models, model];
     state = state.copyWith(models: updatedModels, error: null);
     await _persistCustomModels(updatedModels);
+    if (_capabilityService.canResolveFromUrl(model.downloadUrl)) {
+      unawaited(_refreshModelCapabilities([model]));
+    }
   }
 
   Future<void> deleteModel(LlmModel model) async {
@@ -300,6 +333,30 @@ class ModelSelectionController extends _$ModelSelectionController {
     await _refreshStorageInfo();
   }
 
+  Future<List<LlmModel>> _applyCachedCapabilities(List<LlmModel> models) async {
+    final cachedCapabilities = await _capabilityService.readCachedCapabilities(
+      models,
+    );
+    if (cachedCapabilities.isEmpty) return models;
+    return _mergeCapabilitiesIntoModels(models, cachedCapabilities);
+  }
+
+  Future<void> _refreshModelCapabilities(List<LlmModel> models) async {
+    final resolvedCapabilities = await _capabilityService.refreshCapabilities(
+      models,
+    );
+    if (resolvedCapabilities.isEmpty) return;
+
+    final updatedModels = _mergeCapabilitiesIntoModels(
+      state.models,
+      resolvedCapabilities,
+    );
+    if (_sameModelCapabilities(state.models, updatedModels)) return;
+
+    state = state.copyWith(models: updatedModels);
+    await _persistCustomModels(updatedModels);
+  }
+
   Future<List<LlmModel>> _loadCustomModels() async {
     try {
       final data = await SecureStorage.instance.read(_customModelsStorageKey);
@@ -333,6 +390,64 @@ class ModelSelectionController extends _$ModelSelectionController {
       key: _customModelsStorageKey,
       value: {'models': encoded},
     );
+  }
+
+  List<LlmModel> _mergeCapabilitiesIntoModels(
+    List<LlmModel> models,
+    Map<String, List<ModelCapability>> capabilitiesByModelId,
+  ) {
+    return models
+        .map((model) {
+          final incomingCapabilities = capabilitiesByModelId[model.id];
+          if (incomingCapabilities == null) return model;
+
+          final mergedCapabilities = _mergeCapabilities(
+            model.capabilities,
+            incomingCapabilities,
+          );
+          if (_sameCapabilities(model.capabilities, mergedCapabilities)) {
+            return model;
+          }
+
+          return model.copyWith(capabilities: mergedCapabilities);
+        })
+        .toList(growable: false);
+  }
+
+  List<ModelCapability> _mergeCapabilities(
+    List<ModelCapability> current,
+    List<ModelCapability> incoming,
+  ) {
+    final merged = <ModelCapability>{...current, ...incoming};
+    return ModelCapability.values
+        .where(merged.contains)
+        .toList(growable: false);
+  }
+
+  bool _sameModelCapabilities(List<LlmModel> current, List<LlmModel> updated) {
+    if (current.length != updated.length) return false;
+
+    for (var index = 0; index < current.length; index++) {
+      if (!_sameCapabilities(
+        current[index].capabilities,
+        updated[index].capabilities,
+      )) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool _sameCapabilities(
+    List<ModelCapability> first,
+    List<ModelCapability> second,
+  ) {
+    if (first.length != second.length) return false;
+    for (var index = 0; index < first.length; index++) {
+      if (first[index] != second[index]) return false;
+    }
+    return true;
   }
 
   String _friendlyDownloadError(Object error) {

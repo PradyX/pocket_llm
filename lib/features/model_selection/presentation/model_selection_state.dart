@@ -14,6 +14,7 @@ class ModelSelectionState {
 
   final List<LlmModel> models;
   final String? selectedModelId;
+  final Set<ModelCapability> selectedCapabilityFilters;
   final Map<String, DownloadProgress> downloadProgress;
   final String? error;
   final int? freeStorageBytes;
@@ -22,6 +23,7 @@ class ModelSelectionState {
   ModelSelectionState({
     required this.models,
     this.selectedModelId,
+    this.selectedCapabilityFilters = const {},
     this.downloadProgress = const {},
     this.error,
     this.freeStorageBytes,
@@ -40,6 +42,7 @@ class ModelSelectionState {
   ModelSelectionState copyWith({
     List<LlmModel>? models,
     Object? selectedModelId = _unset,
+    Set<ModelCapability>? selectedCapabilityFilters,
     Map<String, DownloadProgress>? downloadProgress,
     Object? error = _unset,
     Object? freeStorageBytes = _unset,
@@ -50,6 +53,8 @@ class ModelSelectionState {
       selectedModelId: selectedModelId == _unset
           ? this.selectedModelId
           : selectedModelId as String?,
+      selectedCapabilityFilters:
+          selectedCapabilityFilters ?? this.selectedCapabilityFilters,
       downloadProgress: downloadProgress ?? this.downloadProgress,
       error: error == _unset ? this.error : error as String?,
       freeStorageBytes: freeStorageBytes == _unset
