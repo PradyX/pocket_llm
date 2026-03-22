@@ -32,6 +32,18 @@ class MainFlutterWindow: NSWindow {
       }
     }
 
+    let runtimePathsChannel = FlutterMethodChannel(
+      name: "pocket_llm/runtime_paths",
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    runtimePathsChannel.setMethodCallHandler { call, result in
+      if call.method == "getAppleFrameworksDir" {
+        result(Bundle.main.privateFrameworksPath)
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
     super.awakeFromNib()
   }
 }

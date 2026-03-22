@@ -8,6 +8,18 @@
 
 /* Begin PBXBuildFile section */
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
+		1A6E8D012F8A410100A1B201 /* libggml.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D002F8A410100A1B201 /* libggml.dylib */; };
+		1A6E8D032F8A410100A1B201 /* libggml.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D002F8A410100A1B201 /* libggml.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A6E8D052F8A410100A1B201 /* libggml-base.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D042F8A410100A1B201 /* libggml-base.dylib */; };
+		1A6E8D072F8A410100A1B201 /* libggml-base.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D042F8A410100A1B201 /* libggml-base.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A6E8D092F8A410100A1B201 /* libggml-blas.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D082F8A410100A1B201 /* libggml-blas.dylib */; };
+		1A6E8D0B2F8A410100A1B201 /* libggml-blas.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D082F8A410100A1B201 /* libggml-blas.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A6E8D0D2F8A410100A1B201 /* libggml-cpu.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D0C2F8A410100A1B201 /* libggml-cpu.dylib */; };
+		1A6E8D0F2F8A410100A1B201 /* libggml-cpu.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D0C2F8A410100A1B201 /* libggml-cpu.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A6E8D112F8A410100A1B201 /* libggml-metal.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D102F8A410100A1B201 /* libggml-metal.dylib */; };
+		1A6E8D132F8A410100A1B201 /* libggml-metal.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D102F8A410100A1B201 /* libggml-metal.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A6E8D152F8A410100A1B201 /* libmtmd.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D142F8A410100A1B201 /* libmtmd.dylib */; };
+		1A6E8D172F8A410100A1B201 /* libmtmd.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6E8D142F8A410100A1B201 /* libmtmd.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		2D2D783E2F5C3AD600BF1C56 /* libllama.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 2D2D783D2F5C3AD600BF1C56 /* libllama.dylib */; };
 		2D2D783F2F5C3AE000BF1C56 /* libllama.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 2D2D783D2F5C3AD600BF1C56 /* libllama.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
@@ -38,6 +50,12 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				1A6E8D032F8A410100A1B201 /* libggml.dylib in Embed Frameworks */,
+				1A6E8D072F8A410100A1B201 /* libggml-base.dylib in Embed Frameworks */,
+				1A6E8D0B2F8A410100A1B201 /* libggml-blas.dylib in Embed Frameworks */,
+				1A6E8D0F2F8A410100A1B201 /* libggml-cpu.dylib in Embed Frameworks */,
+				1A6E8D132F8A410100A1B201 /* libggml-metal.dylib in Embed Frameworks */,
+				1A6E8D172F8A410100A1B201 /* libmtmd.dylib in Embed Frameworks */,
 				2D2D783F2F5C3AE000BF1C56 /* libllama.dylib in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
@@ -50,6 +68,12 @@
 		1383D07915DC2B944F689070 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 		1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GeneratedPluginRegistrant.h; sourceTree = "<group>"; };
 		1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
+		1A6E8D002F8A410100A1B201 /* libggml.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libggml.dylib; sourceTree = "<group>"; };
+		1A6E8D042F8A410100A1B201 /* libggml-base.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libggml-base.dylib"; sourceTree = "<group>"; };
+		1A6E8D082F8A410100A1B201 /* libggml-blas.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libggml-blas.dylib"; sourceTree = "<group>"; };
+		1A6E8D0C2F8A410100A1B201 /* libggml-cpu.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libggml-cpu.dylib"; sourceTree = "<group>"; };
+		1A6E8D102F8A410100A1B201 /* libggml-metal.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = "libggml-metal.dylib"; sourceTree = "<group>"; };
+		1A6E8D142F8A410100A1B201 /* libmtmd.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libmtmd.dylib; sourceTree = "<group>"; };
 		2D2D783D2F5C3AD600BF1C56 /* libllama.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; path = libllama.dylib; sourceTree = "<group>"; };
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -86,6 +110,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A6E8D012F8A410100A1B201 /* libggml.dylib in Frameworks */,
+				1A6E8D052F8A410100A1B201 /* libggml-base.dylib in Frameworks */,
+				1A6E8D092F8A410100A1B201 /* libggml-blas.dylib in Frameworks */,
+				1A6E8D0D2F8A410100A1B201 /* libggml-cpu.dylib in Frameworks */,
+				1A6E8D112F8A410100A1B201 /* libggml-metal.dylib in Frameworks */,
+				1A6E8D152F8A410100A1B201 /* libmtmd.dylib in Frameworks */,
 				2D2D783E2F5C3AD600BF1C56 /* libllama.dylib in Frameworks */,
 				48544778E55AA0E59BAA340B /* Pods_Runner.framework in Frameworks */,
 			);
@@ -138,6 +168,12 @@
 		97C146E51CF9000F007C117D = {
 			isa = PBXGroup;
 			children = (
+				1A6E8D002F8A410100A1B201 /* libggml.dylib */,
+				1A6E8D042F8A410100A1B201 /* libggml-base.dylib */,
+				1A6E8D082F8A410100A1B201 /* libggml-blas.dylib */,
+				1A6E8D0C2F8A410100A1B201 /* libggml-cpu.dylib */,
+				1A6E8D102F8A410100A1B201 /* libggml-metal.dylib */,
+				1A6E8D142F8A410100A1B201 /* libmtmd.dylib */,
 				2D2D783D2F5C3AD600BF1C56 /* libllama.dylib */,
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,

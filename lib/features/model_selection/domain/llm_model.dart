@@ -27,8 +27,16 @@ class LlmModel {
   final List<ModelCapability> capabilities;
   final String? downloadUrl;
   final String? localFileName;
+  final String? mmprojDownloadUrl;
+  final String? mmprojLocalFileName;
+  final String promptFormatId;
   final bool isDownloaded;
   final bool isCustom;
+
+  /// Whether this model supports vision/image chat.
+  /// Derived from [capabilities] — any model whose capabilities include
+  /// [ModelCapability.vision] will automatically support image upload.
+  bool get supportsVision => capabilities.contains(ModelCapability.vision);
 
   const LlmModel({
     required this.id,
@@ -38,6 +46,9 @@ class LlmModel {
     this.capabilities = const [],
     this.downloadUrl,
     this.localFileName,
+    this.mmprojDownloadUrl,
+    this.mmprojLocalFileName,
+    this.promptFormatId = 'chatml',
     this.isDownloaded = false,
     this.isCustom = false,
   });
@@ -46,6 +57,8 @@ class LlmModel {
     List<ModelCapability>? capabilities,
     bool? isDownloaded,
     String? localFileName,
+    String? mmprojLocalFileName,
+    String? promptFormatId,
     bool? isCustom,
   }) {
     return LlmModel(
@@ -56,6 +69,9 @@ class LlmModel {
       capabilities: capabilities ?? this.capabilities,
       downloadUrl: downloadUrl,
       localFileName: localFileName ?? this.localFileName,
+      mmprojDownloadUrl: mmprojDownloadUrl,
+      mmprojLocalFileName: mmprojLocalFileName ?? this.mmprojLocalFileName,
+      promptFormatId: promptFormatId ?? this.promptFormatId,
       isDownloaded: isDownloaded ?? this.isDownloaded,
       isCustom: isCustom ?? this.isCustom,
     );
@@ -70,6 +86,9 @@ class LlmModel {
       'capabilities': capabilities.map((capability) => capability.id).toList(),
       'downloadUrl': downloadUrl,
       'localFileName': localFileName,
+      'mmprojDownloadUrl': mmprojDownloadUrl,
+      'mmprojLocalFileName': mmprojLocalFileName,
+      'promptFormatId': promptFormatId,
       'isDownloaded': isDownloaded,
       'isCustom': isCustom,
     };
@@ -83,7 +102,14 @@ class LlmModel {
               .map(ModelCapability.tryParse)
               .whereType<ModelCapability>()
               .toList()
-        : const <ModelCapability>[];
+        : <ModelCapability>[];
+
+    // Backward compat: legacy JSON may have supportsVision: true without
+    // the vision capability in the list. Inject it so the getter works.
+    final legacyVision = json['supportsVision'] as bool? ?? false;
+    if (legacyVision && !capabilities.contains(ModelCapability.vision)) {
+      capabilities.add(ModelCapability.vision);
+    }
 
     return LlmModel(
       id: json['id'] as String? ?? '',
@@ -94,6 +120,9 @@ class LlmModel {
       capabilities: capabilities,
       downloadUrl: json['downloadUrl'] as String?,
       localFileName: json['localFileName'] as String?,
+      mmprojDownloadUrl: json['mmprojDownloadUrl'] as String?,
+      mmprojLocalFileName: json['mmprojLocalFileName'] as String?,
+      promptFormatId: json['promptFormatId'] as String? ?? 'chatml',
       isDownloaded: json['isDownloaded'] as bool? ?? false,
       isCustom: json['isCustom'] as bool? ?? true,
     );
@@ -300,6 +329,21 @@ class LlmModel {
       downloadUrl:
           'https://huggingface.co/bartowski/Qwen_Qwen3-4B-GGUF/resolve/main/Qwen_Qwen3-4B-Q4_K_M.gguf',
       localFileName: 'qwen3-4b-q4_k_m.gguf',
+    ),
+    LlmModel(
+      id: 'gemma-3-4b-it-vision',
+      name: 'Gemma 3 Vision',
+      parameterSize: '4B',
+      description:
+          'Balanced Gemma 3 model curated for image chat and visual Q&A.',
+      capabilities: [ModelCapability.vision],
+      downloadUrl:
+          'https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf',
+      localFileName: 'gemma-3-4b-it-q4_k_m.gguf',
+      mmprojDownloadUrl:
+          'https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/mmproj-model-f16.gguf',
+      mmprojLocalFileName: 'gemma-3-4b-it-mmproj-model-f16.gguf',
+      promptFormatId: 'gemma3',
     ),
     LlmModel(
       id: 'qwen-3.5-4b',

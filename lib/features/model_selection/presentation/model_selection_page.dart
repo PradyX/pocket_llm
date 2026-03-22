@@ -386,13 +386,35 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                         ),
                         _buildDetailRow(
                           context,
+                          'Vision Chat',
+                          model.supportsVision ? 'Supported' : 'No',
+                        ),
+                        _buildDetailRow(
+                          context,
                           'Local File',
                           model.localFileName ?? 'N/A',
                         ),
+                        if (model.mmprojLocalFileName != null)
+                          _buildDetailRow(
+                            context,
+                            'Vision Projector',
+                            model.mmprojLocalFileName ?? 'N/A',
+                          ),
                         _buildDetailRow(
                           context,
                           'Download URL',
                           model.downloadUrl ?? 'N/A',
+                        ),
+                        if (model.mmprojDownloadUrl != null)
+                          _buildDetailRow(
+                            context,
+                            'Projector URL',
+                            model.mmprojDownloadUrl ?? 'N/A',
+                          ),
+                        _buildDetailRow(
+                          context,
+                          'Prompt Format',
+                          model.promptFormatId,
                         ),
                         _buildDetailRow(
                           context,

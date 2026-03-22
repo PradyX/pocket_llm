@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/features/home/domain/chat_message.dart';
+import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:pocket_llm/storage/secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -86,8 +89,17 @@ class HomeController extends _$HomeController {
     return List<ChatMessage>.from(_modelChats[_activeModelId!] ?? const []);
   }
 
-  Future<void> sendMessage(String text) async {
-    await _runPrompt(promptText: text, appendUserMessage: true);
+  Future<void> sendMessage(
+    String text, {
+    String? imagePath,
+    String? imageLabel,
+  }) async {
+    await _runPrompt(
+      promptText: text,
+      appendUserMessage: true,
+      imagePath: imagePath,
+      imageLabel: imageLabel,
+    );
   }
 
   Future<void> regenerateAssistantMessage(String assistantMessageId) async {
@@ -143,6 +155,8 @@ class HomeController extends _$HomeController {
     required String promptText,
     required bool appendUserMessage,
     List<ChatMessage>? baseMessages,
+    String? imagePath,
+    String? imageLabel,
   }) async {
     final generationStatus = ref.read(homeGenerationStatusProvider);
     if (generationStatus.isGenerating) return;
@@ -150,8 +164,10 @@ class HomeController extends _$HomeController {
     final trimmed = promptText.trim();
     if (trimmed.isEmpty) return;
 
-    _stopRequestedByUser = false;
+    final selectionState = ref.read(modelSelectionControllerProvider);
+    final selectedModel = selectionState.selectedModel;
 
+    _stopRequestedByUser = false;
     _setStatus(
       text: 'Preparing request...',
       isGenerating: true,
@@ -161,37 +177,57 @@ class HomeController extends _$HomeController {
     );
 
     if (baseMessages != null) {
-      state = List<ChatMessage>.from(baseMessages);
+      final nextState = List<ChatMessage>.from(baseMessages);
+      await _deleteRemovedAttachments(
+        previousMessages: List<ChatMessage>.from(state),
+        nextMessages: nextState,
+      );
+      state = nextState;
     }
-
-    if (appendUserMessage) {
-      state = [
-        ...state,
-        ChatMessage(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          text: trimmed,
-          isUser: true,
-          timestamp: DateTime.now(),
-        ),
-      ];
-    }
-
-    _saveActiveChatSnapshot();
-
-    // Let keyboard/list animations settle before heavy native work starts.
-    await Future<void>.delayed(const Duration(milliseconds: 220));
-
-    final selectionState = ref.read(modelSelectionControllerProvider);
-    final selectedModel = selectionState.selectedModel;
 
     try {
+      if (appendUserMessage) {
+        final userMessageId = DateTime.now().millisecondsSinceEpoch.toString();
+        String? storedImagePath;
+        String? storedImageLabel;
+
+        if (imagePath != null && imagePath.trim().isNotEmpty) {
+          final targetModelId = selectedModel?.id ?? _activeModelId ?? 'chat';
+          storedImageLabel = (imageLabel ?? p.basename(imagePath)).trim();
+          storedImagePath = await _storageService.copyAttachmentToChat(
+            modelId: targetModelId,
+            messageId: userMessageId,
+            sourcePath: imagePath,
+            preferredFileName: storedImageLabel,
+          );
+        }
+
+        state = [
+          ...state,
+          ChatMessage(
+            id: userMessageId,
+            text: trimmed,
+            isUser: true,
+            timestamp: DateTime.now(),
+            imagePath: storedImagePath,
+            imageLabel: storedImageLabel,
+          ),
+        ];
+      }
+
+      _saveActiveChatSnapshot();
+
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+
       if (selectedModel != null &&
           selectedModel.isDownloaded &&
           selectedModel.localFileName != null) {
-        await _generateNativeResponse(selectedModel.localFileName!);
+        await _generateNativeResponse(selectedModel);
       } else {
         await _addPlaceholderResponse();
       }
+    } catch (e) {
+      _appendAssistantError('Error generating response: $e');
     } finally {
       _setStatus(text: '', isGenerating: false);
       _stopRequestedByUser = false;
@@ -200,23 +236,29 @@ class HomeController extends _$HomeController {
     }
   }
 
-  Future<void> _generateNativeResponse(String localFileName) async {
+  Future<void> _generateNativeResponse(LlmModel selectedModel) async {
+    final localFileName = selectedModel.localFileName;
+    if (localFileName == null || localFileName.trim().isEmpty) {
+      throw Exception('Selected model file is missing.');
+    }
+
+    final aiMessageId = '${DateTime.now().millisecondsSinceEpoch}_ai';
+
+    state = [
+      ...state,
+      ChatMessage(
+        id: aiMessageId,
+        text: 'Thinking...',
+        isUser: false,
+        timestamp: DateTime.now(),
+      ),
+    ];
+
     try {
       final inferenceSettings = ref.read(inferenceSettingsProvider);
       final adaptiveMode = inferenceSettings.adaptiveMode;
       final sampling = inferenceSettings.resolvedSampling;
       final maxTokens = _resolveMaxTokens(adaptiveMode: adaptiveMode);
-      final aiMessageId = '${DateTime.now().millisecondsSinceEpoch}_ai';
-
-      state = [
-        ...state,
-        ChatMessage(
-          id: aiMessageId,
-          text: 'Thinking...',
-          isUser: false,
-          timestamp: DateTime.now(),
-        ),
-      ];
 
       _setStatus(
         text: 'Preparing response...',
@@ -227,75 +269,90 @@ class HomeController extends _$HomeController {
       );
       await Future<void>.delayed(const Duration(milliseconds: 180));
 
-      _setStatus(text: 'Loading model...', isGenerating: true);
-      final path = await _storageService.getLocalFilePath(localFileName);
-      final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096;
-
-      await _llmService.ensureModelLoaded(
-        path,
-        nCtx: targetNCtx,
-        nBatch: targetNCtx,
-        temperature: sampling.temperature,
-        topP: sampling.topP,
-        topK: 40,
-      );
-
-      _setStatus(text: 'Building prompt...', isGenerating: true);
-
-      // final historyCandidates = state
-      //     .where((m) => m.id != aiMessageId && m.text.trim().isNotEmpty)
-      //     .toList();
-      // final history = historyCandidates.length > 5
-      //     ? historyCandidates.sublist(historyCandidates.length - 5)
-      //     : historyCandidates;
-
-      // History strategy:
-      // 1. Walk conversation from newest → oldest.
-      // 2. Compress long messages (keep start + end).
-      // 3. Stop when token budget is reached.
-      // This keeps prompts small while preserving important context.
-
       const maxHistoryTokens = 500;
       const maxMessageChars = 800;
+      const imageTokenBudget = 320;
 
       final history = <ChatMessage>[];
       int usedTokens = 0;
 
       final candidates = state
-          .where((m) => m.id != aiMessageId && m.text.trim().isNotEmpty)
+          .where(
+            (m) =>
+                m.id != aiMessageId &&
+                (m.text.trim().isNotEmpty || m.imagePath != null),
+          )
           .toList()
           .reversed;
 
       for (final msg in candidates) {
         var text = msg.text;
-
-        // Compress long messages to keep important context.
         if (text.length > maxMessageChars) {
           final head = text.substring(0, 300);
           final tail = text.substring(text.length - 200);
           text = '$head ... $tail';
         }
 
-        final estimatedTokens = (text.length / 4).ceil();
-
+        final estimatedTokens =
+            (text.length / 4).ceil() +
+            (msg.imagePath != null ? imageTokenBudget : 0);
         if (usedTokens + estimatedTokens > maxHistoryTokens) break;
 
         history.insert(0, msg.copyWith(text: text));
-
         usedTokens += estimatedTokens;
       }
 
-      final formattedPrompt = buildLlmChatPrompt(
+      final promptBundle = buildModelChatPrompt(
         history
             .map(
               (msg) => msg.isUser
-                  ? LlmPromptMessage.user(msg.text)
+                  ? LlmPromptMessage.user(msg.text, imagePath: msg.imagePath)
                   : LlmPromptMessage.assistant(msg.text),
             )
             .toList(),
         systemPrompt: _systemPrompt,
+        promptFormatId: selectedModel.promptFormatId,
       );
 
+      _setStatus(text: 'Loading model...', isGenerating: true);
+      final modelPath = await _storageService.getLocalFilePath(localFileName);
+      final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096;
+
+      String? mmprojPath;
+      if (promptBundle.imagePaths.isNotEmpty) {
+        if (!selectedModel.supportsVision ||
+            selectedModel.mmprojLocalFileName == null ||
+            selectedModel.mmprojLocalFileName!.trim().isEmpty) {
+          throw Exception(
+            'This model does not support image chat in Pocket LLM.',
+          );
+        }
+
+        final projectorFileName = selectedModel.mmprojLocalFileName!;
+        final isProjectorReady = await _storageService.isModelDownloaded(
+          projectorFileName,
+        );
+        if (!isProjectorReady) {
+          throw Exception(
+            'Vision projector is missing or incomplete. Re-download ${selectedModel.name}.',
+          );
+        }
+        mmprojPath = await _storageService.getLocalFilePath(projectorFileName);
+      }
+
+      await _llmService.ensureModelLoaded(
+        modelPath,
+        nCtx: targetNCtx,
+        nBatch: targetNCtx,
+        temperature: sampling.temperature,
+        topP: sampling.topP,
+        topK: 40,
+        mmprojPath: mmprojPath,
+      );
+
+      _setStatus(text: 'Building prompt...', isGenerating: true);
+
+      final stopSequence = modelStopToken(selectedModel.promptFormatId);
       final responseBuffer = StringBuffer();
       var sawToken = false;
       var generatedTokenCount = 0;
@@ -317,11 +374,19 @@ class HomeController extends _$HomeController {
         );
       }
 
-      await for (final token in _llmService.generateResponse(
-        formattedPrompt,
-        maxTokens: maxTokens,
-      )) {
-        final cleanToken = token.replaceAll('<|im_end|>', '');
+      final responseStream = promptBundle.imagePaths.isNotEmpty
+          ? _llmService.generateVisionResponse(
+              promptBundle.prompt,
+              imagePaths: promptBundle.imagePaths,
+              maxTokens: maxTokens,
+            )
+          : _llmService.generateResponse(
+              promptBundle.prompt,
+              maxTokens: maxTokens,
+            );
+
+      await for (final token in responseStream) {
+        final cleanToken = token.replaceAll(stopSequence, '');
         if (cleanToken.isNotEmpty) {
           sawToken = true;
           responseBuffer.write(cleanToken);
@@ -339,7 +404,7 @@ class HomeController extends _$HomeController {
           );
         }
 
-        if (token.contains('<|im_end|>')) {
+        if (token.contains(stopSequence)) {
           await emit(force: true);
           break;
         }
@@ -401,13 +466,7 @@ class HomeController extends _$HomeController {
         );
       }
     } catch (e) {
-      final errorResponse = ChatMessage(
-        id: '${DateTime.now().millisecondsSinceEpoch}_error',
-        text: 'Error generating response: $e',
-        isUser: false,
-        timestamp: DateTime.now(),
-      );
-      state = [...state, errorResponse];
+      _replaceAiMessage(aiMessageId, 'Error generating response: $e');
     }
   }
 
@@ -491,6 +550,18 @@ class HomeController extends _$HomeController {
     ];
   }
 
+  void _appendAssistantError(String text) {
+    state = [
+      ...state,
+      ChatMessage(
+        id: '${DateTime.now().millisecondsSinceEpoch}_error',
+        text: text,
+        isUser: false,
+        timestamp: DateTime.now(),
+      ),
+    ];
+  }
+
   int _resolveMaxTokens({required bool adaptiveMode}) {
     final inferenceSettings = ref.read(inferenceSettingsProvider);
     final userMaxTokens = inferenceSettings.maxTokens;
@@ -556,6 +627,23 @@ class HomeController extends _$HomeController {
     _modelChats[_activeModelId!] = List<ChatMessage>.from(state);
   }
 
+  Future<void> _deleteRemovedAttachments({
+    required List<ChatMessage> previousMessages,
+    required List<ChatMessage> nextMessages,
+  }) async {
+    final retainedPaths = nextMessages
+        .map((message) => message.imagePath)
+        .whereType<String>()
+        .toSet();
+    final removedPaths = previousMessages
+        .map((message) => message.imagePath)
+        .whereType<String>()
+        .where((path) => !retainedPaths.contains(path))
+        .toSet();
+    if (removedPaths.isEmpty) return;
+    await _storageService.deleteFiles(removedPaths);
+  }
+
   Future<void> _loadChatsFromStorage() async {
     try {
       final data = await SecureStorage.instance.read(_chatStorageKey);
@@ -613,9 +701,14 @@ class HomeController extends _$HomeController {
     }
   }
 
-  void clearChat() {
+  Future<void> clearChat() async {
+    final attachmentPaths = state
+        .map((message) => message.imagePath)
+        .whereType<String>()
+        .toSet();
     state = [];
     _saveActiveChatSnapshot();
+    await _storageService.deleteFiles(attachmentPaths);
     unawaited(_persistChatsToStorage());
   }
 }
