@@ -26,6 +26,18 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(modelSelectionControllerProvider);
     final sortedModels = [...state.models]..sort(_compareModelsByParamSize);
+    final capabilityCounts = _buildCapabilityCounts(state.models);
+    final visibleCapabilities = ModelCapability.values
+        .where((capability) => (capabilityCounts[capability] ?? 0) > 0)
+        .toList(growable: false);
+    final filteredModels = sortedModels
+        .where((model) {
+          if (state.selectedCapabilityFilters.isEmpty) return true;
+          return state.selectedCapabilityFilters.every(
+            model.capabilities.contains,
+          );
+        })
+        .toList(growable: false);
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
@@ -65,13 +77,22 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
       ),
       body: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: sortedModels.length + 1,
+        itemCount: filteredModels.isEmpty ? 2 : filteredModels.length + 1,
         itemBuilder: (context, index) {
           if (index == 0) {
-            return _buildStorageCard(context, state);
+            return _buildStorageCard(
+              context,
+              state,
+              visibleCapabilities,
+              capabilityCounts,
+            );
           }
 
-          final model = sortedModels[index - 1];
+          if (filteredModels.isEmpty) {
+            return _buildEmptyFilterState(context);
+          }
+
+          final model = filteredModels[index - 1];
           final isSelected = model.id == state.selectedModelId;
           final downloadProgress = state.downloadProgress[model.id];
           final isDownloading = downloadProgress != null;
@@ -203,6 +224,22 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                                         : colorScheme.onSurfaceVariant,
                                   ),
                                 ),
+                                if (model.capabilities.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: model.capabilities
+                                        .map(
+                                          (capability) => _buildCapabilityBadge(
+                                            context,
+                                            capability,
+                                            isSelected: isSelected,
+                                          ),
+                                        )
+                                        .toList(growable: false),
+                                  ),
+                                ],
                                 if (downloadProgress != null) ...[
                                   const SizedBox(height: 8),
                                   LinearProgressIndicator(
@@ -340,6 +377,15 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                         ),
                         _buildDetailRow(
                           context,
+                          'Capabilities',
+                          model.capabilities.isEmpty
+                              ? 'None'
+                              : model.capabilities
+                                    .map((capability) => capability.label)
+                                    .join(', '),
+                        ),
+                        _buildDetailRow(
+                          context,
                           'Local File',
                           model.localFileName ?? 'N/A',
                         ),
@@ -365,7 +411,12 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     );
   }
 
-  Widget _buildStorageCard(BuildContext context, ModelSelectionState state) {
+  Widget _buildStorageCard(
+    BuildContext context,
+    ModelSelectionState state,
+    List<ModelCapability> visibleCapabilities,
+    Map<ModelCapability, int> capabilityCounts,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final free = state.freeStorageBytes;
@@ -418,9 +469,113 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
+          if (visibleCapabilities.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Text(
+                  'Filters',
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                if (state.selectedCapabilityFilters.isNotEmpty)
+                  TextButton(
+                    onPressed: () {
+                      ref
+                          .read(modelSelectionControllerProvider.notifier)
+                          .clearCapabilityFilters();
+                    },
+                    child: const Text('Clear'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: visibleCapabilities
+                  .map(
+                    (capability) => FilterChip(
+                      selected: state.selectedCapabilityFilters.contains(
+                        capability,
+                      ),
+                      showCheckmark: false,
+                      avatar: Icon(_capabilityIcon(capability), size: 18),
+                      label: Text(
+                        '${capability.label} (${capabilityCounts[capability] ?? 0})',
+                      ),
+                      onSelected: (_) {
+                        ref
+                            .read(modelSelectionControllerProvider.notifier)
+                            .toggleCapabilityFilter(capability);
+                      },
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildEmptyFilterState(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Card(
+        color: colorScheme.surfaceContainerLow,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'No models match the selected filters.',
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Try removing one or more capability chips to see the full model list again.',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonal(
+                onPressed: () {
+                  ref
+                      .read(modelSelectionControllerProvider.notifier)
+                      .clearCapabilityFilters();
+                },
+                child: const Text('Clear Filters'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Map<ModelCapability, int> _buildCapabilityCounts(List<LlmModel> models) {
+    final counts = <ModelCapability, int>{};
+    for (final capability in ModelCapability.values) {
+      counts[capability] = 0;
+    }
+
+    for (final model in models) {
+      for (final capability in model.capabilities) {
+        counts[capability] = (counts[capability] ?? 0) + 1;
+      }
+    }
+
+    return counts;
   }
 
   int _compareModelsByParamSize(LlmModel a, LlmModel b) {
@@ -475,6 +630,52 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     );
   }
 
+  Widget _buildCapabilityBadge(
+    BuildContext context,
+    ModelCapability capability, {
+    required bool isSelected,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final backgroundColor = isSelected
+        ? colorScheme.primary.withValues(alpha: 0.14)
+        : colorScheme.primaryContainer.withValues(alpha: 0.55);
+    final foregroundColor = isSelected
+        ? colorScheme.primary
+        : colorScheme.onPrimaryContainer;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_capabilityIcon(capability), size: 16, color: foregroundColor),
+          const SizedBox(width: 6),
+          Text(
+            capability.label.toLowerCase(),
+            style: textTheme.labelMedium?.copyWith(
+              color: foregroundColor,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _capabilityIcon(ModelCapability capability) {
+    return switch (capability) {
+      ModelCapability.vision => Icons.visibility_rounded,
+      ModelCapability.tools => Icons.build_rounded,
+      ModelCapability.thinking => Icons.psychology_rounded,
+      ModelCapability.coding => Icons.code_rounded,
+    };
+  }
+
   String _formatBytes(int bytes) {
     if (bytes <= 0) return '0 B';
     if (bytes < 1024) return '$bytes B';
@@ -490,6 +691,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     String name = '';
     String parameterSize = '';
     String description = '';
+    final selectedCapabilities = <ModelCapability>{};
     String? urlError;
     String? nameError;
     String? sizeError;
@@ -563,6 +765,58 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                       maxLines: 4,
                       onChanged: (value) => description = value,
                     ),
+                    const SizedBox(height: 16),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Capabilities (optional)',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Choose one or more chips. If this is a Hugging Face model, the app will also try to infer matching capabilities automatically.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: ModelCapability.values
+                            .map(
+                              (capability) => FilterChip(
+                                selected: selectedCapabilities.contains(
+                                  capability,
+                                ),
+                                showCheckmark: false,
+                                avatar: Icon(
+                                  _capabilityIcon(capability),
+                                  size: 18,
+                                ),
+                                label: Text(capability.label),
+                                onSelected: (selected) {
+                                  setDialogState(() {
+                                    if (selected) {
+                                      selectedCapabilities.add(capability);
+                                    } else {
+                                      selectedCapabilities.remove(capability);
+                                    }
+                                  });
+                                },
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -605,6 +859,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                           name: normalizedName,
                           parameterSize: normalizedSize,
                           description: description,
+                          capabilities: selectedCapabilities.toList(),
                         );
                   },
                   child: const Text('Add'),

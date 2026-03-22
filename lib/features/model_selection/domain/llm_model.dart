@@ -1,9 +1,30 @@
+enum ModelCapability {
+  vision('vision', 'Vision'),
+  tools('tools', 'Tools'),
+  thinking('thinking', 'Thinking'),
+  coding('coding', 'Coding');
+
+  const ModelCapability(this.id, this.label);
+
+  final String id;
+  final String label;
+
+  static ModelCapability? tryParse(String value) {
+    final normalized = value.trim().toLowerCase();
+    for (final capability in values) {
+      if (capability.id == normalized) return capability;
+    }
+    return null;
+  }
+}
+
 /// Represents a local LLM model available for inference.
 class LlmModel {
   final String id;
   final String name;
   final String parameterSize;
   final String description;
+  final List<ModelCapability> capabilities;
   final String? downloadUrl;
   final String? localFileName;
   final bool isDownloaded;
@@ -14,6 +35,7 @@ class LlmModel {
     required this.name,
     required this.parameterSize,
     required this.description,
+    this.capabilities = const [],
     this.downloadUrl,
     this.localFileName,
     this.isDownloaded = false,
@@ -21,6 +43,7 @@ class LlmModel {
   });
 
   LlmModel copyWith({
+    List<ModelCapability>? capabilities,
     bool? isDownloaded,
     String? localFileName,
     bool? isCustom,
@@ -30,6 +53,7 @@ class LlmModel {
       name: name,
       parameterSize: parameterSize,
       description: description,
+      capabilities: capabilities ?? this.capabilities,
       downloadUrl: downloadUrl,
       localFileName: localFileName ?? this.localFileName,
       isDownloaded: isDownloaded ?? this.isDownloaded,
@@ -43,6 +67,7 @@ class LlmModel {
       'name': name,
       'parameterSize': parameterSize,
       'description': description,
+      'capabilities': capabilities.map((capability) => capability.id).toList(),
       'downloadUrl': downloadUrl,
       'localFileName': localFileName,
       'isDownloaded': isDownloaded,
@@ -51,12 +76,22 @@ class LlmModel {
   }
 
   factory LlmModel.fromJson(Map<String, dynamic> json) {
+    final rawCapabilities = json['capabilities'];
+    final capabilities = rawCapabilities is List
+        ? rawCapabilities
+              .whereType<String>()
+              .map(ModelCapability.tryParse)
+              .whereType<ModelCapability>()
+              .toList()
+        : const <ModelCapability>[];
+
     return LlmModel(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? 'Custom Model',
       parameterSize: json['parameterSize'] as String? ?? 'Unknown',
       description:
           json['description'] as String? ?? 'User-added model download link.',
+      capabilities: capabilities,
       downloadUrl: json['downloadUrl'] as String?,
       localFileName: json['localFileName'] as String?,
       isDownloaded: json['isDownloaded'] as bool? ?? false,
