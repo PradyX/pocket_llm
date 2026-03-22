@@ -175,6 +175,16 @@ class ModelSelectionController extends _$ModelSelectionController {
     state = state.copyWith(selectedCapabilityFilters: <ModelCapability>{});
   }
 
+  void setSearchQuery(String query) {
+    if (state.searchQuery == query) return;
+    state = state.copyWith(searchQuery: query);
+  }
+
+  void clearSearch() {
+    if (state.searchQuery.isEmpty) return;
+    state = state.copyWith(searchQuery: '');
+  }
+
   Future<void> downloadModel(LlmModel model) async {
     final assets = _downloadAssetsForModel(model);
     if (assets.isEmpty) return;

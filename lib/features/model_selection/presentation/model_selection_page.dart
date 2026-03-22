@@ -13,13 +13,23 @@ class ModelSelectionPage extends ConsumerStatefulWidget {
 
 class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   final Set<String> _expandedModelIds = <String>{};
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(modelSelectionControllerProvider.notifier).refreshStorageInfo();
+      _searchController.text = ref
+          .read(modelSelectionControllerProvider)
+          .searchQuery;
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -32,10 +42,23 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
         .toList(growable: false);
     final filteredModels = sortedModels
         .where((model) {
-          if (state.selectedCapabilityFilters.isEmpty) return true;
-          return state.selectedCapabilityFilters.every(
-            model.capabilities.contains,
-          );
+          // 1. Filter by capabilities
+          if (state.selectedCapabilityFilters.isNotEmpty &&
+              !state.selectedCapabilityFilters.every(
+                model.capabilities.contains,
+              )) {
+            return false;
+          }
+
+          // 2. Filter by search query
+          if (state.searchQuery.trim().isNotEmpty) {
+            final q = state.searchQuery.trim().toLowerCase();
+            final nameMatch = model.name.toLowerCase().contains(q);
+            final descMatch = model.description.toLowerCase().contains(q);
+            if (!nameMatch && !descMatch) return false;
+          }
+
+          return true;
         })
         .toList(growable: false);
     final colorScheme = Theme.of(context).colorScheme;
@@ -89,7 +112,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
           }
 
           if (filteredModels.isEmpty) {
-            return _buildEmptyFilterState(context);
+            return _buildEmptyFilterState(context, state);
           }
 
           final model = filteredModels[index - 1];
@@ -493,6 +516,38 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
             ),
           if (visibleCapabilities.isNotEmpty) ...[
             const SizedBox(height: 18),
+            TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search models...',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: state.searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded),
+                        onPressed: () {
+                          _searchController.clear();
+                          ref
+                              .read(modelSelectionControllerProvider.notifier)
+                              .clearSearch();
+                          FocusScope.of(context).unfocus();
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: colorScheme.surfaceContainerHigh,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onChanged: (value) {
+                ref
+                    .read(modelSelectionControllerProvider.notifier)
+                    .setSearchQuery(value);
+              },
+            ),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Text(
@@ -543,9 +598,20 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     );
   }
 
-  Widget _buildEmptyFilterState(BuildContext context) {
+  Widget _buildEmptyFilterState(
+    BuildContext context,
+    ModelSelectionState state,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+
+    final hasSearch = state.searchQuery.trim().isNotEmpty;
+    final hasFilters = state.selectedCapabilityFilters.isNotEmpty;
+    final message = hasSearch && hasFilters
+        ? 'No models match the search query and selected filters.'
+        : hasSearch
+        ? 'No models match your search.'
+        : 'No models match the selected filters.';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -557,27 +623,46 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'No models match the selected filters.',
+                message,
                 style: textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 6),
               Text(
-                'Try removing one or more capability chips to see the full model list again.',
+                'Try adjusting your search or removing capability chips to see more models.',
                 style: textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 12),
-              FilledButton.tonal(
-                onPressed: () {
-                  ref
-                      .read(modelSelectionControllerProvider.notifier)
-                      .clearCapabilityFilters();
-                },
-                child: const Text('Clear Filters'),
-              ),
+              if (hasSearch || hasFilters) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    if (hasSearch) ...[
+                      FilledButton.tonal(
+                        onPressed: () {
+                          _searchController.clear();
+                          ref
+                              .read(modelSelectionControllerProvider.notifier)
+                              .clearSearch();
+                        },
+                        child: const Text('Clear Search'),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (hasFilters)
+                      FilledButton.tonal(
+                        onPressed: () {
+                          ref
+                              .read(modelSelectionControllerProvider.notifier)
+                              .clearCapabilityFilters();
+                        },
+                        child: const Text('Clear Filters'),
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

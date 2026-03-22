@@ -15,6 +15,7 @@ class ModelSelectionState {
   final List<LlmModel> models;
   final String? selectedModelId;
   final Set<ModelCapability> selectedCapabilityFilters;
+  final String searchQuery;
   final Map<String, DownloadProgress> downloadProgress;
   final String? error;
   final int? freeStorageBytes;
@@ -24,6 +25,7 @@ class ModelSelectionState {
     required this.models,
     this.selectedModelId,
     this.selectedCapabilityFilters = const {},
+    this.searchQuery = '',
     this.downloadProgress = const {},
     this.error,
     this.freeStorageBytes,
@@ -43,6 +45,7 @@ class ModelSelectionState {
     List<LlmModel>? models,
     Object? selectedModelId = _unset,
     Set<ModelCapability>? selectedCapabilityFilters,
+    String? searchQuery,
     Map<String, DownloadProgress>? downloadProgress,
     Object? error = _unset,
     Object? freeStorageBytes = _unset,
@@ -55,6 +58,7 @@ class ModelSelectionState {
           : selectedModelId as String?,
       selectedCapabilityFilters:
           selectedCapabilityFilters ?? this.selectedCapabilityFilters,
+      searchQuery: searchQuery ?? this.searchQuery,
       downloadProgress: downloadProgress ?? this.downloadProgress,
       error: error == _unset ? this.error : error as String?,
       freeStorageBytes: freeStorageBytes == _unset
