@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:pocket_llm/core/services/hugging_face_model_capability_service.dart';
+import 'package:pocket_llm/core/services/hugging_face_model_discovery_service.dart';
 import 'package:pocket_llm/core/services/local_notification_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/storage_info_service.dart';
@@ -30,6 +31,8 @@ class ModelSelectionController extends _$ModelSelectionController {
       LocalNotificationService.instance;
   late final HuggingFaceModelCapabilityService _capabilityService =
       HuggingFaceModelCapabilityService();
+  late final HuggingFaceModelDiscoveryService _discoveryService =
+      HuggingFaceModelDiscoveryService();
   final Map<String, CancelToken> _cancelTokens = {};
 
   @override
@@ -44,7 +47,13 @@ class ModelSelectionController extends _$ModelSelectionController {
 
   Future<void> _init() async {
     final customModels = await _loadCustomModels();
-    final combinedModels = [...LlmModel.availableModels, ...customModels];
+    final cachedDiscovered = await _discoveryService.readCachedModels();
+
+    final combinedModels = _mergeModelLists(
+      staticModels: LlmModel.availableModels,
+      discoveredModels: cachedDiscovered,
+      customModels: customModels,
+    );
 
     final updatedModels = await Future.wait(
       combinedModels.map((model) async {
@@ -77,6 +86,70 @@ class ModelSelectionController extends _$ModelSelectionController {
     );
     await _refreshStorageInfo();
     unawaited(_refreshModelCapabilities(modelsWithCachedCapabilities));
+    unawaited(_refreshDiscoveredModels());
+  }
+
+  Future<void> _refreshDiscoveredModels() async {
+    final isStale = await _discoveryService.isCacheStale();
+    if (!isStale) return;
+
+    final freshModels = await _discoveryService.refreshModels();
+    if (freshModels.isEmpty) return;
+
+    final customModels = state.models.where((m) => m.isCustom).toList();
+    final merged = _mergeModelLists(
+      staticModels: LlmModel.availableModels,
+      discoveredModels: freshModels,
+      customModels: customModels,
+    );
+
+    final updatedModels = await Future.wait(
+      merged.map((model) async {
+        final isDownloaded = await _isModelBundleDownloaded(model);
+        return model.copyWith(isDownloaded: isDownloaded);
+      }),
+    );
+
+    final withCapabilities = await _applyCachedCapabilities(updatedModels);
+
+    // Preserve current selection.
+    final currentSelected = state.selectedModelId;
+    state = state.copyWith(
+      models: withCapabilities,
+      selectedModelId: currentSelected,
+    );
+    unawaited(_refreshModelCapabilities(withCapabilities));
+  }
+
+  /// Merges static, discovered, and custom model lists, deduplicating by
+  /// [localFileName]. Static models take priority over discovered ones.
+  List<LlmModel> _mergeModelLists({
+    required List<LlmModel> staticModels,
+    required List<LlmModel> discoveredModels,
+    required List<LlmModel> customModels,
+  }) {
+    final seen = <String>{};
+    final merged = <LlmModel>[];
+
+    // Static models first (highest priority).
+    for (final model in staticModels) {
+      final key = model.localFileName ?? model.id;
+      if (seen.add(key)) merged.add(model);
+    }
+
+    // Discovered models (skip if same file already present).
+    for (final model in discoveredModels) {
+      final key = model.localFileName ?? model.id;
+      if (seen.add(key)) merged.add(model);
+    }
+
+    // Custom models (always included, user-added).
+    for (final model in customModels) {
+      final key = model.localFileName ?? model.id;
+      if (seen.add(key)) merged.add(model);
+    }
+
+    return merged;
   }
 
   void selectModel(LlmModel model) {
