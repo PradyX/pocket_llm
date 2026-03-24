@@ -31,6 +31,8 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 ## Highlights
 
 - Local inference with GGUF models (no server required for generation)
+- **Vision Model Support**: Multimodal chat with image support (projector-based)
+- **On-device Benchmarking**: Integrated `llmfit` to measure local performance
 - Live token streaming in chat with `Thinking...` + progressive output
 - Stop generation anytime
 - Per-model chat memory (switching models keeps separate threads)
@@ -43,10 +45,13 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Built-in model catalog + custom model links
 - Chunked/resumable downloads with progress + pause
 - Local notification when a model download completes
+- **macOS Desktop Support**: Fully functional desktop implementation
 
 ### Model Management
 
+- **Model Search**: Quick filtering by name or parameter size
 - Built-in model list (Qwen, Qwen Coder, Llama 3.2, SmolLM2, Gemma, Phi, TinyLlama)
+- **HF Compatibility Detection**: Automatic detection of model capabilities
 - Add custom models from direct `.gguf` URL
 - Custom model validation:
   - URL required (`http/https`)
@@ -91,6 +96,8 @@ lib/
 │   ├── settings/inference_settings_provider.dart
 │   └── theme/
 ├── features/
+│   ├── about/
+│   │   └── presentation/about_page.dart
 │   ├── home/
 │   │   ├── domain/chat_message.dart
 │   │   └── presentation/
