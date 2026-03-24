@@ -78,11 +78,13 @@ class LlmService {
     final modelParams = ModelParams();
     final isVisionLoad = normalizedMmprojPath != null;
     final defaultGpuLayers = Platform.isIOS
-        ? 99
+        ? 32
         : Platform.isAndroid
-            ? 0
-            // Cap GPU layers for vision on desktop to avoid Metal buffer overflow.
-            : isVisionLoad ? 24 : 99;
+        ? 0
+        // Cap GPU layers for vision on desktop to avoid Metal buffer overflow.
+        : isVisionLoad
+        ? 24
+        : 32;
     modelParams.nGpuLayers = nGpuLayers ?? defaultGpuLayers;
 
     final contextParams = ContextParams();
@@ -110,13 +112,17 @@ class LlmService {
         print('[LlmService] File size: $len bytes');
         if (len >= 64) {
           final header = file.openSync().readSync(64);
-          final hex = header.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+          final hex = header
+              .map((b) => b.toRadixString(16).padLeft(2, '0'))
+              .join(' ');
           print('[LlmService] File header (64B): $hex');
         }
       }
       print('[LlmService] Llama.libraryPath: ${Llama.libraryPath}');
       print('[LlmService] ModelParams: nGpuLayers=${modelParams.nGpuLayers}');
-      print('[LlmService] ContextParams: nCtx=${contextParams.nCtx}, nBatch=${contextParams.nBatch}, nThreads=${contextParams.nThreads}');
+      print(
+        '[LlmService] ContextParams: nCtx=${contextParams.nCtx}, nBatch=${contextParams.nBatch}, nThreads=${contextParams.nThreads}',
+      );
       print('[LlmService] Initializing Llama instance...');
       _llama = Llama(
         modelPath,
