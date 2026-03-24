@@ -31,6 +31,8 @@ dependencies:
   path: ^1.9.0
   flutter_local_notifications: ^21.0.0
   cupertino_icons: ^1.0.6
+  flutter_markdown: ^0.7.3
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
@@ -48,6 +50,7 @@ flutter:
 
   assets:
     - .env
+    - README.md
     - assets/icons/
     - assets/tools/llmfit/LICENSE
     - assets/tools/llmfit/README.md
