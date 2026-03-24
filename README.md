@@ -170,6 +170,11 @@ Test on a physical iOS device for reliable on-device inference behavior.
 - Chat threads and settings are persisted locally via secure storage
 - No cloud inference backend is required for chat generation
 
+## Credits
+
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) - High-performance LLM inference in C/C++.
+- [llmfit](https://github.com/PradyX/llmfit) - LLM benchmarking tool.
+
 ## License
 
 This project is licensed under **GNU GPL v3**.
