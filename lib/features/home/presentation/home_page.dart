@@ -709,6 +709,14 @@ class _HomePageState extends ConsumerState<HomePage> {
               context.push(AppRoutes.benchmark);
             },
           ),
+          ListTile(
+            leading: const Icon(Icons.info_outline_rounded),
+            title: const Text('About'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.about);
+            },
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.settings_outlined),
