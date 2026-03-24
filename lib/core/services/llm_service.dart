@@ -51,6 +51,9 @@ class LlmService {
         mmprojPath != null && mmprojPath.trim().isNotEmpty
         ? mmprojPath.trim()
         : null;
+    print('[LlmService] Loading model: $modelPath');
+    print('[LlmService] Vision projector: $normalizedMmprojPath');
+
     await _ensureLibraryConfigured(
       requiresVision: normalizedMmprojPath != null,
     );
@@ -100,6 +103,21 @@ class LlmService {
     if (topK != null) samplerParams.topK = topK;
 
     try {
+      final file = File(modelPath);
+      print('[LlmService] File exists: ${file.existsSync()}');
+      if (file.existsSync()) {
+        final len = file.lengthSync();
+        print('[LlmService] File size: $len bytes');
+        if (len >= 64) {
+          final header = file.openSync().readSync(64);
+          final hex = header.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+          print('[LlmService] File header (64B): $hex');
+        }
+      }
+      print('[LlmService] Llama.libraryPath: ${Llama.libraryPath}');
+      print('[LlmService] ModelParams: nGpuLayers=${modelParams.nGpuLayers}');
+      print('[LlmService] ContextParams: nCtx=${contextParams.nCtx}, nBatch=${contextParams.nBatch}, nThreads=${contextParams.nThreads}');
+      print('[LlmService] Initializing Llama instance...');
       _llama = Llama(
         modelPath,
         modelParams,
@@ -108,7 +126,10 @@ class LlmService {
         false,
         normalizedMmprojPath,
       );
-    } catch (e) {
+      print('[LlmService] Llama initialized successfully.');
+    } catch (e, stack) {
+      print('[LlmService] Initialization failed: $e');
+      print('[LlmService] Stack trace: $stack');
       final details = e.toString().toLowerCase();
       if (details.contains('unknown') ||
           details.contains('unsupported') ||
@@ -291,7 +312,9 @@ class LlmService {
     if (_libraryConfigured) return;
 
     final preferredPath = await _resolveMultimodalLibraryPath();
+    print('[LlmService] Preferred library path: $preferredPath');
     if (preferredPath != null && preferredPath.trim().isNotEmpty) {
+      print('[LlmService] Setting Llama.libraryPath to: $preferredPath');
       Llama.libraryPath = preferredPath;
       _libraryConfigured = true;
       return;
@@ -316,7 +339,7 @@ class LlmService {
           return candidate;
         }
       }
-      return 'libmtmd.so';
+      return null;
     }
 
     if (Platform.isIOS || Platform.isMacOS) {
