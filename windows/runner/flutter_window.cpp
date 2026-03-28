@@ -1,4 +1,7 @@
 #include "flutter_window.h"
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
+#include <windows.h>
 
 #include <optional>
 
@@ -35,6 +38,36 @@ bool FlutterWindow::OnCreate() {
   // registered. The following call ensures a frame is pending to ensure the
   // window is shown. It is a no-op if the first frame hasn't completed yet.
   flutter_controller_->ForceRedraw();
+
+  // Storage Info Method Channel
+  auto storage_channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "pocket_llm/storage_info",
+      &flutter::StandardMethodCodec::GetInstance());
+
+  storage_channel->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name().compare("getStorageInfo") == 0) {
+          ULARGE_INTEGER free_bytes_available;
+          ULARGE_INTEGER total_number_of_bytes;
+          ULARGE_INTEGER total_number_of_free_bytes;
+
+          if (GetDiskFreeSpaceEx(NULL, &free_bytes_available,
+                                 &total_number_of_bytes,
+                                 &total_number_of_free_bytes)) {
+            flutter::EncodableMap response;
+            response[flutter::EncodableValue("freeBytes")] =
+                flutter::EncodableValue(static_cast<int64_t>(free_bytes_available.QuadPart));
+            response[flutter::EncodableValue("totalBytes")] =
+                flutter::EncodableValue(static_cast<int64_t>(total_number_of_bytes.QuadPart));
+            result->Success(flutter::EncodableValue(response));
+          } else {
+            result->Error("UNAVAILABLE", "Could not get storage info");
+          }
+        } else {
+          result->NotImplemented();
+        }
+      });
 
   return true;
 }

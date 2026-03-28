@@ -27,6 +27,7 @@ class LocalNotificationService {
       android: androidSettings,
       iOS: iosSettings,
       macOS: iosSettings,
+      linux: null,
     );
     await _plugin.initialize(settings: settings);
     _isInitialized = true;
