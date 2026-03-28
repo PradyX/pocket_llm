@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/core/services/android_tool_executor_service.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
@@ -23,3 +24,9 @@ final platformRuntimePathsServiceProvider =
     Provider<PlatformRuntimePathsService>((ref) {
       return PlatformRuntimePathsService();
     });
+
+final androidToolExecutorServiceProvider = Provider<AndroidToolExecutorService>(
+  (ref) {
+    return AndroidToolExecutorService();
+  },
+);

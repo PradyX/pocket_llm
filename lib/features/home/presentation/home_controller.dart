@@ -9,6 +9,7 @@ import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
+import 'package:pocket_llm/core/utils/llm_structured_response.dart';
 import 'package:pocket_llm/features/home/domain/chat_message.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
@@ -55,7 +56,6 @@ final homeGenerationStatusProvider = StateProvider<HomeGenerationStatus>(
 
 @riverpod
 class HomeController extends _$HomeController {
-  static const _systemPrompt = 'You are a helpful and concise assistant.';
   static const _chatStorageKey = 'model_chat_threads_v1';
 
   final Map<String, List<ChatMessage>> _modelChats = {};
@@ -67,6 +67,11 @@ class HomeController extends _$HomeController {
   LlmService get _llmService => ref.read(llmServiceProvider);
   ModelStorageService get _storageService =>
       ref.read(modelStorageServiceProvider);
+  bool get _androidToolCallingEnabled => Platform.isAndroid;
+
+  String get _systemPrompt => _androidToolCallingEnabled
+      ? buildAndroidToolCallingSystemPrompt()
+      : defaultAssistantSystemPrompt;
 
   @override
   List<ChatMessage> build() {
@@ -255,6 +260,7 @@ class HomeController extends _$HomeController {
     ];
 
     try {
+      final useStructuredAndroidResponses = _androidToolCallingEnabled;
       final inferenceSettings = ref.read(inferenceSettingsProvider);
       final adaptiveMode = inferenceSettings.adaptiveMode;
       final sampling = inferenceSettings.resolvedSampling;
@@ -363,6 +369,8 @@ class HomeController extends _$HomeController {
       final generationTimer = Stopwatch()..start();
 
       Future<void> emit({bool force = false}) async {
+        if (useStructuredAndroidResponses) return;
+
         final now = DateTime.now();
         if (!force && now.difference(lastEmitAt) < minEmitGap) return;
         lastEmitAt = now;
@@ -427,7 +435,7 @@ class HomeController extends _$HomeController {
 
       if (_stopRequestedByUser || _llmService.isStopRequested) {
         final partial = responseBuffer.toString();
-        if (partial.trim().isEmpty) {
+        if (useStructuredAndroidResponses || partial.trim().isEmpty) {
           _replaceAiMessage(
             aiMessageId,
             'Generation stopped.',
@@ -456,7 +464,9 @@ class HomeController extends _$HomeController {
           tokensPerSecond: averageTokensPerSecond,
         );
       } else {
-        final finalText = buildFinalResponseText(responseBuffer.toString());
+        final finalText = await _resolveAssistantText(
+          buildFinalResponseText(responseBuffer.toString()),
+        );
         _replaceAiMessage(
           aiMessageId,
           finalText,
@@ -710,5 +720,27 @@ class HomeController extends _$HomeController {
     _saveActiveChatSnapshot();
     await _storageService.deleteFiles(attachmentPaths);
     unawaited(_persistChatsToStorage());
+  }
+
+  Future<String> _resolveAssistantText(String rawResponse) async {
+    if (!_androidToolCallingEnabled) {
+      return rawResponse;
+    }
+
+    final structuredResponse = tryParseLlmStructuredResponse(rawResponse);
+    if (structuredResponse == null) {
+      return rawResponse;
+    }
+
+    switch (structuredResponse.type) {
+      case LlmStructuredResponseType.message:
+        final content = structuredResponse.content?.trim() ?? '';
+        return content.isEmpty ? rawResponse : content;
+      case LlmStructuredResponseType.toolCall:
+        final executionResult = await ref
+            .read(androidToolExecutorServiceProvider)
+            .executeToolPayload(structuredResponse.rawJson);
+        return executionResult.message;
+    }
   }
 }
