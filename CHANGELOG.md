@@ -16,13 +16,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Android Initialization Regression**: Resolved an issue where missing multimodal libraries prevented standard model loading.
-- **Font & Icon Assets**: Fixed missing `CupertinoIcons` in release builds and optimized font tree-shaking.
 - **Library Path Resolution**: Improved native library path resolution on Android for better compatibility with split `.so` files.
 - **Message History Optimization**: Context window now correctly compresses long messages to maintain stable performance.
-
-### Changed
-- **Credits Update**: Properly credited `llama.cpp` and `llmfit` in the documentation.
-- **Drawer Organization**: Reorganized navigation drawer for better accessibility of core features.
 
 ## [1.0.0] - 2026-03-07
 
