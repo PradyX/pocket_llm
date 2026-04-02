@@ -25,7 +25,7 @@ dependencies:
   slang_flutter: ^4.13.0
   talker_flutter: ^5.1.15
   firebase_crashlytics: ^4.3.10
-  llama_cpp_dart: ^0.1.0
+  llama_cpp_dart: 0.2.2
   image_picker: ^1.1.2
   path_provider: ^2.1.2
   path: ^1.9.0

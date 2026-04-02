@@ -126,11 +126,11 @@ class LlmService {
       print('[LlmService] Initializing Llama instance...');
       _llama = Llama(
         modelPath,
-        modelParams,
-        contextParams,
-        samplerParams,
-        false,
-        normalizedMmprojPath,
+        modelParams: modelParams,
+        contextParams: contextParams,
+        samplerParams: samplerParams,
+        verbose: false,
+        mmprojPath: normalizedMmprojPath,
       );
       print('[LlmService] Llama initialized successfully.');
     } catch (e, stack) {
