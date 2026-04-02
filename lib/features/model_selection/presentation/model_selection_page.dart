@@ -35,7 +35,12 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(modelSelectionControllerProvider);
-    final sortedModels = [...state.models]..sort(_compareModelsByParamSize);
+    final sortedModels = [...state.models]
+      ..sort(
+        (a, b) => state.prioritizeDownloadedModels
+            ? _compareModelsPrioritizingInstalled(a, b)
+            : _compareModelsByParamSize(a, b),
+      );
     final capabilityCounts = _buildCapabilityCounts(state.models);
     final visibleCapabilities = ModelCapability.values
         .where((capability) => (capabilityCounts[capability] ?? 0) > 0)
@@ -469,6 +474,9 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     final hasInfo = free != null && total != null && total > 0;
     final used = hasInfo ? (total - free).clamp(0, total) : 0;
     final usedRatio = hasInfo ? (used / total).clamp(0.0, 1.0) : 0.0;
+    final installedCount = state.models
+        .where((model) => model.isDownloaded)
+        .length;
     final progressColor = usedRatio >= 0.9
         ? colorScheme.error
         : usedRatio >= 0.7
@@ -514,7 +522,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-          if (visibleCapabilities.isNotEmpty) ...[
+          if (state.models.isNotEmpty) ...[
             const SizedBox(height: 18),
             TextField(
               controller: _searchController,
@@ -557,12 +565,13 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                   ),
                 ),
                 const Spacer(),
-                if (state.selectedCapabilityFilters.isNotEmpty)
+                if (state.selectedCapabilityFilters.isNotEmpty ||
+                    state.prioritizeDownloadedModels)
                   TextButton(
                     onPressed: () {
                       ref
                           .read(modelSelectionControllerProvider.notifier)
-                          .clearCapabilityFilters();
+                          .clearFilters();
                     },
                     child: const Text('Clear'),
                   ),
@@ -572,25 +581,36 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
             Wrap(
               spacing: 10,
               runSpacing: 10,
-              children: visibleCapabilities
-                  .map(
-                    (capability) => FilterChip(
-                      selected: state.selectedCapabilityFilters.contains(
-                        capability,
-                      ),
-                      showCheckmark: false,
-                      avatar: Icon(_capabilityIcon(capability), size: 18),
-                      label: Text(
-                        '${capability.label} (${capabilityCounts[capability] ?? 0})',
-                      ),
-                      onSelected: (_) {
-                        ref
-                            .read(modelSelectionControllerProvider.notifier)
-                            .toggleCapabilityFilter(capability);
-                      },
+              children: [
+                FilterChip(
+                  selected: state.prioritizeDownloadedModels,
+                  showCheckmark: false,
+                  avatar: const Icon(Icons.download_done_rounded, size: 18),
+                  label: Text('Installed ($installedCount)'),
+                  onSelected: (selected) {
+                    ref
+                        .read(modelSelectionControllerProvider.notifier)
+                        .setPrioritizeDownloadedModels(selected);
+                  },
+                ),
+                ...visibleCapabilities.map(
+                  (capability) => FilterChip(
+                    selected: state.selectedCapabilityFilters.contains(
+                      capability,
                     ),
-                  )
-                  .toList(growable: false),
+                    showCheckmark: false,
+                    avatar: Icon(_capabilityIcon(capability), size: 18),
+                    label: Text(
+                      '${capability.label} (${capabilityCounts[capability] ?? 0})',
+                    ),
+                    onSelected: (_) {
+                      ref
+                          .read(modelSelectionControllerProvider.notifier)
+                          .toggleCapabilityFilter(capability);
+                    },
+                  ),
+                ),
+              ],
             ),
           ],
         ],
@@ -606,7 +626,9 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     final textTheme = Theme.of(context).textTheme;
 
     final hasSearch = state.searchQuery.trim().isNotEmpty;
-    final hasFilters = state.selectedCapabilityFilters.isNotEmpty;
+    final hasFilters =
+        state.selectedCapabilityFilters.isNotEmpty ||
+        state.prioritizeDownloadedModels;
     final message = hasSearch && hasFilters
         ? 'No models match the search query and selected filters.'
         : hasSearch
@@ -630,7 +652,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Try adjusting your search or removing capability chips to see more models.',
+                'Try adjusting your search or removing filters to see more models.',
                 style: textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -656,7 +678,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                         onPressed: () {
                           ref
                               .read(modelSelectionControllerProvider.notifier)
-                              .clearCapabilityFilters();
+                              .clearFilters();
                         },
                         child: const Text('Clear Filters'),
                       ),
@@ -692,6 +714,14 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     final bySize = aSize.compareTo(bSize);
     if (bySize != 0) return bySize;
     return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  }
+
+  int _compareModelsPrioritizingInstalled(LlmModel a, LlmModel b) {
+    final byDownloaded = (b.isDownloaded ? 1 : 0).compareTo(
+      a.isDownloaded ? 1 : 0,
+    );
+    if (byDownloaded != 0) return byDownloaded;
+    return _compareModelsByParamSize(a, b);
   }
 
   double _toNumericParameterSize(String value) {
