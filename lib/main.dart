@@ -6,7 +6,6 @@ import 'package:pocket_llm/core/utils/logger.dart';
 import 'package:pocket_llm/i18n/strings.g.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'firebase_initializer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,10 +23,8 @@ Future<void> main() async {
     ),
   );
 
-  await FirebaseInitializer.init();
-
-  // Initialize Crashlytics error handlers
-  AppLogger.initCrashlytics();
+  // Initialize global Flutter/Dart error handlers.
+  AppLogger.initErrorHandlers();
 
   // Initialize i18n
   LocaleSettings.useDeviceLocale();

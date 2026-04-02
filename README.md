@@ -78,7 +78,6 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - `flutter_secure_storage` for persisted app data
 - `flutter_local_notifications` for download-complete notifications
 - GoRouter for navigation
-- Firebase Core + Crashlytics
 
 ## Project Structure
 
@@ -111,7 +110,6 @@ lib/
 │   │       └── model_selection_state.dart
 │   └── settings/presentation/settings_page.dart
 ├── storage/secure_storage.dart
-└── firebase_initializer.dart
 ```
 
 ## Getting Started

@@ -17,14 +17,12 @@ dependencies:
   flutter_secure_storage: ^9.0.0
   freezed_annotation: ^2.4.1
   json_annotation: ^4.9.0
-  firebase_core: ^3.6.0
   intl: ^0.20.2
   flutter_dotenv: ^6.0.0
   pretty_dio_logger: ^1.4.0
   slang: ^4.13.0
   slang_flutter: ^4.13.0
   talker_flutter: ^5.1.15
-  firebase_crashlytics: ^4.3.10
   llama_cpp_dart: 0.2.2
   image_picker: ^1.1.2
   path_provider: ^2.1.2
