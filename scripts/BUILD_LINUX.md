@@ -23,6 +23,12 @@ sudo apt update
 sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjsoncpp-dev patchelf
 ```
 
+On Arch Linux, the equivalent build packages are typically:
+
+```bash
+sudo pacman -S --needed clang cmake ninja pkgconf gtk3 libsecret jsoncpp patchelf
+```
+
 If you want to build the bundled `llmfit` binary too, install Rust with `rustup` and make sure `cargo` is on your `PATH`.
 
 ## 1. Build The Linux Runtime Libraries
@@ -120,10 +126,18 @@ build/linux/arm64/release/pocket_llm-linux-arm64.tar.gz
 
 ## 6. Install On A Linux Machine
 
-On the target machine, install the runtime libraries your distro needs. On Debian/Ubuntu, a typical runtime set is:
+On the target machine, install the runtime libraries your distro needs.
+
+On Debian/Ubuntu, a typical runtime set is:
 
 ```bash
 sudo apt install libgtk-3-0 libsecret-1-0 libjsoncpp1
+```
+
+On Arch Linux, the typical runtime set is:
+
+```bash
+sudo pacman -S --needed gtk3 libsecret jsoncpp
 ```
 
 Then extract the archive somewhere permanent, for example:
@@ -144,6 +158,61 @@ Optional convenience symlink:
 ```bash
 sudo ln -sf /opt/pocket-llm/pocket_llm /usr/local/bin/pocket-llm
 ```
+
+That same extraction flow works on Arch:
+
+```bash
+sudo mkdir -p /opt/pocket-llm
+sudo tar -xzf pocket_llm-linux-x64.tar.gz -C /opt/pocket-llm --strip-components=1
+sudo ln -sf /opt/pocket-llm/pocket_llm /usr/local/bin/pocket-llm
+```
+
+## 7. Add A Desktop Launcher
+
+PocketLlama's installed icon inside the Flutter bundle is typically:
+
+```text
+/opt/pocket-llm/data/flutter_assets/assets/icons/pocketllm_new.png
+```
+
+For a per-user launcher on Ubuntu, Arch, or most other Linux desktops:
+
+```bash
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/pocket-llm.desktop <<'EOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Pocket LLM
+Comment=Privacy-first local AI assistant
+Exec=/opt/pocket-llm/pocket_llm
+Icon=/opt/pocket-llm/data/flutter_assets/assets/icons/pocketllm_new.png
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true
+EOF
+
+chmod +x ~/.local/share/applications/pocket-llm.desktop
+```
+
+For a system-wide launcher:
+
+```bash
+sudo tee /usr/share/applications/pocket-llm.desktop >/dev/null <<'EOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Pocket LLM
+Comment=Privacy-first local AI assistant
+Exec=/opt/pocket-llm/pocket_llm
+Icon=/opt/pocket-llm/data/flutter_assets/assets/icons/pocketllm_new.png
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true
+EOF
+```
+
+On some desktops, logging out and back in or refreshing the application menu may be needed before the launcher appears.
 
 ## Notes
 
