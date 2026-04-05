@@ -72,3 +72,4 @@ lib/firebase_options.dart
 /ios/lib*
 /macos/Runner/Frameworks/*
 /PocketLLM.dmg
+/linux/lib/*
