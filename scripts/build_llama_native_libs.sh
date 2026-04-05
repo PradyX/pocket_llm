@@ -13,6 +13,7 @@ LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-}"
 SKIP_GIT_CHECKOUT="${SKIP_GIT_CHECKOUT:-0}"
 SKIP_GIT_FETCH="${SKIP_GIT_FETCH:-0}"
 ALLOW_DIRTY_LLAMA_CPP="${ALLOW_DIRTY_LLAMA_CPP:-0}"
+HOST_OS="$(uname -s)"
 
 if command -v sysctl >/dev/null 2>&1; then
   DEFAULT_JOBS="$(sysctl -n hw.ncpu)"
@@ -28,6 +29,14 @@ ANDROID_ABIS=(
 )
 
 MANAGED_ANDROID_LIBS=(
+  "libggml.so"
+  "libggml-base.so"
+  "libggml-cpu.so"
+  "libllama.so"
+  "libmtmd.so"
+)
+
+MANAGED_LINUX_LIBS=(
   "libggml.so"
   "libggml-base.so"
   "libggml-cpu.so"
@@ -61,11 +70,15 @@ die() {
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/build_llama_native_libs.sh [all|android|macos|ios|ios-device|ios-simulator]
+  scripts/build_llama_native_libs.sh [all|android|linux|macos|ios|ios-device|ios-simulator]
 
 The script resolves the locked `llama_cpp_dart` version from `pubspec.lock`,
 finds the matching `llama.cpp` commit from your local pub cache, checks out
 that commit in `LLAMA_CPP_DIR`, and then builds/copies the native libraries.
+
+With no explicit targets:
+  - on macOS hosts: builds Android + macOS + iOS device + iOS simulator
+  - on Linux hosts: builds Linux only
 
 Defaults:
   LLAMA_CPP_DIR=/Users/prady/FlutterProjects/llama.cpp
@@ -82,6 +95,7 @@ Optional overrides:
 
 Examples:
   scripts/build_llama_native_libs.sh
+  scripts/build_llama_native_libs.sh linux
   scripts/build_llama_native_libs.sh android macos
   LLAMA_CPP_DIR=/path/to/llama.cpp scripts/build_llama_native_libs.sh ios
 EOF
@@ -267,6 +281,17 @@ sign_apple_libs_if_possible() {
   done < <(find "${dest_dir}" -maxdepth 1 -type f -name 'lib*.dylib' -print0)
 }
 
+set_linux_rpath_if_possible() {
+  local dest_dir="$1"
+  local lib
+
+  command -v patchelf >/dev/null 2>&1 || return 0
+
+  while IFS= read -r -d '' lib; do
+    patchelf --set-rpath '$ORIGIN' "${lib}" >/dev/null 2>&1 || true
+  done < <(find "${dest_dir}" -maxdepth 1 -type f -name 'lib*.so' -print0)
+}
+
 normalize_apple_install_names() {
   local dest_dir="$1"
   local lib
@@ -345,6 +370,26 @@ copy_apple_outputs() {
   fi
 }
 
+copy_linux_outputs() {
+  local build_dir="$1"
+  local dest_dir="${PROJECT_DIR}/linux/lib"
+  local -a libs=()
+
+  while IFS= read -r lib; do
+    libs+=("${lib}")
+  done < <(find "${build_dir}/bin" -maxdepth 1 -type f -name 'lib*.so' | sort)
+
+  [[ "${#libs[@]}" -gt 0 ]] || die "No Linux shared libraries found in ${build_dir}/bin"
+
+  remove_managed_libs "${dest_dir}" "${MANAGED_LINUX_LIBS[@]}"
+  copy_files "${dest_dir}" "${libs[@]}"
+  set_linux_rpath_if_possible "${dest_dir}"
+
+  if [[ ! -f "${dest_dir}/libmtmd.so" ]]; then
+    warn "libmtmd.so was not produced for Linux. Vision models will not work until it is bundled."
+  fi
+}
+
 build_android_abi() {
   local abi="$1"
   local ndk_root="$2"
@@ -398,6 +443,39 @@ build_android() {
   for abi in "${ANDROID_ABIS[@]}"; do
     build_android_abi "${abi}" "${ndk_root}"
   done
+}
+
+build_linux() {
+  local build_dir="${LLAMA_CPP_DIR}/build-pocketllama-linux"
+
+  require_command cmake
+
+  [[ "${HOST_OS}" == "Linux" ]] || die "Linux builds must be run on a Linux host."
+
+  log "Configuring Linux"
+  rm -rf "${build_dir}"
+  cmake \
+    -S "${LLAMA_CPP_DIR}" \
+    -B "${build_dir}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_BUILD_RPATH=\$ORIGIN \
+    -DCMAKE_INSTALL_RPATH=\$ORIGIN \
+    -DLLAMA_BUILD_TESTS=OFF \
+    -DLLAMA_BUILD_EXAMPLES=OFF \
+    -DLLAMA_BUILD_SERVER=OFF \
+    -DLLAMA_BUILD_TOOLS=ON \
+    -DLLAMA_NATIVE=OFF \
+    -DLLAMA_CURL=OFF \
+    -DGGML_OPENMP=OFF \
+    -DGGML_BLAS=OFF \
+    -DGGML_VULKAN=OFF
+
+  log "Building Linux"
+  cmake --build "${build_dir}" --parallel "${CMAKE_JOBS}" --target llama mtmd
+
+  log "Copying Linux libraries"
+  copy_linux_outputs "${build_dir}"
 }
 
 build_macos() {
@@ -498,6 +576,11 @@ print_summary() {
   log "Android libraries:"
   find "${PROJECT_DIR}/android/app/src/main/jniLibs" -maxdepth 2 -type f | sort
 
+  log "Linux libraries:"
+  if [[ -d "${PROJECT_DIR}/linux/lib" ]]; then
+    find "${PROJECT_DIR}/linux/lib" -maxdepth 1 -type f -name 'lib*.so' | sort
+  fi
+
   log "iOS device libraries:"
   find "${PROJECT_DIR}/ios" -maxdepth 1 -type f -name 'lib*.dylib' | sort
 
@@ -521,27 +604,39 @@ main() {
   sync_llama_cpp_checkout "${target_commit}"
 
   local build_android_requested=0
+  local build_linux_requested=0
   local build_macos_requested=0
   local build_ios_device_requested=0
   local build_ios_sim_requested=0
 
   if [[ "$#" -eq 0 ]]; then
-    build_android_requested=1
-    build_macos_requested=1
-    build_ios_device_requested=1
-    build_ios_sim_requested=1
+    if [[ "${HOST_OS}" == "Linux" ]]; then
+      build_linux_requested=1
+    else
+      build_android_requested=1
+      build_macos_requested=1
+      build_ios_device_requested=1
+      build_ios_sim_requested=1
+    fi
   else
     local arg
     for arg in "$@"; do
       case "${arg}" in
         all)
-          build_android_requested=1
-          build_macos_requested=1
-          build_ios_device_requested=1
-          build_ios_sim_requested=1
+          if [[ "${HOST_OS}" == "Linux" ]]; then
+            build_linux_requested=1
+          else
+            build_android_requested=1
+            build_macos_requested=1
+            build_ios_device_requested=1
+            build_ios_sim_requested=1
+          fi
           ;;
         android)
           build_android_requested=1
+          ;;
+        linux)
+          build_linux_requested=1
           ;;
         macos)
           build_macos_requested=1
@@ -570,6 +665,10 @@ main() {
 
   if [[ "${build_android_requested}" -eq 1 ]]; then
     build_android
+  fi
+
+  if [[ "${build_linux_requested}" -eq 1 ]]; then
+    build_linux
   fi
 
   if [[ "${build_macos_requested}" -eq 1 ]]; then

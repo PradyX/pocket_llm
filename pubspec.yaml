@@ -50,10 +50,7 @@ flutter:
     - .env
     - README.md
     - assets/icons/
-    - assets/tools/llmfit/LICENSE
-    - assets/tools/llmfit/README.md
-    - assets/tools/llmfit/macos/arm64/llmfit
-    - assets/tools/llmfit/android/arm64-v8a/llmfit
+    - assets/tools/llmfit/
 
 flutter_launcher_icons:
   android: true

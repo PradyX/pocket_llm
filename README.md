@@ -4,12 +4,12 @@
 
 # Pocket LLM
 
-Pocket LLM is a **privacy-first mobile AI assistant that runs entirely on your device**.  
+Pocket LLM is a **privacy-first local AI assistant that runs entirely on your device**.  
 It enables **on-device Local Language Model (LLM) inference using GGUF models** with `llama_cpp_dart`, allowing you to chat with AI **without sending your data to external servers**.
 
-Unlike most AI apps that rely on cloud APIs, **Pocket LLM performs all inference locally on your phone**. Your prompts, conversations, and models remain **fully under your control**, making it suitable for users who value **privacy, offline capability, and ownership of their data**.
+Unlike most AI apps that rely on cloud APIs, **Pocket LLM performs all inference locally on your phone or desktop**. Your prompts, conversations, and models remain **fully under your control**, making it suitable for users who value **privacy, offline capability, and ownership of their data**.
 
-The app is designed as a **mobile-first local AI runtime**, providing a smooth chat experience with model downloads, streaming responses, and per-model chat memory — all running directly **on-device**.
+The app is designed as a **mobile-first local AI runtime** that now also supports desktop workflows, providing a smooth chat experience with model downloads, streaming responses, and per-model chat memory — all running directly **on-device**.
 
 Because inference happens locally:
 
@@ -45,7 +45,7 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Built-in model catalog + custom model links
 - Chunked/resumable downloads with progress + pause
 - Local notification when a model download completes
-- **macOS Desktop Support**: Fully functional desktop implementation
+- **macOS + Linux Desktop Support**: Desktop-ready local runtime and benchmarking flow
 
 ### Model Management
 
@@ -75,7 +75,7 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Riverpod (`flutter_riverpod`, `riverpod_annotation`)
 - `llama_cpp_dart` for local LLM runtime
 - Dio for model downloads (chunked + resumable)
-- `flutter_secure_storage` for persisted app data
+- `flutter_secure_storage` for persisted app data, with Linux compatibility fallback when the system keyring is unavailable
 - `flutter_local_notifications` for download-complete notifications
 - GoRouter for navigation
 
@@ -117,7 +117,16 @@ lib/
 ### Prerequisites
 
 - Flutter SDK `^3.10.8`
-- Android Studio / Xcode toolchain
+- Android Studio / Xcode / Linux desktop toolchain depending on your target platform
+
+For Linux desktop development, enable the Flutter desktop target and install the Linux build dependencies that Flutter, `flutter_secure_storage`, and the desktop shell need. On Debian/Ubuntu-based systems, a typical setup is:
+
+```bash
+flutter config --enable-linux-desktop
+sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libjsoncpp-dev
+```
+
+If you also want the bundled Linux benchmark CLI, install Rust with `rustup` as well.
 
 ### Setup
 
@@ -128,9 +137,15 @@ flutter pub get
 # 2) Ensure env file exists (required by startup)
 cp .env.example .env
 
-# 3) Run app
-flutter run
+# 3) Run app for your target platform
+flutter run -d android
+# or
+flutter run -d macos
+# or
+flutter run -d linux
 ```
+
+For Linux-specific native runtime and benchmark asset steps, see [scripts/BUILD_LINUX.md](scripts/BUILD_LINUX.md).
 
 ### If you change Riverpod annotations
 
@@ -168,6 +183,28 @@ Delete and re-download the model.
 
 Large model/runtime combinations may fail or behave differently on simulator.
 Test on a physical iOS device for reliable on-device inference behavior.
+
+### Linux build fails with `libsecret` / `jsoncpp` errors
+
+Install the Linux desktop prerequisites before running `flutter run -d linux` or `flutter build linux`.
+On Debian/Ubuntu, the usual packages are:
+
+```bash
+sudo apt install libsecret-1-dev libjsoncpp-dev
+```
+
+Your distro may use a different runtime package name for `jsoncpp`.
+
+### Linux notifications do not appear
+
+Pocket LLM uses the Freedesktop notifications API on Linux.
+You need a running desktop notification daemon/session for notifications to show.
+
+### Linux secure storage falls back to local file storage
+
+On Linux, `flutter_secure_storage` depends on the system keyring.
+If the keyring is unavailable or locked, Pocket LLM automatically falls back to app-local storage so the app can still run.
+Install and unlock a supported keyring if you want the platform-backed secure store.
 
 ## Privacy
 

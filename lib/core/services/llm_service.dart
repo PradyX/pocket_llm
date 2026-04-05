@@ -336,6 +336,14 @@ class LlmService {
   }
 
   Future<String?> _resolveMultimodalLibraryPath() async {
+    final overridePath = Platform.environment['POCKET_LLM_MTMD_PATH'];
+    if (overridePath != null && overridePath.trim().isNotEmpty) {
+      final overrideFile = File(overridePath.trim());
+      if (overrideFile.existsSync()) {
+        return overrideFile.path;
+      }
+    }
+
     if (Platform.isAndroid) {
       final nativeLibraryDir = await _platformRuntimePathsService
           ?.getAndroidNativeLibraryDir();
@@ -358,6 +366,21 @@ class LlmService {
       final candidate = p.join(frameworksDir, 'libmtmd.dylib');
       if (File(candidate).existsSync()) {
         return candidate;
+      }
+    }
+
+    if (Platform.isLinux) {
+      final executable = File(Platform.resolvedExecutable);
+      final candidates = <String>{
+        p.join(executable.parent.path, 'libmtmd.so'),
+        p.join(executable.parent.path, 'lib', 'libmtmd.so'),
+        p.join(executable.parent.parent.path, 'lib', 'libmtmd.so'),
+      };
+
+      for (final candidate in candidates) {
+        if (File(candidate).existsSync()) {
+          return candidate;
+        }
       }
     }
 

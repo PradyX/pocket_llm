@@ -23,6 +23,7 @@ Rules:
 PocketLlama resolves:
 
 - Android: `libmtmd.so`
+- Linux (when bundled): `libmtmd.so`
 - Apple platforms: `libmtmd.dylib`
 
 Those libraries then depend on the matching `llama` and `ggml` libraries from the same build.
@@ -30,6 +31,7 @@ Those libraries then depend on the matching `llama` and `ggml` libraries from th
 Today the project already contains:
 
 - Android app-local JNI libs under `android/app/src/main/jniLibs/`
+- Linux desktop bundle libs under `linux/lib/` after you build them
 - macOS dylibs under `macos/Runner/Frameworks/`
 
 So the safest update flow is:
@@ -200,6 +202,45 @@ find "$POCKET_LLAMA/macos/Runner/Frameworks" -maxdepth 1 -type f | sort
 
 Do not replace only `libllama.dylib`. Keep the whole dylib family in sync.
 
+## Linux
+
+For Linux desktop builds, PocketLlama expects the bundled runtime family under:
+
+```text
+linux/lib/
+```
+
+Build these on a Linux host so the generated `.so` files match the target runtime.
+
+### Build And Copy In One Step
+
+From the PocketLlama repo:
+
+```bash
+cd "$POCKET_LLAMA"
+scripts/build_llama_native_libs.sh linux
+```
+
+That target configures a Linux `llama.cpp` build, copies the generated shared libraries into `linux/lib/`, and keeps the core runtime set together.
+
+Expected files include:
+
+- `libmtmd.so`
+- `libllama.so`
+- `libggml.so`
+- `libggml-base.so`
+- `libggml-cpu.so`
+
+If `patchelf` is available, the script also normalizes the Linux runtime path to `$ORIGIN` so `libmtmd.so` can resolve adjacent `ggml`/`llama` libraries from the final Flutter bundle.
+
+### Quick Validation
+
+```bash
+find "$POCKET_LLAMA/linux/lib" -maxdepth 1 -type f -name 'lib*.so' | sort
+```
+
+If `libmtmd.so` is missing, text-only inference may still work through the base runtime, but vision/projector models will not.
+
 ## After Replacing Libraries
 
 ```bash
@@ -216,6 +257,15 @@ cd "$POCKET_LLAMA"
 flutter clean
 flutter pub get
 flutter run -d android
+```
+
+For Linux:
+
+```bash
+cd "$POCKET_LLAMA"
+flutter clean
+flutter pub get
+flutter run -d linux
 ```
 
 ## Known Limitation: Qwen 3.5
