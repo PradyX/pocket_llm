@@ -15,10 +15,14 @@ SKIP_GIT_FETCH="${SKIP_GIT_FETCH:-0}"
 ALLOW_DIRTY_LLAMA_CPP="${ALLOW_DIRTY_LLAMA_CPP:-0}"
 HOST_OS="$(uname -s)"
 
-if command -v sysctl >/dev/null 2>&1; then
+if [[ "${HOST_OS}" == "Darwin" ]] && command -v sysctl >/dev/null 2>&1; then
   DEFAULT_JOBS="$(sysctl -n hw.ncpu)"
-else
+elif command -v getconf >/dev/null 2>&1; then
   DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+elif command -v nproc >/dev/null 2>&1; then
+  DEFAULT_JOBS="$(nproc 2>/dev/null || echo 4)"
+else
+  DEFAULT_JOBS=4
 fi
 CMAKE_JOBS="${CMAKE_JOBS:-${DEFAULT_JOBS}}"
 
