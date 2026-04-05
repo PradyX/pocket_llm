@@ -4,8 +4,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+HOST_OS="$(uname -s)"
 
-LLAMA_CPP_DIR="${LLAMA_CPP_DIR:-/Users/prady/FlutterProjects/llama.cpp}"
+if [[ "${HOST_OS}" == "Linux" ]]; then
+  DEFAULT_LLAMA_CPP_DIR="/home/prady/flutter-projects/llama.cpp"
+else
+  DEFAULT_LLAMA_CPP_DIR="/Users/prady/FlutterProjects/llama.cpp"
+fi
+
+LLAMA_CPP_DIR="${LLAMA_CPP_DIR:-${DEFAULT_LLAMA_CPP_DIR}}"
 ANDROID_PLATFORM="${ANDROID_PLATFORM:-24}"
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-13.0}"
 PUB_CACHE_DIR="${PUB_CACHE_DIR:-${HOME}/.pub-cache}"
@@ -13,7 +20,6 @@ LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-}"
 SKIP_GIT_CHECKOUT="${SKIP_GIT_CHECKOUT:-0}"
 SKIP_GIT_FETCH="${SKIP_GIT_FETCH:-0}"
 ALLOW_DIRTY_LLAMA_CPP="${ALLOW_DIRTY_LLAMA_CPP:-0}"
-HOST_OS="$(uname -s)"
 
 if [[ "${HOST_OS}" == "Darwin" ]] && command -v sysctl >/dev/null 2>&1; then
   DEFAULT_JOBS="$(sysctl -n hw.ncpu)"
@@ -85,7 +91,8 @@ With no explicit targets:
   - on Linux hosts: builds Linux only
 
 Defaults:
-  LLAMA_CPP_DIR=/Users/prady/FlutterProjects/llama.cpp
+  LLAMA_CPP_DIR=/Users/prady/FlutterProjects/llama.cpp   (macOS)
+  LLAMA_CPP_DIR=/home/prady/flutter-projects/llama.cpp   (Linux)
   ANDROID_PLATFORM=24
   IOS_DEPLOYMENT_TARGET=13.0
   CMAKE_JOBS=<host cpu count>
