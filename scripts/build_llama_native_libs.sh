@@ -378,12 +378,19 @@ copy_linux_outputs() {
   local build_dir="$1"
   local dest_dir="${PROJECT_DIR}/linux/lib"
   local -a libs=()
+  local lib_name
 
-  while IFS= read -r lib; do
-    libs+=("${lib}")
-  done < <(find "${build_dir}/bin" -maxdepth 1 -type f -name 'lib*.so' | sort)
+  for lib_name in "${MANAGED_LINUX_LIBS[@]}"; do
+    while IFS= read -r lib; do
+      [[ -n "${lib}" ]] || continue
+      libs+=("${lib}")
+      break
+    done < <(
+      find "${build_dir}" -maxdepth 8 \( -type f -o -type l \) -name "${lib_name}" | sort
+    )
+  done
 
-  [[ "${#libs[@]}" -gt 0 ]] || die "No Linux shared libraries found in ${build_dir}/bin"
+  [[ "${#libs[@]}" -gt 0 ]] || die "No Linux shared libraries found in ${build_dir}"
 
   remove_managed_libs "${dest_dir}" "${MANAGED_LINUX_LIBS[@]}"
   copy_files "${dest_dir}" "${libs[@]}"
