@@ -67,7 +67,7 @@ assets/tools/llmfit/linux/arm64/llmfit
 
 You can override the target triple with `LLMFIT_TARGET` if you already have the matching Rust toolchain installed.
 
-## 3. Run Or Build The App
+## 3. Run The App During Development
 
 ```bash
 cd /path/to/PocketLlama
@@ -76,10 +76,73 @@ flutter pub get
 flutter run -d linux
 ```
 
-Or build a distributable bundle:
+## 4. Build The Release Bundle
 
 ```bash
+cd /path/to/PocketLlama
 flutter build linux
+```
+
+Flutter writes a relocatable Linux bundle to one of:
+
+```text
+build/linux/x64/release/bundle/
+build/linux/arm64/release/bundle/
+```
+
+The executable inside the bundle is:
+
+```text
+bundle/pocket_llm
+```
+
+## 5. Create An Installable Archive
+
+To package the Linux bundle into a release archive:
+
+```bash
+cd /path/to/PocketLlama
+scripts/build_linux_archive.sh
+```
+
+That script:
+
+- runs `flutter build linux --release`
+- finds the generated Flutter bundle
+- creates a compressed archive next to the release bundle
+
+Expected output:
+
+```text
+build/linux/x64/release/pocket_llm-linux-x64.tar.gz
+build/linux/arm64/release/pocket_llm-linux-arm64.tar.gz
+```
+
+## 6. Install On A Linux Machine
+
+On the target machine, install the runtime libraries your distro needs. On Debian/Ubuntu, a typical runtime set is:
+
+```bash
+sudo apt install libgtk-3-0 libsecret-1-0 libjsoncpp1
+```
+
+Then extract the archive somewhere permanent, for example:
+
+```bash
+sudo mkdir -p /opt/pocket-llm
+sudo tar -xzf pocket_llm-linux-x64.tar.gz -C /opt/pocket-llm --strip-components=1
+```
+
+Run it with:
+
+```bash
+/opt/pocket-llm/pocket_llm
+```
+
+Optional convenience symlink:
+
+```bash
+sudo ln -sf /opt/pocket-llm/pocket_llm /usr/local/bin/pocket-llm
 ```
 
 ## Notes
@@ -87,3 +150,4 @@ flutter build linux
 - Linux notifications depend on a running Freedesktop notification daemon in the desktop session.
 - `flutter_secure_storage` uses the Linux keyring when available. PocketLlama falls back to app-local storage if the keyring backend is unavailable at runtime.
 - If you change the bundled native libraries, run `flutter clean` before retesting so Flutter rebuilds the Linux bundle cleanly.
+- The release archive is a relocatable bundle, not a `.deb`. If you want distro-native packaging later, use the generated bundle as the input to your packaging tool.

@@ -145,7 +145,7 @@ flutter run -d macos
 flutter run -d linux
 ```
 
-For Linux-specific native runtime and benchmark asset steps, see [scripts/BUILD_LINUX.md](scripts/BUILD_LINUX.md).
+For Linux-specific native runtime, benchmark asset, and installable release archive steps, see [scripts/BUILD_LINUX.md](scripts/BUILD_LINUX.md).
 
 ### If you change Riverpod annotations
 
