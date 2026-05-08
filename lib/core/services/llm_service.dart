@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
+import 'package:pocket_llm/core/utils/logger.dart';
 
 class LlmService {
   static const _defaultTemperature = 0.8;
@@ -51,8 +52,8 @@ class LlmService {
         mmprojPath != null && mmprojPath.trim().isNotEmpty
         ? mmprojPath.trim()
         : null;
-    print('[LlmService] Loading model: $modelPath');
-    print('[LlmService] Vision projector: $normalizedMmprojPath');
+    AppLogger.debug('[LlmService] Loading model: $modelPath');
+    AppLogger.debug('[LlmService] Vision projector: $normalizedMmprojPath');
 
     await _ensureLibraryConfigured(
       requiresVision: normalizedMmprojPath != null,
@@ -106,24 +107,26 @@ class LlmService {
 
     try {
       final file = File(modelPath);
-      print('[LlmService] File exists: ${file.existsSync()}');
+      AppLogger.debug('[LlmService] File exists: ${file.existsSync()}');
       if (file.existsSync()) {
         final len = file.lengthSync();
-        print('[LlmService] File size: $len bytes');
+        AppLogger.debug('[LlmService] File size: $len bytes');
         if (len >= 64) {
           final header = file.openSync().readSync(64);
           final hex = header
               .map((b) => b.toRadixString(16).padLeft(2, '0'))
               .join(' ');
-          print('[LlmService] File header (64B): $hex');
+          AppLogger.debug('[LlmService] File header (64B): $hex');
         }
       }
-      print('[LlmService] Llama.libraryPath: ${Llama.libraryPath}');
-      print('[LlmService] ModelParams: nGpuLayers=${modelParams.nGpuLayers}');
-      print(
+      AppLogger.debug('[LlmService] Llama.libraryPath: ${Llama.libraryPath}');
+      AppLogger.debug(
+        '[LlmService] ModelParams: nGpuLayers=${modelParams.nGpuLayers}',
+      );
+      AppLogger.debug(
         '[LlmService] ContextParams: nCtx=${contextParams.nCtx}, nBatch=${contextParams.nBatch}, nThreads=${contextParams.nThreads}',
       );
-      print('[LlmService] Initializing Llama instance...');
+      AppLogger.debug('[LlmService] Initializing Llama instance...');
       _llama = Llama(
         modelPath,
         modelParams: modelParams,
@@ -132,10 +135,9 @@ class LlmService {
         verbose: false,
         mmprojPath: normalizedMmprojPath,
       );
-      print('[LlmService] Llama initialized successfully.');
+      AppLogger.debug('[LlmService] Llama initialized successfully.');
     } catch (e, stack) {
-      print('[LlmService] Initialization failed: $e');
-      print('[LlmService] Stack trace: $stack');
+      AppLogger.error('[LlmService] Initialization failed', e, stack);
       final details = e.toString().toLowerCase();
       if (details.contains('unknown') ||
           details.contains('unsupported') ||
@@ -318,9 +320,11 @@ class LlmService {
     if (_libraryConfigured) return;
 
     final preferredPath = await _resolveMultimodalLibraryPath();
-    print('[LlmService] Preferred library path: $preferredPath');
+    AppLogger.debug('[LlmService] Preferred library path: $preferredPath');
     if (preferredPath != null && preferredPath.trim().isNotEmpty) {
-      print('[LlmService] Setting Llama.libraryPath to: $preferredPath');
+      AppLogger.debug(
+        '[LlmService] Setting Llama.libraryPath to: $preferredPath',
+      );
       Llama.libraryPath = preferredPath;
       _libraryConfigured = true;
       return;

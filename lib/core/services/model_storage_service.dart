@@ -64,18 +64,14 @@ class ModelStorageService {
   Future<String> getModelDir() async {
     final appDocDir = await getApplicationDocumentsDirectory();
     final modelDir = Directory(p.join(appDocDir.path, 'models'));
-    if (!modelDir.existsSync()) {
-      modelDir.createSync(recursive: true);
-    }
+    await modelDir.create(recursive: true);
     return modelDir.path;
   }
 
   Future<String> getAttachmentsDir() async {
     final appDocDir = await getApplicationDocumentsDirectory();
     final attachmentsDir = Directory(p.join(appDocDir.path, 'attachments'));
-    if (!attachmentsDir.existsSync()) {
-      attachmentsDir.createSync(recursive: true);
-    }
+    await attachmentsDir.create(recursive: true);
     return attachmentsDir.path;
   }
 
@@ -86,15 +82,13 @@ class ModelStorageService {
     String? preferredFileName,
   }) async {
     final sourceFile = File(sourcePath);
-    if (!sourceFile.existsSync()) {
+    if (!await sourceFile.exists()) {
       throw Exception('Selected image could not be found.');
     }
 
     final attachmentsDir = await getAttachmentsDir();
     final modelDir = Directory(p.join(attachmentsDir, modelId));
-    if (!modelDir.existsSync()) {
-      modelDir.createSync(recursive: true);
-    }
+    await modelDir.create(recursive: true);
 
     final originalName = (preferredFileName ?? p.basename(sourcePath)).trim();
     final normalizedName = originalName.isEmpty ? 'image' : originalName;
@@ -131,17 +125,17 @@ class ModelStorageService {
   Future<bool> isModelDownloaded(String fileName) async {
     final dir = await getModelDir();
     final file = File(p.join(dir, fileName));
-    if (!file.existsSync()) return false;
+    if (!await file.exists()) return false;
 
     // Presence of metadata means chunked download is incomplete/resumable.
     final metadataFile = File('${file.path}.json');
-    if (metadataFile.existsSync()) return false;
+    if (await metadataFile.exists()) return false;
 
     // Validate GGUF magic bytes to avoid marking HTML/error files as models.
-    if (file.lengthSync() < 4) return false;
-    final raf = file.openSync(mode: FileMode.read);
+    if (await file.length() < 4) return false;
+    final raf = await file.open(mode: FileMode.read);
     try {
-      final magic = raf.readSync(4);
+      final magic = await raf.read(4);
       if (magic.length != 4 ||
           magic[0] != 0x47 ||
           magic[1] != 0x47 ||
@@ -150,7 +144,7 @@ class ModelStorageService {
         return false;
       }
     } finally {
-      raf.closeSync();
+      await raf.close();
     }
 
     return true;
@@ -159,8 +153,8 @@ class ModelStorageService {
   Future<int> getLocalFileSize(String fileName) async {
     final dir = await getModelDir();
     final file = File(p.join(dir, fileName));
-    if (!file.existsSync()) return 0;
-    return file.lengthSync();
+    if (!await file.exists()) return 0;
+    return file.length();
   }
 
   Future<int?> getRemoteFileSize(String url, {CancelToken? cancelToken}) async {
