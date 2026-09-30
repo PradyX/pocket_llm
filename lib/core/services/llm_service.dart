@@ -14,7 +14,11 @@ class LlmService {
 
   final PlatformRuntimePathsService? _platformRuntimePathsService;
 
-  Llama? _llama;
+  LlamaEngine? _llama;
+  EngineSession? _session;
+  StreamIterator<GenerationEvent>? _generation;
+  String? _libraryPath;
+  int _nPredict = -1;
   String? _loadedModelPath;
   bool _isGenerating = false;
   bool _stopRequested = false;
@@ -76,67 +80,49 @@ class LlmService {
     _stopRequested = false;
     _isGenerating = false;
 
-    final modelParams = ModelParams();
     final isVisionLoad = normalizedMmprojPath != null;
-    final defaultGpuLayers = Platform.isIOS
-        ? 32
-        : Platform.isAndroid
-        ? 0
-        // Cap GPU layers for vision on desktop to avoid Metal buffer overflow.
-        : isVisionLoad
-        ? 24
-        : 32;
-    modelParams.nGpuLayers = nGpuLayers ?? defaultGpuLayers;
-
-    final contextParams = ContextParams();
-    contextParams.nCtx = resolvedNCtx;
-    if (nBatch != null) {
-      final resolvedNBatch = math.min(nBatch, resolvedNCtx);
-      contextParams.nBatch = resolvedNBatch;
-      contextParams.nUbatch = resolvedNBatch;
-    }
-    contextParams.nThreads = nThreads ?? defaultThreads;
-    contextParams.nThreadsBatch = nThreadsBatch ?? defaultThreads;
-    contextParams.offloadKqv = offloadKqv ?? !isMobile;
-    contextParams.nPredict = nPredict ?? -1;
-
-    final samplerParams = SamplerParams();
-    if (temperature != null) samplerParams.temp = temperature;
-    if (topP != null) samplerParams.topP = topP;
-    if (topK != null) samplerParams.topK = topK;
+    final modelParams = ModelParams(
+      path: modelPath,
+      gpuLayers:
+          nGpuLayers ??
+          (Platform.isAndroid
+              ? 0
+              : isVisionLoad
+              ? 24
+              : 32),
+    );
+    final resolvedNBatch = math.min(nBatch ?? 512, resolvedNCtx);
+    final contextParams = ContextParams(
+      nCtx: resolvedNCtx,
+      nBatch: resolvedNBatch,
+      nUbatch: resolvedNBatch,
+      nThreads: nThreads ?? defaultThreads,
+      nThreadsBatch: nThreadsBatch ?? defaultThreads,
+      offloadKqv: offloadKqv ?? !isMobile,
+    );
+    _nPredict = nPredict ?? -1;
+    final samplerParams = SamplerParams(
+      temperature: temperature ?? _defaultTemperature,
+      topP: topP ?? _defaultTopP,
+      topK: topK ?? _defaultTopK,
+    );
 
     try {
-      final file = File(modelPath);
-      AppLogger.debug('[LlmService] File exists: ${file.existsSync()}');
-      if (file.existsSync()) {
-        final len = file.lengthSync();
-        AppLogger.debug('[LlmService] File size: $len bytes');
-        if (len >= 64) {
-          final header = file.openSync().readSync(64);
-          final hex = header
-              .map((b) => b.toRadixString(16).padLeft(2, '0'))
-              .join(' ');
-          AppLogger.debug('[LlmService] File header (64B): $hex');
-        }
-      }
-      AppLogger.debug('[LlmService] Llama.libraryPath: ${Llama.libraryPath}');
-      AppLogger.debug(
-        '[LlmService] ModelParams: nGpuLayers=${modelParams.nGpuLayers}',
-      );
-      AppLogger.debug(
-        '[LlmService] ContextParams: nCtx=${contextParams.nCtx}, nBatch=${contextParams.nBatch}, nThreads=${contextParams.nThreads}',
-      );
-      AppLogger.debug('[LlmService] Initializing Llama instance...');
-      _llama = Llama(
-        modelPath,
+      AppLogger.debug('[LlmService] Native library: $_libraryPath');
+      _llama = await LlamaEngine.spawn(
+        libraryPath: _libraryPath ?? LlamaLibrary.defaultFileName(),
         modelParams: modelParams,
         contextParams: contextParams,
-        samplerParams: samplerParams,
-        verbose: false,
-        mmprojPath: normalizedMmprojPath,
+        multimodalParams: normalizedMmprojPath == null
+            ? null
+            : MultimodalParams(
+                mmprojPath: normalizedMmprojPath,
+                mediaMarker: '<image>',
+              ),
       );
-      AppLogger.debug('[LlmService] Llama initialized successfully.');
+      _session = await _llama!.createSession();
     } catch (e, stack) {
+      await unloadModel();
       AppLogger.error('[LlmService] Initialization failed', e, stack);
       final details = e.toString().toLowerCase();
       if (details.contains('unknown') ||
@@ -155,14 +141,18 @@ class LlmService {
     _loadedModelPath = modelPath;
     _configuredNCtx = contextParams.nCtx;
     _configuredNBatch = contextParams.nBatch;
-    _configuredTemperature = samplerParams.temp;
+    _configuredTemperature = samplerParams.temperature;
     _configuredTopP = samplerParams.topP;
     _configuredTopK = samplerParams.topK;
     _configuredMmprojPath = normalizedMmprojPath;
   }
 
   Future<void> unloadModel() async {
-    _llama?.dispose();
+    await _generation?.cancel();
+    _generation = null;
+    await _session?.dispose();
+    _session = null;
+    await _llama?.dispose();
     _llama = null;
     _loadedModelPath = null;
     _isGenerating = false;
@@ -205,6 +195,7 @@ class LlmService {
         (resolvedTopP - _configuredTopP).abs() > 0.001 ||
         normalizedMmprojPath != _configuredMmprojPath;
     if (isLoaded && _loadedModelPath == modelPath && !requiresReloadForConfig) {
+      _nPredict = nPredict ?? _nPredict;
       return;
     }
 
@@ -224,89 +215,66 @@ class LlmService {
     );
   }
 
-  Stream<String> generateResponse(String prompt, {int? maxTokens}) async* {
-    if (_llama == null) {
-      throw Exception('Model not loaded');
-    }
-
-    _stopRequested = false;
-    _isGenerating = true;
-    var generatedTokenCount = 0;
-
-    final llama = _llama!;
-    llama.clear();
-    llama.setPrompt(prompt);
-
-    try {
-      while (true) {
-        if (_stopRequested) break;
-
-        final (token, isDone, contextLimitReached) = llama.getNextWithStatus();
-        if (token.isNotEmpty) {
-          yield token;
-          generatedTokenCount++;
-        }
-
-        if (maxTokens != null && generatedTokenCount >= maxTokens) break;
-        if (isDone || contextLimitReached) break;
-
-        if (generatedTokenCount % 8 == 0) {
-          await Future<void>.delayed(Duration.zero);
-        }
-      }
-    } finally {
-      _isGenerating = false;
-    }
-  }
+  Stream<String> generateResponse(String prompt, {int? maxTokens}) =>
+      _generate(prompt, maxTokens: maxTokens);
 
   Stream<String> generateVisionResponse(
     String prompt, {
     required List<String> imagePaths,
     int? maxTokens,
-  }) async* {
-    if (_llama == null) {
-      throw Exception('Model not loaded');
-    }
+  }) {
     if (imagePaths.isEmpty) {
       throw Exception('No image supplied for vision generation.');
     }
-
-    final inputs = imagePaths
+    final media = imagePaths
         .map((path) {
-          final file = File(path);
-          if (!file.existsSync()) {
+          if (!File(path).existsSync()) {
             throw Exception('Attached image could not be found.');
           }
-          return LlamaImage.fromFile(file);
+          return LlamaMedia.imageFile(path);
         })
         .toList(growable: false);
+    return _generate(prompt, maxTokens: maxTokens, media: media);
+  }
 
+  Stream<String> _generate(
+    String prompt, {
+    int? maxTokens,
+    List<LlamaMedia> media = const [],
+  }) async* {
+    final session = _session;
+    if (session == null) throw Exception('Model not loaded');
+    if (_isGenerating) throw StateError('Generation already in progress');
     _stopRequested = false;
     _isGenerating = true;
-    var generatedTokenCount = 0;
-
     try {
-      await for (final token in _llama!.generateWithMedia(
-        prompt,
-        inputs: inputs,
-      )) {
+      await session.clear();
+      if (_stopRequested) return;
+      final generation = StreamIterator(
+        session.generate(
+          prompt: prompt,
+          addSpecial: true,
+          media: media,
+          sampler: SamplerParams(
+            temperature: _configuredTemperature,
+            topP: _configuredTopP,
+            topK: _configuredTopK,
+          ),
+          // The new API requires a non-negative limit; context capacity still
+          // bounds requests that previously used nPredict = -1.
+          maxTokens:
+              maxTokens ?? (_nPredict >= 0 ? _nPredict : _configuredNCtx),
+        ),
+      );
+      _generation = generation;
+      while (!_stopRequested && await generation.moveNext()) {
+        final event = generation.current;
         if (_stopRequested) break;
-
-        if (token.isNotEmpty) {
-          yield token;
-          generatedTokenCount++;
-        }
-
-        if (maxTokens != null && generatedTokenCount >= maxTokens) {
-          _stopRequested = true;
-          break;
-        }
-
-        if (generatedTokenCount % 8 == 0) {
-          await Future<void>.delayed(Duration.zero);
-        }
+        if (event is TokenEvent && event.text.isNotEmpty) yield event.text;
       }
     } finally {
+      await _generation?.cancel();
+      _generation = null;
       _isGenerating = false;
     }
   }
@@ -314,18 +282,22 @@ class LlmService {
   void stopGeneration() {
     if (!_isGenerating) return;
     _stopRequested = true;
+    unawaited(_generation?.cancel());
   }
 
   Future<void> _ensureLibraryConfigured({required bool requiresVision}) async {
-    if (_libraryConfigured) return;
+    if (_libraryConfigured && (!requiresVision || _libraryPath != null)) return;
 
     final preferredPath = await _resolveMultimodalLibraryPath();
     AppLogger.debug('[LlmService] Preferred library path: $preferredPath');
     if (preferredPath != null && preferredPath.trim().isNotEmpty) {
       AppLogger.debug(
-        '[LlmService] Setting Llama.libraryPath to: $preferredPath',
+        '[LlmService] Setting native library path to: $preferredPath',
       );
-      Llama.libraryPath = preferredPath;
+      _libraryPath = p.join(
+        p.dirname(preferredPath),
+        Platform.isIOS || Platform.isMacOS ? 'libllama.dylib' : 'libllama.so',
+      );
       _libraryConfigured = true;
       return;
     }

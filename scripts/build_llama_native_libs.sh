@@ -15,14 +15,15 @@ fi
 LLAMA_CPP_DIR="${LLAMA_CPP_DIR:-${DEFAULT_LLAMA_CPP_DIR}}"
 ANDROID_PLATFORM="${ANDROID_PLATFORM:-24}"
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-13.0}"
-PUB_CACHE_DIR="${PUB_CACHE_DIR:-${HOME}/.pub-cache}"
+PUB_CACHE_DIR="${PUB_CACHE_DIR:-${PUB_CACHE:-${HOME}/.pub-cache}}"
+BUILD_ROOT="${BUILD_ROOT:-${PROJECT_DIR}/build/llama-native}"
 LLAMA_CPP_COMMIT="${LLAMA_CPP_COMMIT:-}"
 SKIP_GIT_CHECKOUT="${SKIP_GIT_CHECKOUT:-0}"
 SKIP_GIT_FETCH="${SKIP_GIT_FETCH:-0}"
 ALLOW_DIRTY_LLAMA_CPP="${ALLOW_DIRTY_LLAMA_CPP:-0}"
 
 if [[ "${HOST_OS}" == "Darwin" ]] && command -v sysctl >/dev/null 2>&1; then
-  DEFAULT_JOBS="$(sysctl -n hw.ncpu)"
+  DEFAULT_JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 elif command -v getconf >/dev/null 2>&1; then
   DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 elif command -v nproc >/dev/null 2>&1; then
@@ -39,14 +40,6 @@ ANDROID_ABIS=(
 )
 
 MANAGED_ANDROID_LIBS=(
-  "libggml.so"
-  "libggml-base.so"
-  "libggml-cpu.so"
-  "libllama.so"
-  "libmtmd.so"
-)
-
-MANAGED_LINUX_LIBS=(
   "libggml.so"
   "libggml-base.so"
   "libggml-cpu.so"
@@ -96,12 +89,13 @@ Defaults:
   ANDROID_PLATFORM=24
   IOS_DEPLOYMENT_TARGET=13.0
   CMAKE_JOBS=<host cpu count>
-  PUB_CACHE_DIR=$HOME/.pub-cache
+  PUB_CACHE_DIR=$PUB_CACHE or $HOME/.pub-cache
+  BUILD_ROOT=<project>/build/llama-native
 
 Optional overrides:
   LLAMA_CPP_COMMIT=<commit-or-tag>    Force a specific llama.cpp checkout target
   SKIP_GIT_FETCH=1                    Do not fetch latest refs before checkout
-  SKIP_GIT_CHECKOUT=1                 Build the current checkout without switching
+  SKIP_GIT_CHECKOUT=1                 Verify and build the pinned checkout without switching
   ALLOW_DIRTY_LLAMA_CPP=1             Allow building from a dirty llama.cpp repo
 
 Examples:
@@ -192,6 +186,15 @@ resolve_target_llama_cpp_commit() {
 
   [[ -f "${package_pubspec}" ]] || die "Missing package pubspec: ${package_pubspec}"
 
+  # Rewrite releases publish their native ABI pin in generated version.dart.
+  if [[ -f "${package_dir}/lib/src/version.dart" ]]; then
+    target_commit="$(sed -n '/llamaCppCommit =/{n;s/[^0-9a-f]//g;p;}' "${package_dir}/lib/src/version.dart")"
+    if [[ "${target_commit}" =~ ^[0-9a-f]{40}$ ]]; then
+      printf '%s\n' "${target_commit}"
+      return
+    fi
+  fi
+
   target_commit="$(
     sed -nE 's/^version:[[:space:]]*[^#]+#[[:space:]]*([0-9a-f]{7,40})[[:space:]]*$/\1/p' "${package_pubspec}" \
       | head -n 1
@@ -218,6 +221,7 @@ sync_llama_cpp_checkout() {
   fi
 
   if [[ "${SKIP_GIT_CHECKOUT}" == "1" ]]; then
+    [[ "${current_commit}" == "$(git -C "${LLAMA_CPP_DIR}" rev-parse "${target_ref}^{commit}")" ]] || die "Current checkout does not match the Dart binding ABI pin ${target_ref}."
     log "Skipping git checkout. Current llama.cpp commit: ${current_commit}${current_tag:+ (${current_tag})}"
     return
   fi
@@ -300,7 +304,7 @@ set_linux_rpath_if_possible() {
 
   while IFS= read -r -d '' lib; do
     patchelf --set-rpath '$ORIGIN' "${lib}" >/dev/null 2>&1 || true
-  done < <(find "${dest_dir}" -maxdepth 1 -type f -name 'lib*.so' -print0)
+  done < <(find "${dest_dir}" -maxdepth 1 -type f -name 'lib*.so*' -print0)
 }
 
 normalize_apple_install_names() {
@@ -335,6 +339,29 @@ collect_apple_libs() {
   done
 }
 
+# Validate a complete runtime before removing any previously installed files.
+validate_runtime_outputs() {
+  local extension="$1"
+  shift
+  local name src found
+  for name in ggml ggml-base ggml-cpu llama mtmd; do
+    found=0
+    for src in "$@"; do
+      if [[ "$(basename "${src}")" == "lib${name}.${extension}" && -s "${src}" ]]; then
+        found=1
+        break
+      fi
+    done
+    [[ "${found}" -eq 1 ]] || die "Build did not produce lib${name}.${extension}; existing libraries retained."
+  done
+}
+
+write_runtime_version() {
+  printf 'llama_cpp_dart=%s\nllama_cpp=%s\n' \
+    "$(resolve_llama_cpp_dart_version)" \
+    "$(git -C "${LLAMA_CPP_DIR}" rev-parse HEAD)" > "$1/llama-runtime.version"
+}
+
 copy_android_outputs() {
   local abi="$1"
   local build_dir="$2"
@@ -347,8 +374,10 @@ copy_android_outputs() {
 
   [[ "${#libs[@]}" -gt 0 ]] || die "No Android shared libraries found for ${abi} in ${build_dir}/bin"
 
+  validate_runtime_outputs so "${libs[@]}"
   remove_managed_libs "${dest_dir}" "${MANAGED_ANDROID_LIBS[@]}"
   copy_files "${dest_dir}" "${libs[@]}"
+  write_runtime_version "${dest_dir}"
 
   if [[ ! -f "${dest_dir}/libmtmd.so" ]]; then
     warn "libmtmd.so was not produced for ${abi}. This usually means the checkout/config is too old for the current runtime."
@@ -367,8 +396,10 @@ copy_apple_outputs() {
 
   [[ "${#libs[@]}" -gt 0 ]] || die "No Apple dylibs found under ${build_dir}/bin"
 
+  validate_runtime_outputs dylib "${libs[@]}"
   remove_managed_apple_libs "${dest_dir}"
   copy_files "${dest_dir}" "${libs[@]}"
+  write_runtime_version "${dest_dir}"
   normalize_apple_install_names "${dest_dir}"
   sign_apple_libs_if_possible "${dest_dir}"
 
@@ -376,7 +407,7 @@ copy_apple_outputs() {
     warn "libmtmd.dylib was not produced in ${build_dir}. This usually means the checkout/config is too old for the current runtime."
   fi
 
-  if [[ ! -f "${dest_dir}/libggml-blas.dylib" ]]; then
+  if [[ "${dest_dir}" != "${PROJECT_DIR}/ios/Frameworks" && ! -f "${dest_dir}/libggml-blas.dylib" ]]; then
     warn "libggml-blas.dylib is missing in ${dest_dir}. Apple builds in this repo expect it."
   fi
 }
@@ -385,22 +416,19 @@ copy_linux_outputs() {
   local build_dir="$1"
   local dest_dir="${PROJECT_DIR}/linux/lib"
   local -a libs=()
-  local lib_name
 
-  for lib_name in "${MANAGED_LINUX_LIBS[@]}"; do
-    while IFS= read -r lib; do
-      [[ -n "${lib}" ]] || continue
-      libs+=("${lib}")
-      break
-    done < <(
-      find "${build_dir}" -maxdepth 8 \( -type f -o -type l \) -name "${lib_name}" | sort
-    )
-  done
+  # Preserve versioned SONAME files as well as the unversioned FFI entrypoints.
+  while IFS= read -r lib; do
+    libs+=("${lib}")
+  done < <(find "${build_dir}/bin" -maxdepth 1 \( -type f -o -type l \) -name 'lib*.so*' | sort)
 
   [[ "${#libs[@]}" -gt 0 ]] || die "No Linux shared libraries found in ${build_dir}"
 
-  remove_managed_libs "${dest_dir}" "${MANAGED_LINUX_LIBS[@]}"
+  validate_runtime_outputs so "${libs[@]}"
+  mkdir -p "${dest_dir}"
+  rm -f "${dest_dir}"/libggml*.so* "${dest_dir}"/libllama.so* "${dest_dir}"/libmtmd.so*
   copy_files "${dest_dir}" "${libs[@]}"
+  write_runtime_version "${dest_dir}"
   set_linux_rpath_if_possible "${dest_dir}"
 
   if [[ ! -f "${dest_dir}/libmtmd.so" ]]; then
@@ -411,22 +439,23 @@ copy_linux_outputs() {
 build_android_abi() {
   local abi="$1"
   local ndk_root="$2"
-  local build_dir="${LLAMA_CPP_DIR}/build-pocketllama-android-${abi}"
+  local build_dir="${BUILD_ROOT}/android-${abi}"
   local -a cmake_args=(
     -S "${LLAMA_CPP_DIR}"
     -B "${build_dir}"
     -DCMAKE_TOOLCHAIN_FILE="${ndk_root}/build/cmake/android.toolchain.cmake"
     -DANDROID_ABI="${abi}"
     -DANDROID_PLATFORM="android-${ANDROID_PLATFORM}"
-    -DANDROID_STL=c++_shared
+    -DANDROID_STL=c++_static
+    -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON
     -DBUILD_SHARED_LIBS=ON
     -DCMAKE_BUILD_TYPE=Release
     -DLLAMA_BUILD_TESTS=OFF
     -DLLAMA_BUILD_EXAMPLES=OFF
     -DLLAMA_BUILD_SERVER=OFF
     -DLLAMA_BUILD_TOOLS=ON
-    -DLLAMA_NATIVE=OFF
-    -DLLAMA_CURL=OFF
+    -DGGML_NATIVE=OFF
+    -DLLAMA_OPENSSL=OFF
     -DGGML_OPENMP=OFF
   )
 
@@ -464,7 +493,7 @@ build_android() {
 }
 
 build_linux() {
-  local build_dir="${LLAMA_CPP_DIR}/build-pocketllama-linux"
+  local build_dir="${BUILD_ROOT}/linux"
 
   require_command cmake
 
@@ -483,8 +512,8 @@ build_linux() {
     -DLLAMA_BUILD_EXAMPLES=OFF \
     -DLLAMA_BUILD_SERVER=OFF \
     -DLLAMA_BUILD_TOOLS=ON \
-    -DLLAMA_NATIVE=OFF \
-    -DLLAMA_CURL=OFF \
+    -DGGML_NATIVE=OFF \
+    -DLLAMA_OPENSSL=OFF \
     -DGGML_OPENMP=OFF \
     -DGGML_BLAS=OFF \
     -DGGML_VULKAN=OFF
@@ -497,7 +526,7 @@ build_linux() {
 }
 
 build_macos() {
-  local build_dir="${LLAMA_CPP_DIR}/build-pocketllama-macos"
+  local build_dir="${BUILD_ROOT}/macos"
 
   require_command cmake
 
@@ -515,8 +544,8 @@ build_macos() {
     -DLLAMA_BUILD_TOOLS=ON \
     -DGGML_METAL=ON \
     -DGGML_METAL_EMBED_LIBRARY=ON \
-    -DLLAMA_NATIVE=OFF \
-    -DLLAMA_CURL=OFF
+    -DGGML_NATIVE=OFF \
+    -DLLAMA_OPENSSL=OFF
 
   log "Building macOS"
   cmake --build "${build_dir}" --parallel "${CMAKE_JOBS}" --target llama mtmd
@@ -530,7 +559,7 @@ build_ios_variant() {
   local sysroot="$2"
   local dest_dir="$3"
   local metal_mode="$4"
-  local build_dir="${LLAMA_CPP_DIR}/build-pocketllama-ios-${variant_name}"
+  local build_dir="${BUILD_ROOT}/ios-${variant_name}"
   local -a cmake_args=(
     -S "${LLAMA_CPP_DIR}"
     -B "${build_dir}"
@@ -544,8 +573,8 @@ build_ios_variant() {
     -DLLAMA_BUILD_EXAMPLES=OFF
     -DLLAMA_BUILD_SERVER=OFF
     -DLLAMA_BUILD_TOOLS=ON
-    -DLLAMA_NATIVE=OFF
-    -DLLAMA_CURL=OFF
+    -DGGML_NATIVE=OFF
+    -DLLAMA_OPENSSL=OFF
     -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO
     -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
     -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=-
@@ -615,11 +644,6 @@ main() {
     exit 0
   fi
 
-  assert_paths
-  local target_commit
-  target_commit="$(resolve_target_llama_cpp_commit)"
-  log "Target llama.cpp ref for current Flutter dependency: ${target_commit}"
-  sync_llama_cpp_checkout "${target_commit}"
 
   local build_android_requested=0
   local build_linux_requested=0
@@ -680,6 +704,12 @@ main() {
       esac
     done
   fi
+
+  assert_paths
+  local target_commit
+  target_commit="$(resolve_target_llama_cpp_commit)"
+  log "Target llama.cpp ref for current Flutter dependency: ${target_commit}"
+  sync_llama_cpp_checkout "${target_commit}"
 
   if [[ "${build_android_requested}" -eq 1 ]]; then
     build_android

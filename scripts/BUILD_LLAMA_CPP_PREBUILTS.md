@@ -1,286 +1,112 @@
-# Building PocketLlama Llama.cpp Prebuilts
+# Building PocketLlama llama.cpp libraries
 
-PocketLlama currently depends on:
+The app pins `llama_cpp_dart: 0.9.0-dev.10` and its matching llama.cpp revision:
 
-```yaml
-llama_cpp_dart: 0.2.2
+```
+afeebe103bd99cda8f5dfaefcabadf890db7fda7 (b10182)
 ```
 
-For this binding version, the matching `llama.cpp` revision is:
+This prerelease is the newest binding compatible with the project's Flutter
+3.38.9 SDK. `0.9.0-dev.12` requires Flutter 3.44 and uses the same native pin.
+The 0.9 API is a rewrite: PocketLlama uses `LlamaEngine` worker isolates,
+`EngineSession`, streaming token events, and `LlamaMedia` for images.
 
-```text
-4ffc47cb2001e7d523f9ff525335bbe34b1a2858
-```
+The pinned native source includes `qwen35`, `qwen35moe`, and `qwen3next`
+architectures. Individual GGUF files still need compatible quantization,
+adequate memory, and (for vision) a matching projector.
 
-Rules:
+## Build
 
-- Do not mix `0.1.x`-era prebuilts with `llama_cpp_dart 0.2.2`.
-- Do not copy only `libllama` and leave older `libmtmd` / `ggml` libraries in place.
-- Replace each platform's full library set together.
-
-## What PocketLlama Loads
-
-PocketLlama resolves:
-
-- Android: `libmtmd.so`
-- Linux (when bundled): `libmtmd.so`
-- Apple platforms: `libmtmd.dylib`
-
-Those libraries then depend on the matching `llama` and `ggml` libraries from the same build.
-
-Today the project already contains:
-
-- Android app-local JNI libs under `android/app/src/main/jniLibs/`
-- Linux desktop bundle libs under `linux/lib/` after you build them
-- macOS dylibs under `macos/Runner/Frameworks/`
-
-So the safest update flow is:
-
-1. Build a matching runtime set.
-2. Replace the whole set for the target platform.
-3. Run `flutter clean` before testing.
-
-## Source Checkout To Build From
-
-Build from a checkout of the `llama_cpp_dart` repository that matches the Dart package version you are using.
-
-At minimum, verify:
-
-- the checkout's `pubspec.yaml` says `version: 0.2.2`
-- its `src/llama.cpp` submodule is on `4ffc47cb2001e7d523f9ff525335bbe34b1a2858`
-
-Example setup:
+Run `flutter pub get` first. The script resolves the locked package in the pub
+cache and reads its `lib/src/version.dart` native ABI pin. It also supports the
+older package's pubspec comment format. Never update native libraries alone:
+FFI structure layouts and symbols must match the Dart package.
 
 ```bash
-export LLAMA_CPP_DART_SRC="$HOME/src/llama_cpp_dart"
-export POCKET_LLAMA="/Users/prady/FlutterProjects/PocketLlama"
+# macOS: Android, universal macOS, arm64 iOS device and simulator
+scripts/build_llama_native_libs.sh all
 
-cd "$LLAMA_CPP_DART_SRC"
-git submodule update --init --recursive
-git -C src/llama.cpp checkout 4ffc47cb2001e7d523f9ff525335bbe34b1a2858
+# Individual targets
+scripts/build_llama_native_libs.sh android
+scripts/build_llama_native_libs.sh macos
+scripts/build_llama_native_libs.sh ios
+
+# Run on a Linux host
+LLAMA_CPP_DIR=/path/to/llama.cpp scripts/build_llama_native_libs.sh linux
 ```
 
-If your clone is older and does not match `0.2.2`, update the wrapper checkout first before building.
+Default source locations are `/Users/prady/FlutterProjects/llama.cpp` on macOS
+and `/home/prady/flutter-projects/llama.cpp` on Linux. Override with
+`LLAMA_CPP_DIR`. Build products live in `build/llama-native/` (override with
+`BUILD_ROOT`). The source checkout must be clean. The script fetches and checks
+out the required revision; use `SKIP_GIT_FETCH=1` if it is already available.
+`SKIP_GIT_CHECKOUT=1` still verifies that HEAD matches the required ABI pin.
 
-## Android
+Android requires an NDK (`ANDROID_NDK_ROOT` can select it); the script builds
+arm64-v8a, armeabi-v7a, and x86_64. It statically links the C++ runtime and enables
+flexible page sizes. PocketLlama manages JNI libraries itself; do not add a
+second AAR containing a different llama runtime.
 
-### Important Differences From The Old Doc
+Apple builds require Xcode and the appropriate SDKs. macOS builds arm64 and
+x86_64; iOS builds arm64 device and arm64 simulator separately. Metal is enabled
+for macOS/device and disabled for the simulator.
 
-- The old doc cloned bare `llama.cpp`. That is not enough for the current Android build.
-- `llama_cpp_dart 0.2.2` defines the Android `mtmd` shared library in the wrapper CMake, not in PocketLlama.
-- The current `0.2.2` Android build flow is aligned around `arm64-v8a` and `x86_64`.
-- The package ships OpenCL helper libs only for `arm64-v8a` and `x86_64`, not `armeabi-v7a`.
+## Installed outputs
 
-If you still keep `armeabi-v7a` in PocketLlama, treat it as a separate legacy path and test it independently. Do not assume the `0.2.2` OpenCL-enabled flow covers it.
+| Target | Destination |
+| --- | --- |
+| Android | `android/app/src/main/jniLibs/<abi>/` |
+| macOS | `macos/Runner/Frameworks/` |
+| iOS device | `ios/` |
+| iOS simulator | `ios/Frameworks/` |
+| Linux | `linux/lib/` |
 
-### NDK
+Always replace the entire `libllama`, `libmtmd`, and `libggml*` family together.
+The app passes the bundled **libllama** path to the engine; the new binding opens
+sibling **libmtmd** for multimodal symbols. The existing `POCKET_LLM_MTMD_PATH`
+override still selects the containing runtime directory.
 
-The upstream `llama_cpp_dart 0.2.2` Android library build file asks for:
+Native binaries are gitignored and must be rebuilt on each build machine.
+Linux binaries must be rebuilt on Linux before packaging a Linux release.
+After rebuilding, restart the app completely so no old native library remains
+loaded. Run `flutter test` and exercise text generation, Stop, model switching,
+and image generation with a matching projector on each target device.
 
-```text
-29.0.13846066
-```
-
-On this machine, the installed NDKs include:
-
-```text
-25.1.8937393
-28.2.13676358
-29.0.14206865
-```
-
-Before building, do one of these:
-
-- install NDK `29.0.13846066`, or
-- temporarily change the clone's `android/llamalib/build.gradle` to `29.0.14206865`
-
-Using a 29.x NDK is the right direction for this stack.
-
-### Build The Android AAR
+For a desktop ABI/tokenizer smoke test (no model weights required):
 
 ```bash
-cd "$LLAMA_CPP_DART_SRC"
-./android/build-android-aar.sh
+dart run tool/smoke_llama_runtime.dart \
+  "$PWD/macos/Runner/Frameworks/libllama.dylib" \
+  "$LLAMA_CPP_DIR/models/ggml-vocab-qwen35.gguf"
 ```
 
-Expected output:
+Pass a full model GGUF as a third argument to also test worker-isolate
+inference and repeated session reset. This does not validate image inference;
+that requires a full vision model and its matching projector.
 
-```text
-$LLAMA_CPP_DART_SRC/android/llamalib/build/outputs/aar/llamalib-release.aar
-```
+## Linux release artifact alternative
 
-### Extract The Native Libraries
+On a non-Linux build machine, the exact upstream release also provides
+[Ubuntu x64 binaries](https://github.com/ggml-org/llama.cpp/releases/download/b10182/llama-b10182-bin-ubuntu-x64.tar.gz).
+The archive SHA-256 is
+`9a087d633cc03a8e93f2d689bc80adbfb680efca025bc9a328d5e186d528757a`.
+The current local Linux bundle was refreshed from that verified archive.
+
+Copy the complete `libllama.so*`, `libmtmd.so*`, `libggml.so*`,
+`libggml-base.so*`, and `libggml-cpu-*.so` families together, preserving the
+relative SONAME symlinks. This release loads CPU variants dynamically instead
+of using a single `libggml-cpu.so`. Its libraries use `$ORIGIN` to find siblings.
+It requires glibc 2.34 or newer plus the C++/OpenMP system runtimes; build from
+source on your target Linux distribution when broader compatibility is needed.
+Linux execution must still be tested on Linux.
+
+To exercise PocketLlama's service itself with local native libraries:
 
 ```bash
-export AAR="$LLAMA_CPP_DART_SRC/android/llamalib/build/outputs/aar/llamalib-release.aar"
-export AAR_UNPACK="$LLAMA_CPP_DART_SRC/android/aar-unpacked"
-
-rm -rf "$AAR_UNPACK"
-mkdir -p "$AAR_UNPACK"
-unzip -o "$AAR" -d "$AAR_UNPACK"
-find "$AAR_UNPACK/jni" -maxdepth 2 -type f | sort
+POCKET_LLM_TEST_MODEL=/absolute/path/to/model.gguf \
+POCKET_LLM_MTMD_PATH="$PWD/macos/Runner/Frameworks/libmtmd.dylib" \
+flutter test test/llm_service_native_test.dart
 ```
 
-You should see ABI folders containing a matching set of `.so` files. The important ones for PocketLlama are:
-
-- `libmtmd.so`
-- `libllama.so`
-- `libggml.so`
-- `libggml-base.so`
-- `libggml-cpu.so`
-
-### Copy Into PocketLlama
-
-```bash
-mkdir -p "$POCKET_LLAMA/android/app/src/main/jniLibs/arm64-v8a"
-mkdir -p "$POCKET_LLAMA/android/app/src/main/jniLibs/x86_64"
-
-rsync -av "$AAR_UNPACK/jni/arm64-v8a/" "$POCKET_LLAMA/android/app/src/main/jniLibs/arm64-v8a/"
-rsync -av "$AAR_UNPACK/jni/x86_64/" "$POCKET_LLAMA/android/app/src/main/jniLibs/x86_64/"
-```
-
-If you intentionally maintain `armeabi-v7a`, do not reuse old `0.1.x` binaries with these new ones.
-
-### Quick Validation
-
-```bash
-find "$POCKET_LLAMA/android/app/src/main/jniLibs" -maxdepth 2 -type f | sort
-```
-
-PocketLlama should no longer be in the state where Android only has `libllama.so` but no `libmtmd.so`.
-
-## macOS
-
-For macOS, PocketLlama already embeds the Apple dylibs from:
-
-```text
-macos/Runner/Frameworks/
-```
-
-Replace that whole dylib set together.
-
-### Build
-
-From the same matching `llama_cpp_dart` checkout:
-
-```bash
-cd "$LLAMA_CPP_DART_SRC"
-git submodule update --init --recursive
-git -C src/llama.cpp checkout 4ffc47cb2001e7d523f9ff525335bbe34b1a2858
-bash darwin/run_build.sh src/llama.cpp <YOUR_APPLE_TEAM_ID> MAC_ARM64
-```
-
-If your clone's `darwin/build.sh` hardcodes someone else's Apple Development Team, do not use it as-is.
-
-Expected output directory:
-
-```text
-$LLAMA_CPP_DART_SRC/bin/MAC_ARM64
-```
-
-Expected files include:
-
-- `libmtmd.dylib`
-- `libllama.dylib`
-- `libggml.dylib`
-- `libggml-base.dylib`
-- `libggml-cpu.dylib`
-- `libggml-metal.dylib`
-- `libggml-blas.dylib`
-
-### Copy Into PocketLlama
-
-```bash
-rsync -av "$LLAMA_CPP_DART_SRC/bin/MAC_ARM64/" "$POCKET_LLAMA/macos/Runner/Frameworks/"
-```
-
-### Quick Validation
-
-```bash
-find "$POCKET_LLAMA/macos/Runner/Frameworks" -maxdepth 1 -type f | sort
-```
-
-Do not replace only `libllama.dylib`. Keep the whole dylib family in sync.
-
-## Linux
-
-For Linux desktop builds, PocketLlama expects the bundled runtime family under:
-
-```text
-linux/lib/
-```
-
-Build these on a Linux host so the generated `.so` files match the target runtime.
-
-### Build And Copy In One Step
-
-From the PocketLlama repo:
-
-```bash
-cd "$POCKET_LLAMA"
-scripts/build_llama_native_libs.sh linux
-```
-
-That target configures a Linux `llama.cpp` build, copies the generated shared libraries into `linux/lib/`, and keeps the core runtime set together.
-
-Expected files include:
-
-- `libmtmd.so`
-- `libllama.so`
-- `libggml.so`
-- `libggml-base.so`
-- `libggml-cpu.so`
-
-If `patchelf` is available, the script also normalizes the Linux runtime path to `$ORIGIN` so `libmtmd.so` can resolve adjacent `ggml`/`llama` libraries from the final Flutter bundle.
-
-### Quick Validation
-
-```bash
-find "$POCKET_LLAMA/linux/lib" -maxdepth 1 -type f -name 'lib*.so' | sort
-```
-
-If `libmtmd.so` is missing, text-only inference may still work through the base runtime, but vision/projector models will not.
-
-## After Replacing Libraries
-
-```bash
-cd "$POCKET_LLAMA"
-flutter clean
-flutter pub get
-flutter run -d macos
-```
-
-For Android:
-
-```bash
-cd "$POCKET_LLAMA"
-flutter clean
-flutter pub get
-flutter run -d android
-```
-
-For Linux:
-
-```bash
-cd "$POCKET_LLAMA"
-flutter clean
-flutter pub get
-flutter run -d linux
-```
-
-## Known Limitation: Qwen 3.5
-
-Matching the native build to `llama_cpp_dart 0.2.2` fixes version skew. It does not automatically guarantee support for every new GGUF architecture.
-
-Your failing model reports:
-
-```text
-general.architecture = qwen35
-```
-
-Even after moving PocketLlama to `llama_cpp_dart 0.2.2`, the shipped runtime still appears to expose `qwen3`-family support but not `qwen35`. So:
-
-- rebuilding from the correct commit is still the right thing to do
-- but a successful rebuild may still not make Qwen 3.5 load
-
-If Qwen 3.5 still fails after following this doc, the next problem is likely runtime feature support, not build mismatch.
+This checks generation, Stop, model reuse, the prediction limit, and unloading.
+The native integration test is skipped in ordinary test runs without a model.
