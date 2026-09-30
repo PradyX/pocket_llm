@@ -75,8 +75,18 @@ class ModelStorageService {
     return attachmentsDir.path;
   }
 
+  /// Removes the attachment directory of a conversation (used when the
+  /// conversation itself is deleted).
+  Future<void> deleteConversationAttachments(String conversationId) async {
+    final attachmentsDir = await getAttachmentsDir();
+    final directory = Directory(p.join(attachmentsDir, conversationId));
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+  }
+
   Future<String> copyAttachmentToChat({
-    required String modelId,
+    required String conversationId,
     required String messageId,
     required String sourcePath,
     String? preferredFileName,
@@ -87,8 +97,8 @@ class ModelStorageService {
     }
 
     final attachmentsDir = await getAttachmentsDir();
-    final modelDir = Directory(p.join(attachmentsDir, modelId));
-    await modelDir.create(recursive: true);
+    final conversationDir = Directory(p.join(attachmentsDir, conversationId));
+    await conversationDir.create(recursive: true);
 
     final originalName = (preferredFileName ?? p.basename(sourcePath)).trim();
     final normalizedName = originalName.isEmpty ? 'image' : originalName;
@@ -97,7 +107,7 @@ class ModelStorageService {
     );
     final extension = p.extension(normalizedName).toLowerCase();
     final targetPath = p.join(
-      modelDir.path,
+      conversationDir.path,
       '${messageId}_${sanitizedBase.isEmpty ? 'image' : sanitizedBase}$extension',
     );
 

@@ -1,26 +1,31 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'home_controller.dart';
+part of 'conversation_controller.dart';
 
 // **************************************************************************
 // RiverpodGenerator
 // **************************************************************************
 
-String _$homeControllerHash() => r'978e06718d55552915e89a7ceadc539aa9d2b1cd';
+String _$conversationControllerHash() =>
+    r'8f2b7c4e1a9d53f6c0e2b8d7a4f19c63e5b20d8a';
 
-/// See also [HomeController].
-@ProviderFor(HomeController)
-final homeControllerProvider =
-    AutoDisposeNotifierProvider<HomeController, List<Message>>.internal(
-      HomeController.new,
-      name: r'homeControllerProvider',
+/// See also [ConversationController].
+@ProviderFor(ConversationController)
+final conversationControllerProvider =
+    AutoDisposeNotifierProvider<
+      ConversationController,
+      ConversationListState
+    >.internal(
+      ConversationController.new,
+      name: r'conversationControllerProvider',
       debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
           ? null
-          : _$homeControllerHash,
+          : _$conversationControllerHash,
       dependencies: null,
       allTransitiveDependencies: null,
     );
 
-typedef _$HomeController = AutoDisposeNotifier<List<Message>>;
+typedef _$ConversationController =
+    AutoDisposeNotifier<ConversationListState>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

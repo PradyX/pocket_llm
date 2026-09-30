@@ -35,7 +35,10 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - **On-device Benchmarking**: Integrated `llmfit` to measure local performance
 - Live token streaming in chat with `Thinking...` + progressive output
 - Stop generation anytime
-- Per-model chat memory (switching models keeps separate threads)
+- **Multiple local conversations**: create, rename, search, pin and delete chats
+- **Switch models inside a conversation** without losing chat history
+- Per-message model attribution and generation stats
+- Export/import conversations as versioned JSON (clipboard flow)
 - Regenerate assistant reply + Edit & Resend user prompts
 - Generation stats per assistant message (`tok/s`, elapsed time, token count)
 - Markdown-like code fence rendering + one-tap copy for code blocks
@@ -161,6 +164,14 @@ dart run build_runner build --delete-conflicting-outputs
 4. Start chatting on Home.
 5. Use `Stop`, `Regenerate`, or `Edit & Resend` for quick iteration.
 
+### Conversations
+
+- Tap the **new chat** icon on Home to start a conversation.
+- Open **Conversations** in the drawer to search, rename, pin, delete, export or import chats.
+- Switching models inside a conversation keeps its history; every assistant reply records the model that generated it.
+- Conversations are stored locally as versioned JSON (`conversations/` under the app support directory).
+- Existing per-model chats from older versions are migrated into conversations automatically on first launch; the original secure-storage backup (`model_chat_threads_v1`) is left untouched.
+
 ## Troubleshooting
 
 ### `HTTP 401/403` while downloading model
@@ -209,7 +220,7 @@ Install and unlock a supported keyring if you want the platform-backed secure st
 ## Privacy
 
 - Inference runs on-device
-- Chat threads and settings are persisted locally via secure storage
+- Conversations are stored locally as versioned JSON under the app support directory; settings and keys stay in secure storage
 - No cloud inference backend is required for chat generation
 
 ## Credits

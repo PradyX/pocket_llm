@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Conversation & data architecture (Roadmap Phase 1)**: conversations are now independent from models.
+  - Create, rename, delete, search and pin multiple local conversations.
+  - Switch the active model inside a conversation without losing or duplicating history.
+  - Every assistant message records the model that generated it, plus per-message generation stats.
+  - Export/import conversations as versioned JSON (clipboard flow, no new dependencies).
+  - Automatic migration of existing per-model chat threads into conversations on upgrade; the legacy secure-storage entry (`model_chat_threads_v1`) is kept as a backup.
+  - Conversations are persisted in a versioned file store (`conversations/index.json` plus one file per conversation) under the app support directory.
+
 ## [1.5.0] - 2026-03-24
 
 ### Added

@@ -7,7 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/navigation/app_router.dart';
-import 'package:pocket_llm/features/home/domain/chat_message.dart';
+import 'package:pocket_llm/features/conversations/domain/message.dart';
+import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
@@ -25,7 +26,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   final _scrollController = ScrollController();
   final _imagePicker = ImagePicker();
   bool _scrollScheduled = false;
-  ProviderSubscription<List<ChatMessage>>? _messagesSubscription;
+  ProviderSubscription<List<Message>>? _messagesSubscription;
   ProviderSubscription<ModelSelectionState>? _modelSelectionSubscription;
   XFile? _draftImage;
 
@@ -133,21 +134,31 @@ class _HomePageState extends ConsumerState<HomePage> {
     setState(() => _draftImage = pickedFile);
   }
 
-  Future<void> _regenerateMessage(ChatMessage message) async {
+  Future<void> _startNewConversation() async {
+    await ref
+        .read(conversationControllerProvider.notifier)
+        .createConversation(
+          activeModelId: ref
+              .read(modelSelectionControllerProvider)
+              .selectedModelId,
+        );
+  }
+
+  Future<void> _regenerateMessage(Message message) async {
     await ref
         .read(homeControllerProvider.notifier)
         .regenerateAssistantMessage(message.id);
   }
 
-  Future<void> _editAndResendMessage(ChatMessage message) async {
-    var draftText = message.text;
+  Future<void> _editAndResendMessage(Message message) async {
+    var draftText = message.content;
     final updatedText = await showDialog<String>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('Edit & Resend'),
           content: TextFormField(
-            initialValue: message.text,
+            initialValue: message.content,
             autofocus: true,
             minLines: 2,
             maxLines: 8,
@@ -209,6 +220,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget build(BuildContext context) {
     final messages = ref.watch(homeControllerProvider);
     final generationStatus = ref.watch(homeGenerationStatusProvider);
+    final activeConversation = ref.watch(
+      conversationControllerProvider.select(
+        (state) => state.activeConversation,
+      ),
+    );
     final selectionState = ref.watch(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
     final downloadedModels =
@@ -304,6 +320,11 @@ class _HomePageState extends ConsumerState<HomePage> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add_comment_outlined),
+            tooltip: 'New chat',
+            onPressed: isGenerating ? null : _startNewConversation,
+          ),
           if (messages.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_outline_rounded),
@@ -315,6 +336,39 @@ class _HomePageState extends ConsumerState<HomePage> {
                     },
             ),
         ],
+        bottom: activeConversation == null
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(26),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  color: colorScheme.surfaceContainerHigh,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        size: 13,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          activeConversation.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.labelSmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
       ),
       drawer: _buildDrawer(context, colorScheme, textTheme, selectedModel),
       body: Column(
@@ -685,6 +739,15 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
           ),
           ListTile(
+            leading: const Icon(Icons.forum_outlined),
+            title: const Text('Conversations'),
+            subtitle: const Text('Search, rename and manage chats'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.conversations);
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.smart_toy_outlined),
             title: const Text('Model Selection'),
             subtitle: selectedModel != null
@@ -759,7 +822,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 }
 
 class _ChatBubble extends StatefulWidget {
-  final ChatMessage message;
+  final Message message;
   final VoidCallback? onRegenerate;
   final VoidCallback? onEditResend;
 
@@ -785,7 +848,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
         isUser &&
         widget.onEditResend != null &&
         widget.message.imagePath == null;
-    final text = widget.message.text;
+    final text = widget.message.content;
     final actionForeground = isUser
         ? colorScheme.onPrimary
         : colorScheme.primary;
@@ -900,8 +963,8 @@ class _ChatBubbleState extends State<_ChatBubble> {
               ),
             ),
           if (!isUser &&
-              widget.message.tokensPerSecond != null &&
-              widget.message.elapsedMs != null)
+              widget.message.generationStats?.tokensPerSecond != null &&
+              widget.message.generationStats?.elapsedMs != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
@@ -960,13 +1023,13 @@ class _ChatBubbleState extends State<_ChatBubble> {
     );
   }
 
-  String _formatAssistantStats(ChatMessage message) {
-    final tps = message.tokensPerSecond ?? 0;
-    final elapsedMs = message.elapsedMs ?? 0;
+  String _formatAssistantStats(Message message) {
+    final stats = message.generationStats;
+    final tps = stats?.tokensPerSecond ?? 0;
+    final elapsedMs = stats?.elapsedMs ?? 0;
     final seconds = elapsedMs / 1000.0;
-    final tokenPart = message.generatedTokens != null
-        ? ' · ${message.generatedTokens} tok'
-        : '';
+    final generatedTokens = stats?.generatedTokens;
+    final tokenPart = generatedTokens != null ? ' · $generatedTokens tok' : '';
     return '${tps.toStringAsFixed(1)} tok/s · ${seconds.toStringAsFixed(1)}s$tokenPart';
   }
 }

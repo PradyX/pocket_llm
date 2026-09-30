@@ -2,18 +2,21 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
+import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/core/utils/llm_structured_response.dart';
-import 'package:pocket_llm/features/home/domain/chat_message.dart';
+import 'package:pocket_llm/features/conversations/domain/message.dart';
+import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
+import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
-import 'package:pocket_llm/storage/secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'home_controller.g.dart';
@@ -56,11 +59,9 @@ final homeGenerationStatusProvider = StateProvider<HomeGenerationStatus>(
 
 @riverpod
 class HomeController extends _$HomeController {
-  static const _chatStorageKey = 'model_chat_threads_v1';
-
-  final Map<String, List<ChatMessage>> _modelChats = {};
-  String? _activeModelId;
-  bool _hydrated = false;
+  String? _activeConversationId;
+  bool _conversationStateHydrated = false;
+  bool _suppressNextConversationLoad = false;
   bool _stopRequestedByUser = false;
   double? _adaptiveTokensPerSecondEma;
 
@@ -74,24 +75,33 @@ class HomeController extends _$HomeController {
       : defaultAssistantSystemPrompt;
 
   @override
-  List<ChatMessage> build() {
+  List<Message> build() {
+    ref.listen<String?>(
+      conversationControllerProvider.select(
+        (state) => state.activeConversationId,
+      ),
+      (previous, next) {
+        unawaited(_switchToConversation(next));
+      },
+    );
     ref.listen<String?>(
       modelSelectionControllerProvider.select((s) => s.selectedModelId),
       (previous, next) {
-        _switchToModel(next);
+        _onSelectedModelChanged(next);
       },
     );
 
-    if (!_hydrated) {
-      _hydrated = true;
-      _activeModelId = ref
-          .read(modelSelectionControllerProvider)
-          .selectedModelId;
-      unawaited(_loadChatsFromStorage());
+    if (!_conversationStateHydrated) {
+      _conversationStateHydrated = true;
+      final initialConversationId = ref
+          .read(conversationControllerProvider)
+          .activeConversationId;
+      if (initialConversationId != null) {
+        unawaited(_switchToConversation(initialConversationId));
+      }
     }
 
-    if (_activeModelId == null) return const [];
-    return List<ChatMessage>.from(_modelChats[_activeModelId!] ?? const []);
+    return const [];
   }
 
   Future<void> sendMessage(
@@ -125,7 +135,7 @@ class HomeController extends _$HomeController {
     }
     if (userIndex < 0) return;
 
-    final promptText = state[userIndex].text;
+    final promptText = state[userIndex].content;
     final baseMessages = state.sublist(0, assistantIndex);
 
     await _runPrompt(
@@ -159,7 +169,7 @@ class HomeController extends _$HomeController {
   Future<void> _runPrompt({
     required String promptText,
     required bool appendUserMessage,
-    List<ChatMessage>? baseMessages,
+    List<Message>? baseMessages,
     String? imagePath,
     String? imageLabel,
   }) async {
@@ -172,6 +182,9 @@ class HomeController extends _$HomeController {
     final selectionState = ref.read(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
 
+    final conversationId = await _ensureActiveConversation();
+    if (conversationId == null) return;
+
     _stopRequestedByUser = false;
     _setStatus(
       text: 'Preparing request...',
@@ -182,9 +195,9 @@ class HomeController extends _$HomeController {
     );
 
     if (baseMessages != null) {
-      final nextState = List<ChatMessage>.from(baseMessages);
+      final nextState = List<Message>.from(baseMessages);
       await _deleteRemovedAttachments(
-        previousMessages: List<ChatMessage>.from(state),
+        previousMessages: List<Message>.from(state),
         nextMessages: nextState,
       );
       state = nextState;
@@ -192,35 +205,41 @@ class HomeController extends _$HomeController {
 
     try {
       if (appendUserMessage) {
-        final userMessageId = DateTime.now().millisecondsSinceEpoch.toString();
-        String? storedImagePath;
-        String? storedImageLabel;
+        final userMessageId = IdGenerator.message();
+        MessageAttachment? attachment;
 
         if (imagePath != null && imagePath.trim().isNotEmpty) {
-          final targetModelId = selectedModel?.id ?? _activeModelId ?? 'chat';
-          storedImageLabel = (imageLabel ?? p.basename(imagePath)).trim();
-          storedImagePath = await _storageService.copyAttachmentToChat(
-            modelId: targetModelId,
+          final label = (imageLabel ?? p.basename(imagePath)).trim();
+          final storedImagePath = await _storageService.copyAttachmentToChat(
+            conversationId: conversationId,
             messageId: userMessageId,
             sourcePath: imagePath,
-            preferredFileName: storedImageLabel,
+            preferredFileName: label,
+          );
+          attachment = MessageAttachment.create(
+            type: AttachmentType.image,
+            path: storedImagePath,
+            label: label,
           );
         }
 
         state = [
           ...state,
-          ChatMessage(
+          Message(
             id: userMessageId,
-            text: trimmed,
-            isUser: true,
-            timestamp: DateTime.now(),
-            imagePath: storedImagePath,
-            imageLabel: storedImageLabel,
+            conversationId: conversationId,
+            role: MessageRole.user,
+            content: trimmed,
+            createdAt: DateTime.now(),
+            attachments: attachment == null ? const [] : [attachment],
           ),
         ];
-      }
 
-      _saveActiveChatSnapshot();
+        await ref
+            .read(conversationControllerProvider.notifier)
+            .maybeAutoTitleFromMessage(conversationId, trimmed);
+        await _persistConversation();
+      }
 
       await Future<void>.delayed(const Duration(milliseconds: 220));
 
@@ -236,8 +255,49 @@ class HomeController extends _$HomeController {
     } finally {
       _setStatus(text: '', isGenerating: false);
       _stopRequestedByUser = false;
-      _saveActiveChatSnapshot();
-      unawaited(_persistChatsToStorage());
+      unawaited(_persistConversation());
+    }
+  }
+
+  /// Returns the active conversation id, creating a conversation when none is
+  /// active yet.
+  Future<String?> _ensureActiveConversation() async {
+    final conversationController = ref.read(
+      conversationControllerProvider.notifier,
+    );
+    final existingId = ref
+        .read(conversationControllerProvider)
+        .activeConversationId;
+    if (existingId != null) {
+      _activeConversationId = existingId;
+      return existingId;
+    }
+
+    final newId = IdGenerator.conversation();
+    _suppressNextConversationLoad = true;
+    try {
+      final conversation = await conversationController.createConversation(
+        id: newId,
+        activeModelId: ref
+            .read(modelSelectionControllerProvider)
+            .selectedModelId,
+      );
+      _activeConversationId = conversation.id;
+      return conversation.id;
+    } finally {
+      _suppressNextConversationLoad = false;
+    }
+  }
+
+  Future<void> _persistConversation() async {
+    final conversationId = _activeConversationId;
+    if (conversationId == null) return;
+    try {
+      await ref
+          .read(conversationControllerProvider.notifier)
+          .saveConversationMessages(conversationId, List<Message>.from(state));
+    } catch (error) {
+      debugPrint('HomeController: could not persist conversation: $error');
     }
   }
 
@@ -247,15 +307,18 @@ class HomeController extends _$HomeController {
       throw Exception('Selected model file is missing.');
     }
 
-    final aiMessageId = '${DateTime.now().millisecondsSinceEpoch}_ai';
+    final aiMessageId = IdGenerator.message();
 
     state = [
       ...state,
-      ChatMessage(
+      Message(
         id: aiMessageId,
-        text: 'Thinking...',
-        isUser: false,
-        timestamp: DateTime.now(),
+        conversationId: _activeConversationId ?? '',
+        role: MessageRole.assistant,
+        content: 'Thinking...',
+        createdAt: DateTime.now(),
+        modelId: selectedModel.id,
+        modelName: selectedModel.name,
       ),
     ];
 
@@ -279,20 +342,20 @@ class HomeController extends _$HomeController {
       const maxMessageChars = 800;
       const imageTokenBudget = 320;
 
-      final history = <ChatMessage>[];
+      final history = <Message>[];
       int usedTokens = 0;
 
       final candidates = state
           .where(
             (m) =>
                 m.id != aiMessageId &&
-                (m.text.trim().isNotEmpty || m.imagePath != null),
+                (m.content.trim().isNotEmpty || m.attachments.isNotEmpty),
           )
           .toList()
           .reversed;
 
       for (final msg in candidates) {
-        var text = msg.text;
+        var text = msg.content;
         if (text.length > maxMessageChars) {
           final head = text.substring(0, 300);
           final tail = text.substring(text.length - 200);
@@ -301,10 +364,10 @@ class HomeController extends _$HomeController {
 
         final estimatedTokens =
             (text.length / 4).ceil() +
-            (msg.imagePath != null ? imageTokenBudget : 0);
+            (msg.attachments.isNotEmpty ? imageTokenBudget : 0);
         if (usedTokens + estimatedTokens > maxHistoryTokens) break;
 
-        history.insert(0, msg.copyWith(text: text));
+        history.insert(0, msg.copyWith(content: text));
         usedTokens += estimatedTokens;
       }
 
@@ -312,8 +375,8 @@ class HomeController extends _$HomeController {
         history
             .map(
               (msg) => msg.isUser
-                  ? LlmPromptMessage.user(msg.text, imagePath: msg.imagePath)
-                  : LlmPromptMessage.assistant(msg.text),
+                  ? LlmPromptMessage.user(msg.content, imagePath: msg.imagePath)
+                  : LlmPromptMessage.assistant(msg.content),
             )
             .toList(),
         systemPrompt: _systemPrompt,
@@ -483,12 +546,13 @@ class HomeController extends _$HomeController {
   Future<void> _addPlaceholderResponse() async {
     _setStatus(text: 'No model selected...', isGenerating: true);
     await Future<void>.delayed(const Duration(milliseconds: 300));
-    final response = ChatMessage(
-      id: '${DateTime.now().millisecondsSinceEpoch}_ai',
-      text:
+    final response = Message(
+      id: IdGenerator.message(),
+      conversationId: _activeConversationId ?? '',
+      role: MessageRole.assistant,
+      content:
           'Model not downloaded or selected. Please download a model from Model Selection to use native inference.',
-      isUser: false,
-      timestamp: DateTime.now(),
+      createdAt: DateTime.now(),
     );
     state = [...state, response];
   }
@@ -546,14 +610,21 @@ class HomeController extends _$HomeController {
     Duration? elapsed,
     double? tokensPerSecond,
   }) {
+    final stats =
+        (generatedTokens == null && elapsed == null && tokensPerSecond == null)
+        ? null
+        : MessageGenerationStats(
+            generatedTokens: generatedTokens,
+            elapsedMs: elapsed?.inMilliseconds,
+            tokensPerSecond: tokensPerSecond,
+          );
     state = [
       for (final msg in state)
         if (msg.id == id)
           msg.copyWith(
-            text: text,
-            generatedTokens: generatedTokens,
-            elapsedMs: elapsed?.inMilliseconds,
-            tokensPerSecond: tokensPerSecond,
+            content: text,
+            generationStats: stats,
+            tokenCount: generatedTokens ?? msg.tokenCount,
           )
         else
           msg,
@@ -563,11 +634,12 @@ class HomeController extends _$HomeController {
   void _appendAssistantError(String text) {
     state = [
       ...state,
-      ChatMessage(
-        id: '${DateTime.now().millisecondsSinceEpoch}_error',
-        text: text,
-        isUser: false,
-        timestamp: DateTime.now(),
+      Message(
+        id: IdGenerator.message(),
+        conversationId: _activeConversationId ?? '',
+        role: MessageRole.assistant,
+        content: text,
+        createdAt: DateTime.now(),
       ),
     ];
   }
@@ -623,103 +695,79 @@ class HomeController extends _$HomeController {
         (current * (1 - emaAlpha)) + (tokensPerSecond * emaAlpha);
   }
 
-  void _switchToModel(String? modelId) {
-    if (modelId == _activeModelId) return;
+  Future<void> _switchToConversation(String? conversationId) async {
+    if (_suppressNextConversationLoad) {
+      _activeConversationId = conversationId;
+      return;
+    }
+    if (conversationId == _activeConversationId) return;
+    if (ref.read(homeGenerationStatusProvider).isGenerating) return;
 
-    _saveActiveChatSnapshot();
-    _activeModelId = modelId;
-    state = List<ChatMessage>.from(_modelChats[modelId] ?? const []);
-    unawaited(_persistChatsToStorage());
+    _activeConversationId = conversationId;
+    if (conversationId == null) {
+      state = const [];
+      return;
+    }
+
+    try {
+      final messages = await ref
+          .read(conversationRepositoryProvider)
+          .loadMessages(conversationId);
+      if (_activeConversationId != conversationId) return;
+      state = List<Message>.from(messages);
+    } catch (error) {
+      debugPrint('HomeController: could not load conversation: $error');
+      if (_activeConversationId != conversationId) return;
+      state = const [];
+    }
   }
 
-  void _saveActiveChatSnapshot() {
-    if (_activeModelId == null) return;
-    _modelChats[_activeModelId!] = List<ChatMessage>.from(state);
+  void _onSelectedModelChanged(String? modelId) {
+    final conversationId = _activeConversationId;
+    if (conversationId == null) return;
+    unawaited(
+      ref
+          .read(conversationControllerProvider.notifier)
+          .setActiveModel(conversationId, modelId),
+    );
   }
 
   Future<void> _deleteRemovedAttachments({
-    required List<ChatMessage> previousMessages,
-    required List<ChatMessage> nextMessages,
+    required List<Message> previousMessages,
+    required List<Message> nextMessages,
   }) async {
     final retainedPaths = nextMessages
-        .map((message) => message.imagePath)
-        .whereType<String>()
+        .expand((message) => message.attachments)
+        .map((attachment) => attachment.path)
+        .where((path) => path.isNotEmpty)
         .toSet();
     final removedPaths = previousMessages
-        .map((message) => message.imagePath)
-        .whereType<String>()
+        .expand((message) => message.attachments)
+        .map((attachment) => attachment.path)
+        .where((path) => path.isNotEmpty)
         .where((path) => !retainedPaths.contains(path))
         .toSet();
     if (removedPaths.isEmpty) return;
     await _storageService.deleteFiles(removedPaths);
   }
 
-  Future<void> _loadChatsFromStorage() async {
-    try {
-      final data = await SecureStorage.instance.read(_chatStorageKey);
-      final byModelRaw = data?['byModel'];
-      if (byModelRaw is! Map) return;
-
-      final parsed = <String, List<ChatMessage>>{};
-      for (final entry in byModelRaw.entries) {
-        final modelId = entry.key.toString();
-        final rawMessages = entry.value;
-        if (rawMessages is! List) continue;
-
-        final messages = <ChatMessage>[];
-        for (final item in rawMessages) {
-          if (item is Map) {
-            try {
-              messages.add(
-                ChatMessage.fromJson(Map<String, dynamic>.from(item)),
-              );
-            } catch (_) {
-              // Skip malformed messages.
-            }
-          }
-        }
-        parsed[modelId] = messages;
-      }
-
-      _modelChats
-        ..clear()
-        ..addAll(parsed);
-
-      if (_activeModelId != null) {
-        state = List<ChatMessage>.from(
-          _modelChats[_activeModelId!] ?? const [],
-        );
-      }
-    } catch (_) {
-      // Use in-memory defaults when restore fails.
-    }
-  }
-
-  Future<void> _persistChatsToStorage() async {
-    try {
-      final byModel = <String, dynamic>{};
-      for (final entry in _modelChats.entries) {
-        byModel[entry.key] = entry.value.map((m) => m.toJson()).toList();
-      }
-
-      await SecureStorage.instance.write(
-        key: _chatStorageKey,
-        value: {'byModel': byModel},
-      );
-    } catch (_) {
-      // Best-effort persistence.
-    }
-  }
-
   Future<void> clearChat() async {
+    final conversationId = _activeConversationId;
     final attachmentPaths = state
-        .map((message) => message.imagePath)
-        .whereType<String>()
+        .expand((message) => message.attachments)
+        .map((attachment) => attachment.path)
+        .where((path) => path.isNotEmpty)
         .toSet();
-    state = [];
-    _saveActiveChatSnapshot();
-    await _storageService.deleteFiles(attachmentPaths);
-    unawaited(_persistChatsToStorage());
+
+    state = const [];
+    if (conversationId != null) {
+      await ref
+          .read(conversationControllerProvider.notifier)
+          .saveConversationMessages(conversationId, const []);
+    }
+    if (attachmentPaths.isNotEmpty) {
+      await _storageService.deleteFiles(attachmentPaths);
+    }
   }
 
   Future<String> _resolveAssistantText(String rawResponse) async {
