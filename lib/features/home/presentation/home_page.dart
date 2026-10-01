@@ -35,6 +35,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _scrollScheduled = false;
   ProviderSubscription<List<Message>>? _messagesSubscription;
   ProviderSubscription<ModelSelectionState>? _modelSelectionSubscription;
+  ProviderSubscription<String?>? _composerDraftSubscription;
   final List<XFile> _draftImages = [];
 
   /// More images than this would cost more context than a local model can
@@ -45,6 +46,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   void dispose() {
     _messagesSubscription?.close();
     _modelSelectionSubscription?.close();
+    _composerDraftSubscription?.close();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -57,6 +59,20 @@ class _HomePageState extends ConsumerState<HomePage> {
     _messagesSubscription = ref.listenManual(homeControllerProvider, (_, next) {
       _scheduleScrollToBottom();
     });
+    _composerDraftSubscription = ref.listenManual(composerDraftProvider, (
+      _,
+      next,
+    ) {
+      if (next == null) return;
+      _applyComposerDraft(next);
+    });
+    // Text prepared while this page was not built (voice, for example) is
+    // waiting in the provider when the chat opens again.
+    final pendingDraft = ref.read(composerDraftProvider);
+    if (pendingDraft != null) {
+      _applyComposerDraft(pendingDraft);
+    }
+
     _modelSelectionSubscription = ref.listenManual(
       modelSelectionControllerProvider,
       (_, next) {
@@ -79,6 +95,25 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   bool _isVisionReady(LlmModel? model) {
     return model != null && model.isDownloaded && model.supportsVision;
+  }
+
+  /// Moves text prepared elsewhere into the message box.
+  ///
+  /// Speech arrives from a local model, so it is a draft like any other: it is
+  /// appended to whatever the user already typed and waits there for review,
+  /// instead of being sent on their behalf.
+  void _applyComposerDraft(String draft) {
+    ref.read(composerDraftProvider.notifier).state = null;
+    final prepared = draft.trim();
+    if (prepared.isEmpty) return;
+
+    final typed = _messageController.text.trim();
+    final next = typed.isEmpty ? prepared : '$typed\n$prepared';
+    _messageController.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: next.length),
+    );
+    _scheduleScrollToBottom(animated: true);
   }
 
   Future<void> _sendMessage() async {

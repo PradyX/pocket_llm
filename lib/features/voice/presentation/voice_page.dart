@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:pocket_llm/core/navigation/app_router.dart';
+import 'package:pocket_llm/features/home/presentation/home_controller.dart';
+import 'package:pocket_llm/features/voice/application/transcription_controller.dart';
 import 'package:pocket_llm/features/voice/application/voice_controller.dart';
+import 'package:pocket_llm/features/voice/data/speech_to_text_service.dart';
 import 'package:pocket_llm/features/voice/domain/voice_model_option.dart';
 import 'package:pocket_llm/features/voice/presentation/voice_model_picker.dart';
 
-/// Voice: which local model runs speech, and what voice features exist yet.
+/// Voice: which local model runs speech, what it can hear, and what exists yet.
 class VoicePage extends ConsumerStatefulWidget {
   const VoicePage({super.key});
 
@@ -24,7 +30,6 @@ class _VoicePageState extends ConsumerState<VoicePage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(voiceControllerProvider);
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
@@ -47,7 +52,7 @@ class _VoicePageState extends ConsumerState<VoicePage> {
                   const SizedBox(height: 6),
                   Text(
                     'Speech is decoded by a local GGUF model, the same way chat '
-                    'is. Recordings and transcripts are never uploaded, and no '
+                    'is. Clips and transcripts are never uploaded, and no '
                     'voice component is downloaded unless you ask for it.',
                     style: textTheme.bodySmall,
                   ),
@@ -56,7 +61,7 @@ class _VoicePageState extends ConsumerState<VoicePage> {
             ),
           ),
           const SizedBox(height: 12),
-          _SpeechToTextCard(state: state),
+          const _SpeechToTextCard(),
           const SizedBox(height: 12),
           const _TextToSpeechCard(),
         ],
@@ -65,16 +70,18 @@ class _VoicePageState extends ConsumerState<VoicePage> {
   }
 }
 
-class _SpeechToTextCard extends StatelessWidget {
-  const _SpeechToTextCard({required this.state});
-
-  final VoiceState state;
+class _SpeechToTextCard extends ConsumerWidget {
+  const _SpeechToTextCard();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final selected = state.selectedOption;
+    final voiceState = ref.watch(voiceControllerProvider);
+    final transcription = ref.watch(transcriptionControllerProvider);
+    final controller = ref.read(transcriptionControllerProvider.notifier);
+    final selected = voiceState.selectedOption;
+    final canTranscribe = voiceState.isSelectionReady && !transcription.isBusy;
 
     return Card(
       color: colorScheme.surfaceContainerLow,
@@ -85,11 +92,11 @@ class _SpeechToTextCard extends StatelessWidget {
           children: [
             Text('Speech to text', style: textTheme.titleSmall),
             const SizedBox(height: 8),
-            if (state.isInspecting && selected == null)
+            if (voiceState.isInspecting && selected == null)
               const LinearProgressIndicator()
-            else if (state.isSelectionReady && selected != null)
+            else if (voiceState.isSelectionReady && selected != null)
               _SelectedModel(option: selected)
-            else if (state.selectedModelId != null)
+            else if (voiceState.selectedModelId != null)
               Text(
                 selected == null
                     ? 'The chosen voice model is no longer installed. Choose '
@@ -107,28 +114,217 @@ class _SpeechToTextCard extends StatelessWidget {
                 style: textTheme.bodySmall,
               ),
             const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
-                onPressed: () => showVoiceModelPicker(context),
-                icon: const Icon(Icons.graphic_eq_rounded),
-                label: Text(
-                  state.selectedModelId == null
-                      ? 'Choose voice model'
-                      : 'Change voice model',
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => showVoiceModelPicker(context),
+                  icon: const Icon(Icons.graphic_eq_rounded),
+                  label: Text(
+                    voiceState.selectedModelId == null
+                        ? 'Choose voice model'
+                        : 'Change voice model',
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: canTranscribe ? () => controller.start() : null,
+                  icon: const Icon(Icons.audio_file_rounded),
+                  label: Text(
+                    transcription.hasTranscript
+                        ? 'Transcribe another clip'
+                        : 'Transcribe audio file',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            _TranscriptionPanel(
+              state: transcription,
+              onCancel: controller.cancel,
+              onClear: controller.clear,
+              onCopy: (text) => _copyTranscript(context, text),
+              onUseInChat: (text) => _useInChat(context, ref, text),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _copyTranscript(BuildContext context, String transcript) {
+    Clipboard.setData(ClipboardData(text: transcript));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Transcript copied.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// Hands the transcript to the chat as a draft.
+  ///
+  /// It lands in the message box for review and editing; nothing is sent until
+  /// the user says so.
+  void _useInChat(BuildContext context, WidgetRef ref, String transcript) {
+    ref.read(composerDraftProvider.notifier).state = transcript;
+    context.go(AppRoutes.home);
+  }
+}
+
+/// Progress, errors and the transcript of the current clip.
+class _TranscriptionPanel extends StatelessWidget {
+  const _TranscriptionPanel({
+    required this.state,
+    required this.onCancel,
+    required this.onClear,
+    required this.onCopy,
+    required this.onUseInChat,
+  });
+
+  final TranscriptionState state;
+  final VoidCallback onCancel;
+  final VoidCallback onClear;
+  final void Function(String transcript) onCopy;
+  final void Function(String transcript) onUseInChat;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    if (state.isBusy) {
+      final detail = [
+        if (state.statusText.isNotEmpty) state.statusText,
+        if (state.generatedTokens > 0) '${state.generatedTokens} tokens',
+        if (state.elapsed > Duration.zero) '${state.elapsed.inSeconds}s',
+      ].join(' · ');
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const LinearProgressIndicator(),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  detail.isEmpty ? 'Transcribing locally...' : detail,
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
+              TextButton.icon(
+                onPressed: onCancel,
+                icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                label: const Text('Stop'),
+                style: TextButton.styleFrom(
+                  foregroundColor: colorScheme.error,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+          if (state.hasTranscript) _TranscriptBox(state: state),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (state.errorMessage != null) ...[
+          Text(
+            state.errorMessage!,
+            style: textTheme.bodySmall?.copyWith(color: colorScheme.error),
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (state.hasTranscript) ...[
+          _TranscriptBox(state: state),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                onPressed: () => onCopy(state.transcript),
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: const Text('Copy'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => onUseInChat(state.transcript),
+                icon: const Icon(Icons.edit_note_rounded, size: 18),
+                label: const Text('Use in chat'),
+              ),
+              TextButton(onPressed: onClear, child: const Text('Clear')),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '“Use in chat” puts the transcript in the message box so you can '
+            'edit it before sending.',
+            style: textTheme.labelSmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(height: 10),
+          ),
+        ] else if (state.errorMessage == null)
+          Text(
+            'Local models read ${_formatFormats(supportedAudioExtensions)} '
+            'clips. One model runs at a time: transcribing releases the chat '
+            'model, and your next message loads it again.',
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+  }
+
+  static String _formatFormats(List<String> formats) {
+    if (formats.length <= 1) return formats.join();
+    return '${formats.sublist(0, formats.length - 1).join(', ')} or '
+        '${formats.last}';
+  }
+}
+
+class _TranscriptBox extends StatelessWidget {
+  const _TranscriptBox({required this.state});
+
+  final TranscriptionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final meta = [
+      if (state.audioLabel != null) state.audioLabel!,
+      if (state.modelName != null) state.modelName!,
+      if (state.wasStopped) 'stopped early',
+      if (state.elapsed > Duration.zero) '${state.elapsed.inSeconds}s',
+    ].join(' · ');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (meta.isNotEmpty) ...[
             Text(
-              'Recording and in-chat transcription are the next voice step; '
-              'this picks the model they will run.',
+              meta,
               style: textTheme.labelSmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(height: 6),
           ],
-        ),
+          SelectableText(state.transcript, style: textTheme.bodyMedium),
+        ],
       ),
     );
   }

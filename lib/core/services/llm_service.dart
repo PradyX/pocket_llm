@@ -107,7 +107,7 @@ class LlmService {
     AppLogger.debug('[LlmService] Vision projector: $normalizedMmprojPath');
 
     await _ensureLibraryConfigured(
-      requiresVision: normalizedMmprojPath != null,
+      requiresMultimodal: normalizedMmprojPath != null,
     );
 
     final isMobile = Platform.isAndroid || Platform.isIOS;
@@ -291,6 +291,27 @@ class LlmService {
     return _generate(prompt, maxTokens: maxTokens, media: media);
   }
 
+  /// Streams a response about one local audio clip.
+  ///
+  /// The clip is decoded by the bundled multimodal runtime, which reads wav,
+  /// mp3 and flac through miniaudio, so the bytes never leave the device and
+  /// no Dart-side decoder is involved. The prompt must contain the media
+  /// marker the engine was started with, exactly as the image path does.
+  Stream<String> generateAudioResponse(
+    String prompt, {
+    required String audioPath,
+    int? maxTokens,
+  }) {
+    if (!File(audioPath).existsSync()) {
+      throw Exception('Attached audio could not be found.');
+    }
+    return _generate(
+      prompt,
+      maxTokens: maxTokens,
+      media: [LlamaMedia.audioFile(audioPath)],
+    );
+  }
+
   Stream<String> _generate(
     String prompt, {
     int? maxTokens,
@@ -339,8 +360,12 @@ class LlmService {
     unawaited(_generation?.cancel());
   }
 
-  Future<void> _ensureLibraryConfigured({required bool requiresVision}) async {
-    if (_libraryConfigured && (!requiresVision || _libraryPath != null)) return;
+  Future<void> _ensureLibraryConfigured({
+    required bool requiresMultimodal,
+  }) async {
+    if (_libraryConfigured && (!requiresMultimodal || _libraryPath != null)) {
+      return;
+    }
 
     final preferredPath = await _resolveMultimodalLibraryPath();
     AppLogger.debug('[LlmService] Preferred library path: $preferredPath');
@@ -356,9 +381,9 @@ class LlmService {
       return;
     }
 
-    if (requiresVision) {
+    if (requiresMultimodal) {
       throw Exception(
-        'Vision runtime is not bundled on this build. Reinstall the app or use a supported build.',
+        'Image and audio runtime is not bundled on this build. Reinstall the app or use a supported build.',
       );
     }
 

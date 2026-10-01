@@ -77,6 +77,14 @@ final homeGenerationStatusProvider = StateProvider<HomeGenerationStatus>(
   (ref) => const HomeGenerationStatus(),
 );
 
+/// Text another screen wants placed in the chat composer.
+///
+/// The voice screen sets it once a clip has been transcribed; the chat page
+/// moves it into the message box, where it stays until the user edits and
+/// sends it. Nothing is submitted automatically: text a model produced is a
+/// draft, and sending it stays a deliberate action.
+final composerDraftProvider = StateProvider<String?>((ref) => null);
+
 @riverpod
 class HomeController extends _$HomeController {
   String? _activeConversationId;
@@ -725,7 +733,8 @@ class HomeController extends _$HomeController {
   Future<PreparedAttachmentImage?> _prepareImage(
     String path,
     AttachmentSettingsState settings,
-  ) {    if (settings.keepsOriginalImages) {
+  ) {
+    if (settings.keepsOriginalImages) {
       return Future<PreparedAttachmentImage?>.value();
     }
     return const AttachmentImageService().prepare(
