@@ -58,6 +58,16 @@ All notable changes to this project will be documented in this file.
   - Personas are stored in a versioned file (`personas/personas.json`, schema v1) with the same guarantees as profiles: clamped values, a `.corrupt-<time>` backup before any rewrite, and read-only handling of files written by a newer build. Both stores now share one versioned-document implementation.
   - A persona (or every persona) can be exported to the clipboard as versioned JSON and imported back as an editable custom copy: an import can never shadow a shipped built-in, and an id that already exists locally gets a fresh one, so importing never overwrites local work.
   - New **Personas** screen (drawer → Personas) with built-in and custom sections, set-default, duplicate, edit and delete; the chat header shows the active persona and switches it in place, and new chats record the current default persona.
+- **Document pipeline (Roadmap Phase 6A)**: local files can now be read, sliced and searched fully offline.
+  - Text, markdown and source-code files are read where they live; Pocket LLM never copies, moves or edits the original. Everything derived from a file lives in its own versioned store (`documents/index.json`, schema v1).
+  - Extraction, chunking, ranking and storage stay separate, so a format parser, an embedding backend or a different store can be swapped in without rewriting the rest of the pipeline.
+  - Chunking is heading-aware (ATX and setext): paragraphs are packed up to a token target, oversized blocks are split on sentence and line boundaries before a hard cut, and a little of the previous chunk is repeated so a sentence crossing a boundary stays retrievable. Every chunk records the character offsets it came from, so a citation can point at the original text.
+  - Retrieval is lexical (BM25) for now: no extra model download, fully offline, deterministic, and every hit reports which query terms it matched instead of asking the user to trust the ranking.
+  - Each stored document records the chunking settings, the pipeline version and the retrieval backend it was built with, plus a content fingerprint. A file is re-read only when its size or timestamp changed, re-chunked only when its text actually changed or that metadata drifted, and a file that merely moved keeps its existing chunks.
+  - Documents can be searched, refreshed individually and removed; removing a document drops only what Pocket LLM derived, never the file itself.
+  - Ingestion reports progress and accepts a cancellation token, so a large document can be stopped between steps and leaves nothing half-indexed behind.
+  - Files whose bytes do not look like text are rejected with an actionable message instead of being indexed as garbage.
+  - PDF files are recognized but not extractable yet: no maintained pure-Dart extractor is bundled, so attaching one explains the limitation and suggests converting to text or markdown. A PDF extractor is a drop-in addition to the extraction service.
 
 ### Fixed
 - **Image turns could exceed the context window (Roadmap Phase 4)**: the previous history trimming charged image overhead for older messages but not for the newest turn, so a large image message could be sent with a prompt longer than the window the runtime was started with. Attachment overhead is now part of the single-turn budget as well.
