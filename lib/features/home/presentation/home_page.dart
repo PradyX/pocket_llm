@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/navigation/app_router.dart';
+import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
@@ -409,6 +410,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             hasDownloadedModel,
             canAttachImage,
             selectedModel,
+            generationStatus.contextUsage,
           ),
         ],
       ),
@@ -484,6 +486,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     bool hasDownloadedModel,
     bool canAttachImage,
     LlmModel? selectedModel,
+    ContextUsage? contextUsage,
   ) {
     final canCompose = hasDownloadedModel && !isGenerating;
     final progressText = generationText.isEmpty
@@ -545,6 +548,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                 ],
               ),
+            ),
+          if (contextUsage != null && hasDownloadedModel)
+            _buildContextUsageRow(
+              colorScheme,
+              textTheme,
+              contextUsage,
+              isGenerating,
             ),
           if (_draftImage != null)
             Padding(
@@ -614,6 +624,68 @@ class _HomePageState extends ConsumerState<HomePage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// Compact token budget readout for the last assembled prompt.
+  Widget _buildContextUsageRow(
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+    ContextUsage usage,
+    bool isGenerating,
+  ) {
+    final style = textTheme.labelSmall?.copyWith(
+      color: colorScheme.onSurfaceVariant,
+    );
+    final trimming = usage.trimmingLabel;
+    final detail = [
+      if (isGenerating) 'Budget for the request now running',
+      usage.detailLabel,
+      if (trimming != null) trimming,
+    ].join('\n');
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
+      child: Tooltip(
+        message: detail,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.memory_outlined, size: 14, color: style?.color),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    usage.summaryLabel,
+                    style: style,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (trimming != null)
+                  Text(
+                    'trimmed to fit',
+                    style: style?.copyWith(
+                      color: colorScheme.onSurfaceVariant.withValues(
+                        alpha: 0.7,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: usage.percent.clamp(0.0, 1.0),
+                minHeight: 3,
+                backgroundColor: colorScheme.surfaceContainerHighest,
+                color: colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1029,8 +1101,11 @@ class _ChatBubbleState extends State<_ChatBubble> {
     final elapsedMs = stats?.elapsedMs ?? 0;
     final seconds = elapsedMs / 1000.0;
     final generatedTokens = stats?.generatedTokens;
+    final promptTokens = stats?.promptTokens;
     final tokenPart = generatedTokens != null ? ' · $generatedTokens tok' : '';
-    return '${tps.toStringAsFixed(1)} tok/s · ${seconds.toStringAsFixed(1)}s$tokenPart';
+    final promptPart = promptTokens != null ? ' · $promptTokens in' : '';
+    return '${tps.toStringAsFixed(1)} tok/s · '
+        '${seconds.toStringAsFixed(1)}s$tokenPart$promptPart';
   }
 }
 

@@ -24,20 +24,34 @@ class MessageGenerationStats {
   final int? elapsedMs;
   final double? tokensPerSecond;
 
+  /// Input tokens the prompt used, as estimated when the request was built.
+  final int? promptTokens;
+
+  /// Context window the request ran with.
+  final int? contextTokens;
+
   const MessageGenerationStats({
     this.generatedTokens,
     this.elapsedMs,
     this.tokensPerSecond,
+    this.promptTokens,
+    this.contextTokens,
   });
 
   bool get isEmpty =>
-      generatedTokens == null && elapsedMs == null && tokensPerSecond == null;
+      generatedTokens == null &&
+      elapsedMs == null &&
+      tokensPerSecond == null &&
+      promptTokens == null &&
+      contextTokens == null;
 
   Map<String, dynamic> toJson() {
     return {
       'generatedTokens': generatedTokens,
       'elapsedMs': elapsedMs,
       'tokensPerSecond': tokensPerSecond,
+      'promptTokens': promptTokens,
+      'contextTokens': contextTokens,
     };
   }
 
@@ -50,6 +64,8 @@ class MessageGenerationStats {
       generatedTokens: (raw['generatedTokens'] as num?)?.toInt(),
       elapsedMs: (raw['elapsedMs'] as num?)?.toInt(),
       tokensPerSecond: (raw['tokensPerSecond'] as num?)?.toDouble(),
+      promptTokens: (raw['promptTokens'] as num?)?.toInt(),
+      contextTokens: (raw['contextTokens'] as num?)?.toInt(),
     );
     return stats.isEmpty ? null : stats;
   }

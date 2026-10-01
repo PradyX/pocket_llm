@@ -108,6 +108,32 @@ void main() {
       expect(restored.generationStats?.generatedTokens, 5);
     });
 
+    test('round-trips prompt and context token stats', () {
+      final message = Message.create(
+        conversationId: 'c-1',
+        role: MessageRole.assistant,
+        content: 'Answer',
+        generationStats: const MessageGenerationStats(
+          generatedTokens: 20,
+          promptTokens: 512,
+          contextTokens: 2048,
+        ),
+      );
+      final restored = Message.fromJson(message.toJson());
+
+      expect(restored.generationStats?.promptTokens, 512);
+      expect(restored.generationStats?.contextTokens, 2048);
+    });
+
+    test('treats statistics with only legacy fields as present', () {
+      final stats = MessageGenerationStats.fromJson(const {
+        'generatedTokens': 4,
+      });
+      expect(stats?.generatedTokens, 4);
+      expect(stats?.promptTokens, isNull);
+      expect(MessageGenerationStats.fromJson(const {}), isNull);
+    });
+
     test('copyWith can replace conversationId and clear stats', () {
       final message = Message.create(
         conversationId: 'c-1',

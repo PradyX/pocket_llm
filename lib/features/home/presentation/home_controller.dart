@@ -12,6 +12,8 @@ import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/core/utils/llm_structured_response.dart';
+import 'package:pocket_llm/features/conversations/application/conversation_context_builder.dart';
+import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
@@ -29,12 +31,16 @@ class HomeGenerationStatus {
   final Duration elapsed;
   final double tokensPerSecond;
 
+  /// Context usage of the last assembled prompt (roadmap Phase 4).
+  final ContextUsage? contextUsage;
+
   const HomeGenerationStatus({
     this.isGenerating = false,
     this.statusText = '',
     this.generatedTokens = 0,
     this.elapsed = Duration.zero,
     this.tokensPerSecond = 0,
+    this.contextUsage,
   });
 
   HomeGenerationStatus copyWith({
@@ -43,6 +49,7 @@ class HomeGenerationStatus {
     int? generatedTokens,
     Duration? elapsed,
     double? tokensPerSecond,
+    ContextUsage? contextUsage,
   }) {
     return HomeGenerationStatus(
       isGenerating: isGenerating ?? this.isGenerating,
@@ -50,6 +57,7 @@ class HomeGenerationStatus {
       generatedTokens: generatedTokens ?? this.generatedTokens,
       elapsed: elapsed ?? this.elapsed,
       tokensPerSecond: tokensPerSecond ?? this.tokensPerSecond,
+      contextUsage: contextUsage ?? this.contextUsage,
     );
   }
 }
@@ -233,6 +241,7 @@ class HomeController extends _$HomeController {
             content: trimmed,
             createdAt: DateTime.now(),
             attachments: attachment == null ? const [] : [attachment],
+            tokenCount: TokenEstimator.estimateText(trimmed),
           ),
         ];
 
@@ -338,54 +347,41 @@ class HomeController extends _$HomeController {
       );
       await Future<void>.delayed(const Duration(milliseconds: 180));
 
-      const maxHistoryTokens = 500;
-      const maxMessageChars = 800;
-      const imageTokenBudget = 320;
+      // Token-aware context (roadmap Phase 4): the model's declared context,
+      // the platform context and the output reservation decide how much
+      // history is sent. The estimator and the runtime share one constant.
+      final targetNCtx = ModelCompatibilityService.defaultContextTokens;
+      final contextPolicy = ContextPolicy.forModel(
+        runtimeContextTokens: targetNCtx,
+        declaredContextTokens: selectedModel.ggufMetadata?.contextLength,
+        reservedOutputTokens: maxTokens,
+      );
+      final assembly = const ConversationContextBuilder().build(
+        messages: [
+          for (final message in state)
+            if (message.id != aiMessageId) message,
+        ],
+        systemPrompt: _systemPrompt,
+        policy: contextPolicy,
+      );
 
-      final history = <Message>[];
-      int usedTokens = 0;
-
-      final candidates = state
-          .where(
-            (m) =>
-                m.id != aiMessageId &&
-                (m.content.trim().isNotEmpty || m.attachments.isNotEmpty),
-          )
-          .toList()
-          .reversed;
-
-      for (final msg in candidates) {
-        var text = msg.content;
-        if (text.length > maxMessageChars) {
-          final head = text.substring(0, 300);
-          final tail = text.substring(text.length - 200);
-          text = '$head ... $tail';
-        }
-
-        final estimatedTokens =
-            (text.length / 4).ceil() +
-            (msg.attachments.isNotEmpty ? imageTokenBudget : 0);
-        if (usedTokens + estimatedTokens > maxHistoryTokens) break;
-
-        history.insert(0, msg.copyWith(content: text));
-        usedTokens += estimatedTokens;
-      }
+      _setStatus(
+        text: 'Loading model...',
+        isGenerating: true,
+        contextUsage: assembly.usage,
+      );
 
       final promptBundle = buildModelChatPrompt(
-        history
+        assembly.messages
             .map(
               (msg) => msg.isUser
                   ? LlmPromptMessage.user(msg.content, imagePath: msg.imagePath)
                   : LlmPromptMessage.assistant(msg.content),
             )
             .toList(),
-        systemPrompt: _systemPrompt,
+        systemPrompt: assembly.systemPrompt,
         promptFormatId: selectedModel.promptFormatId,
       );
-
-      _setStatus(text: 'Loading model...', isGenerating: true);
-      // Single source of truth shared with the memory estimator.
-      final targetNCtx = ModelCompatibilityService.defaultContextTokens;
 
       String? mmprojPath;
       if (promptBundle.imagePaths.isNotEmpty) {
@@ -510,6 +506,8 @@ class HomeController extends _$HomeController {
             generatedTokens: generatedTokenCount,
             elapsed: elapsed,
             tokensPerSecond: averageTokensPerSecond,
+            promptTokens: assembly.usage.usedTokens,
+            contextTokens: assembly.usage.contextTokens,
           );
         } else {
           _replaceAiMessage(
@@ -518,6 +516,8 @@ class HomeController extends _$HomeController {
             generatedTokens: generatedTokenCount,
             elapsed: elapsed,
             tokensPerSecond: averageTokensPerSecond,
+            promptTokens: assembly.usage.usedTokens,
+            contextTokens: assembly.usage.contextTokens,
           );
         }
         return;
@@ -530,6 +530,8 @@ class HomeController extends _$HomeController {
           generatedTokens: generatedTokenCount,
           elapsed: elapsed,
           tokensPerSecond: averageTokensPerSecond,
+          promptTokens: assembly.usage.usedTokens,
+          contextTokens: assembly.usage.contextTokens,
         );
       } else {
         final finalText = await _resolveAssistantText(
@@ -541,6 +543,8 @@ class HomeController extends _$HomeController {
           generatedTokens: generatedTokenCount,
           elapsed: elapsed,
           tokensPerSecond: averageTokensPerSecond,
+          promptTokens: assembly.usage.usedTokens,
+          contextTokens: assembly.usage.contextTokens,
         );
       }
     } catch (e) {
@@ -588,6 +592,7 @@ class HomeController extends _$HomeController {
     int? generatedTokens,
     Duration? elapsed,
     double? tokensPerSecond,
+    ContextUsage? contextUsage,
   }) {
     final current = ref.read(homeGenerationStatusProvider);
     ref.read(homeGenerationStatusProvider.notifier).state = current.copyWith(
@@ -596,6 +601,7 @@ class HomeController extends _$HomeController {
       generatedTokens: generatedTokens,
       elapsed: elapsed,
       tokensPerSecond: tokensPerSecond,
+      contextUsage: contextUsage,
     );
   }
 
@@ -614,14 +620,22 @@ class HomeController extends _$HomeController {
     int? generatedTokens,
     Duration? elapsed,
     double? tokensPerSecond,
+    int? promptTokens,
+    int? contextTokens,
   }) {
     final stats =
-        (generatedTokens == null && elapsed == null && tokensPerSecond == null)
+        (generatedTokens == null &&
+            elapsed == null &&
+            tokensPerSecond == null &&
+            promptTokens == null &&
+            contextTokens == null)
         ? null
         : MessageGenerationStats(
             generatedTokens: generatedTokens,
             elapsedMs: elapsed?.inMilliseconds,
             tokensPerSecond: tokensPerSecond,
+            promptTokens: promptTokens,
+            contextTokens: contextTokens,
           );
     state = [
       for (final msg in state)
