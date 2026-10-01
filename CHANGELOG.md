@@ -12,6 +12,14 @@ All notable changes to this project will be documented in this file.
   - Export/import conversations as versioned JSON (clipboard flow, no new dependencies).
   - Automatic migration of existing per-model chat threads into conversations on upgrade; the legacy secure-storage entry (`model_chat_threads_v1`) is kept as a backup.
   - Conversations are persisted in a versioned file store (`conversations/index.json` plus one file per conversation) under the app support directory.
+- **Model management (Roadmap Phase 2)**: models can now be added from the device or from Hugging Face.
+  - Import a local `.gguf` file: Pocket LLM reads the GGUF metadata first, then copies it into app storage (`Copy to app`) or, on desktop, references it where it already lives (`Keep in place`).
+  - Imported models are tracked as *managed* (the app owns the file, so removing the model deletes the copy) or *external* (the app only references the path; the original file is never deleted or moved).
+  - Duplicate detection warns before importing when the same file is already referenced or a same-named file exists in app storage, and an import never overwrites an existing model file.
+  - GGUF metadata inspector: architecture, parameter count, quantization, context length, embedding size, layers, tokenizer, special tokens, chat template and vision/projector information, read from the file itself instead of the file name.
+  - New Model Details screen, reachable from any model in the model list, showing source/storage information and the parsed GGUF metadata.
+  - Hugging Face repository browser: paste `author/repository` or a `huggingface.co` link to list GGUF quantization variants with sizes, then download the selected one through the existing resumable downloader (paired `mmproj` projectors are downloaded too).
+  - Imported and repository models persist through the existing custom-model storage with versioned JSON metadata; models saved before Phase 2 keep working.
 
 ## [1.5.0] - 2026-03-24
 
