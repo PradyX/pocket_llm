@@ -65,6 +65,9 @@ All notable changes to this project will be documented in this file.
   - Retrieval is lexical (BM25) for now: no extra model download, fully offline, deterministic, and every hit reports which query terms it matched instead of asking the user to trust the ranking.
   - Each stored document records the chunking settings, the pipeline version and the retrieval backend it was built with, plus a content fingerprint. A file is re-read only when its size or timestamp changed, re-chunked only when its text actually changed or that metadata drifted, and a file that merely moved keeps its existing chunks.
   - Documents can be searched, refreshed individually and removed; removing a document drops only what Pocket LLM derived, never the file itself.
+  - New **Documents** screen (drawer → Documents): add files through the system picker, see every document with its format, chunk count, size and index date, re-index one document or every file that changed on disk, and remove a document.
+  - Indexing shows its stage with a progress bar and can be cancelled; a cancelled or failed file stores nothing and says so, and errors name the file and the reason.
+  - The same screen previews retrieval: a query shows the chunks it would match, with the matched terms and the chunk text, so what the model would be given is visible before asking anything. Retrieval never invents a source.
   - Ingestion reports progress and accepts a cancellation token, so a large document can be stopped between steps and leaves nothing half-indexed behind.
   - Files whose bytes do not look like text are rejected with an actionable message instead of being indexed as garbage.
   - PDF files are recognized but not extractable yet: no maintained pure-Dart extractor is bundled, so attaching one explains the limitation and suggests converting to text or markdown. A PDF extractor is a drop-in addition to the extraction service.
