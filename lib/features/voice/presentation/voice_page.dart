@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pocket_llm/core/navigation/app_router.dart';
+import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/voice/application/transcription_controller.dart';
 import 'package:pocket_llm/features/voice/application/tts_controller.dart';
@@ -445,7 +446,21 @@ class _TextToSpeechCardState extends ConsumerState<_TextToSpeechCard> {
           'is installed, and needs no model download.',
           style: textTheme.bodySmall,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: ref.watch(voiceSettingsProvider).readRepliesAloud,
+          onChanged: (value) => ref
+              .read(voiceSettingsProvider.notifier)
+              .setReadRepliesAloud(value),
+          title: const Text('Read new replies aloud'),
+          subtitle: const Text(
+            'Reads a reply once, as soon as it finishes. Every reply in a chat '
+            'also has its own Read aloud action, so this stays off until you '
+            'want it.',
+          ),
+        ),
+        const SizedBox(height: 4),
         Row(
           children: [
             Expanded(
@@ -553,9 +568,8 @@ class _TextToSpeechCardState extends ConsumerState<_TextToSpeechCard> {
         ],
         const SizedBox(height: 10),
         Text(
-          'Reading assistant replies from the chat uses this same engine and is '
-          'the next step, together with a choice of reading only the replies '
-          'you ask for.',
+          'Reading happens on this device with the voice above, and the audio '
+          'is never written to a file.',
           style: textTheme.labelSmall?.copyWith(
             color: colorScheme.onSurfaceVariant,
           ),

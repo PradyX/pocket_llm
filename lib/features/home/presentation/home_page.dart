@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -12,10 +13,12 @@ import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 import 'package:pocket_llm/features/home/domain/attachment_history.dart';
+import 'package:pocket_llm/features/home/domain/readable_reply.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
+import 'package:pocket_llm/features/voice/application/tts_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
@@ -38,6 +41,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   ProviderSubscription<List<Message>>? _messagesSubscription;
   ProviderSubscription<ModelSelectionState>? _modelSelectionSubscription;
   ProviderSubscription<String?>? _composerDraftSubscription;
+  ProviderSubscription<HomeGenerationStatus>? _generationSubscription;
+
+  /// Reply currently being read aloud, so its own button can offer a stop.
+  String? _readingMessageId;
   final List<XFile> _draftImages = [];
 
   /// Draft images taken from this conversation's history, keyed by their
@@ -54,6 +61,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     _messagesSubscription?.close();
     _modelSelectionSubscription?.close();
     _composerDraftSubscription?.close();
+    _generationSubscription?.close();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -79,6 +87,26 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (pendingDraft != null) {
       _applyComposerDraft(pendingDraft);
     }
+
+    // Reading a reply aloud follows the generation that produced it: the
+    // setting is off by default, and only a run that just finished qualifies.
+    _generationSubscription = ref.listenManual(homeGenerationStatusProvider, (
+      previous,
+      next,
+    ) {
+      if (previous == null) return;
+      if (!shouldReadFinishedReply(
+        wasGenerating: previous.isGenerating,
+        isGenerating: next.isGenerating,
+        readAloudEnabled: ref.read(voiceSettingsProvider).readRepliesAloud,
+      )) {
+        return;
+      }
+
+      final reply = lastReadableReply(ref.read(homeControllerProvider));
+      if (reply == null) return;
+      unawaited(_readReplyAloud(reply));
+    });
 
     _modelSelectionSubscription = ref.listenManual(
       modelSelectionControllerProvider,
@@ -293,6 +321,29 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
   }
 
+  /// Reads [message] aloud, or stops when it is already being read.
+  Future<void> _toggleReadAloud(Message message) async {
+    if (_readingMessageId == message.id &&
+        ref.read(ttsControllerProvider).isSpeaking) {
+      await ref.read(ttsControllerProvider.notifier).stop();
+      if (mounted) setState(() => _readingMessageId = null);
+      return;
+    }
+    await _readReplyAloud(message);
+  }
+
+  /// Speaks one reply. Only one is read at a time, so starting another stops
+  /// the first and the audio never overlaps.
+  Future<void> _readReplyAloud(Message message) async {
+    final controller = ref.read(ttsControllerProvider.notifier);
+    await controller.stop();
+    if (!mounted) return;
+
+    setState(() => _readingMessageId = message.id);
+    await controller.speak(message.content);
+    if (mounted) setState(() => _readingMessageId = null);
+  }
+
   Future<void> _startNewConversation() async {
     await ref
         .read(conversationControllerProvider.notifier)
@@ -496,6 +547,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final textTheme = Theme.of(context).textTheme;
     final isGenerating = generationStatus.isGenerating;
     final generationText = generationStatus.statusText;
+    final ttsState = ref.watch(ttsControllerProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -696,6 +748,15 @@ class _HomePageState extends ConsumerState<HomePage> {
                                 message.attachments.isEmpty)
                             ? () => _editAndResendMessage(message)
                             : null,
+                        onReadAloud:
+                            (ttsState.isSupported &&
+                                !message.isUser &&
+                                message.content.trim().isNotEmpty)
+                            ? () => _toggleReadAloud(message)
+                            : null,
+                        isReading:
+                            ttsState.isSpeaking &&
+                            _readingMessageId == message.id,
                       );
                     },
                   ),
@@ -1275,10 +1336,19 @@ class _ChatBubble extends StatefulWidget {
   final VoidCallback? onRegenerate;
   final VoidCallback? onEditResend;
 
+  /// Reads this message aloud, or stops it; null when the platform cannot
+  /// speak or the message has nothing to say.
+  final VoidCallback? onReadAloud;
+
+  /// True while this message is the one being read.
+  final bool isReading;
+
   const _ChatBubble({
     required this.message,
     this.onRegenerate,
     this.onEditResend,
+    this.onReadAloud,
+    this.isReading = false,
   });
 
   @override
@@ -1435,18 +1505,43 @@ class _ChatBubbleState extends State<_ChatBubble> {
               padding: const EdgeInsets.only(top: 8),
               child: _MessageSources(sources: widget.message.sources),
             ),
-          if (widget.onRegenerate != null)
+          if (widget.onRegenerate != null || widget.onReadAloud != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: OutlinedButton.icon(
-                onPressed: widget.onRegenerate,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Regenerate'),
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  foregroundColor: actionForeground,
-                  side: BorderSide(color: actionBorder),
-                ),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (widget.onReadAloud != null)
+                    OutlinedButton.icon(
+                      onPressed: widget.onReadAloud,
+                      icon: Icon(
+                        widget.isReading
+                            ? Icons.stop_circle_outlined
+                            : Icons.volume_up_outlined,
+                        size: 16,
+                      ),
+                      label: Text(
+                        widget.isReading ? 'Stop reading' : 'Read aloud',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: actionForeground,
+                        side: BorderSide(color: actionBorder),
+                      ),
+                    ),
+                  if (widget.onRegenerate != null)
+                    OutlinedButton.icon(
+                      onPressed: widget.onRegenerate,
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text('Regenerate'),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: actionForeground,
+                        side: BorderSide(color: actionBorder),
+                      ),
+                    ),
+                ],
               ),
             ),
         ],

@@ -7,7 +7,12 @@ import 'package:pocket_llm/storage/secure_storage.dart';
 /// selection store, platform voices belong to the operating system, and
 /// nothing is downloaded by picking either of them.
 class VoiceSettingsState {
-  const VoiceSettingsState({this.sttModelId, this.ttsVoiceId, this.ttsRate});
+  const VoiceSettingsState({
+    this.sttModelId,
+    this.ttsVoiceId,
+    this.ttsRate,
+    this.readRepliesAloud = false,
+  });
 
   /// Model that transcribes local audio, or null when none is chosen.
   final String? sttModelId;
@@ -20,15 +25,19 @@ class VoiceSettingsState {
   /// Speaking rate, or null when the user never changed it.
   final double? ttsRate;
 
+  /// Whether a finished reply is read out on its own. Off by default: speech
+  /// is something the user turns on, never something the app decides to do.
+  final bool readRepliesAloud;
+
   bool get hasSttModel => sttModelId != null && sttModelId!.trim().isNotEmpty;
 
   bool get hasCustomTtsVoice =>
       ttsVoiceId != null && ttsVoiceId!.trim().isNotEmpty;
-
   VoiceSettingsState copyWith({
     Object? sttModelId = _unset,
     Object? ttsVoiceId = _unset,
     Object? ttsRate = _unset,
+    bool? readRepliesAloud,
   }) {
     return VoiceSettingsState(
       sttModelId: sttModelId == _unset
@@ -38,6 +47,7 @@ class VoiceSettingsState {
           ? this.ttsVoiceId
           : ttsVoiceId as String?,
       ttsRate: ttsRate == _unset ? this.ttsRate : ttsRate as double?,
+      readRepliesAloud: readRepliesAloud ?? this.readRepliesAloud,
     );
   }
 
@@ -64,6 +74,7 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettingsState> {
       final sttModelId = data['sttModelId'];
       final ttsVoiceId = data['ttsVoiceId'];
       final ttsRate = data['ttsRate'];
+      final readRepliesAloud = data['readRepliesAloud'];
       state = state.copyWith(
         sttModelId: sttModelId is String && sttModelId.trim().isNotEmpty
             ? sttModelId
@@ -74,6 +85,9 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettingsState> {
             ? ttsVoiceId
             : null,
         ttsRate: ttsRate is num ? ttsRate.toDouble() : null,
+        readRepliesAloud: readRepliesAloud is bool
+            ? readRepliesAloud
+            : state.readRepliesAloud,
       );
     } catch (_) {
       // Keep defaults if storage read fails.
@@ -104,6 +118,12 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettingsState> {
     await _persist();
   }
 
+  /// Turns automatic reading of finished replies on or off.
+  Future<void> setReadRepliesAloud(bool value) async {
+    state = state.copyWith(readRepliesAloud: value);
+    await _persist();
+  }
+
   Future<void> _persist() async {
     await SecureStorage.instance.write(
       key: _settingsKey,
@@ -111,6 +131,7 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettingsState> {
         'sttModelId': state.sttModelId,
         'ttsVoiceId': state.ttsVoiceId,
         'ttsRate': state.ttsRate,
+        'readRepliesAloud': state.readRepliesAloud,
       },
     );
   }
