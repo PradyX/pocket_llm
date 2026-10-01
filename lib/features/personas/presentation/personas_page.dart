@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart'
     show TokenEstimator, formatTokens;
@@ -20,7 +21,23 @@ class PersonasPage extends ConsumerWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Personas')),
+      appBar: AppBar(
+        title: const Text('Personas'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.copy_all_outlined),
+            tooltip: 'Export personas to clipboard',
+            onPressed: () => _exportToClipboard(context, ref),
+          ),
+          IconButton(
+            icon: const Icon(Icons.content_paste_go_outlined),
+            tooltip: 'Import personas from clipboard',
+            onPressed: state.isReadOnly
+                ? null
+                : () => _importFromClipboard(context, ref),
+          ),
+        ],
+      ),
       floatingActionButton: state.isReadOnly
           ? null
           : FloatingActionButton.extended(
@@ -86,6 +103,12 @@ class PersonasPage extends ConsumerWidget {
               isDefault: persona.id == state.defaultPersonaId,
               onSetDefault: () => notifier.selectDefault(persona.id),
               onDuplicate: () => _duplicate(context, ref, persona),
+              onExport: () => _exportToClipboard(
+                context,
+                ref,
+                personaId: persona.id,
+                personaName: persona.name,
+              ),
             ),
           const SizedBox(height: 16),
           Text('Custom', style: textTheme.titleSmall),
@@ -104,6 +127,12 @@ class PersonasPage extends ConsumerWidget {
               isDefault: persona.id == state.defaultPersonaId,
               onSetDefault: () => notifier.selectDefault(persona.id),
               onDuplicate: () => _duplicate(context, ref, persona),
+              onExport: () => _exportToClipboard(
+                context,
+                ref,
+                personaId: persona.id,
+                personaName: persona.name,
+              ),
               onEdit: state.isReadOnly
                   ? null
                   : () => _openEditor(context, ref, persona),
@@ -189,6 +218,91 @@ class PersonasPage extends ConsumerWidget {
     ).showSnackBar(SnackBar(content: Text('Deleted "${persona.name}".')));
   }
 
+  /// Copies one persona, or every persona, to the clipboard as JSON.
+  Future<void> _exportToClipboard(
+    BuildContext context,
+    WidgetRef ref, {
+    String? personaId,
+    String? personaName,
+  }) async {
+    try {
+      final json = ref
+          .read(personasProvider.notifier)
+          .exportJson(personaId: personaId);
+      await Clipboard.setData(ClipboardData(text: json));
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            personaName == null
+                ? 'Personas copied as JSON.'
+                : '"$personaName" copied as JSON.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export failed: $error')));
+    }
+  }
+
+  /// Reads export JSON from a paste field and stores it as custom personas.
+  Future<void> _importFromClipboard(BuildContext context, WidgetRef ref) async {
+    final inputController = TextEditingController();
+    final rawJson = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Import personas'),
+        content: TextField(
+          controller: inputController,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 8,
+          decoration: const InputDecoration(
+            hintText: 'Paste exported persona JSON here',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(inputController.text),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    inputController.dispose();
+
+    if (rawJson == null || rawJson.trim().isEmpty || !context.mounted) return;
+    try {
+      final imported = await ref
+          .read(personasProvider.notifier)
+          .importJson(rawJson);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            imported.isEmpty
+                ? 'Nothing to import.'
+                : 'Imported ${imported.length} persona(s).',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Import failed: $error')));
+    }
+  }
+
   void _showError(BuildContext context, WidgetRef ref) {
     final message = ref.read(personasProvider).errorMessage;
     ScaffoldMessenger.of(
@@ -203,6 +317,7 @@ class _PersonaTile extends StatelessWidget {
     required this.isDefault,
     required this.onSetDefault,
     required this.onDuplicate,
+    required this.onExport,
     this.onEdit,
     this.onDelete,
   });
@@ -211,6 +326,7 @@ class _PersonaTile extends StatelessWidget {
   final bool isDefault;
   final VoidCallback onSetDefault;
   final VoidCallback onDuplicate;
+  final VoidCallback onExport;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
@@ -247,6 +363,8 @@ class _PersonaTile extends StatelessWidget {
             switch (action) {
               case _PersonaAction.duplicate:
                 onDuplicate();
+              case _PersonaAction.export:
+                onExport();
               case _PersonaAction.edit:
                 onEdit?.call();
               case _PersonaAction.delete:
@@ -257,6 +375,10 @@ class _PersonaTile extends StatelessWidget {
             const PopupMenuItem(
               value: _PersonaAction.duplicate,
               child: Text('Duplicate'),
+            ),
+            const PopupMenuItem(
+              value: _PersonaAction.export,
+              child: Text('Export'),
             ),
             if (onEdit != null)
               const PopupMenuItem(
@@ -275,7 +397,7 @@ class _PersonaTile extends StatelessWidget {
   }
 }
 
-enum _PersonaAction { duplicate, edit, delete }
+enum _PersonaAction { duplicate, export, edit, delete }
 
 /// Editor for a custom persona; returns the saved persona when popped.
 class PersonaEditorPage extends ConsumerStatefulWidget {

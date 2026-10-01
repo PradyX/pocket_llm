@@ -148,6 +148,24 @@ class Persona {
     ).normalized();
   }
 
+  /// Returns this persona as an editable custom one.
+  ///
+  /// Used by import: a payload must never be able to shadow a shipped built-in
+  /// or claim built-in status.
+  Persona asCustom({DateTime? now}) {
+    final timestamp = now ?? DateTime.now();
+    return Persona(
+      id: id,
+      name: name,
+      description: description,
+      systemPrompt: systemPrompt,
+      defaultModelId: defaultModelId,
+      inferenceProfileId: inferenceProfileId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    ).normalized();
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,

@@ -1,6 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pocket_llm/features/personas/data/persona_store.dart';
 import 'package:pocket_llm/features/personas/domain/persona.dart';
+
+/// Marker and schema version of the persona export payload.
+///
+/// Mirrors the conversation export flow: a `format` marker so unrelated JSON
+/// is rejected with a clear message, and a version so a newer payload is
+/// refused instead of silently half-imported.
+const String personaExportFormat = 'pocket_llm.personas';
+const int personaExportSchemaVersion = 1;
 
 /// Persona file, opened once per session.
 final personaStoreProvider = FutureProvider<PersonaStore>(
@@ -181,6 +191,87 @@ class PersonasNotifier extends StateNotifier<PersonasState> {
       clearError: true,
     );
     return _persist();
+  }
+
+  /// Serializes [personaId] (or every persona) as versioned export JSON.
+  String exportJson({String? personaId}) {
+    final personas = <Persona>[];
+    if (personaId == null) {
+      personas.addAll(state.personas);
+    } else {
+      final persona = state.personaById(personaId);
+      if (persona != null) personas.add(persona);
+    }
+
+    return const JsonEncoder.withIndent('  ').convert({
+      'format': personaExportFormat,
+      'schemaVersion': personaExportSchemaVersion,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'personas': personas.map((persona) => persona.toJson()).toList(),
+    });
+  }
+
+  /// Imports personas from a previously exported JSON string.
+  Future<List<Persona>> importJson(String rawJson) async {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(rawJson);
+    } catch (_) {
+      throw const FormatException('The import payload is not valid JSON.');
+    }
+    if (decoded is! Map) {
+      throw const FormatException('The import payload is not a JSON object.');
+    }
+    return importPayload(Map<String, dynamic>.from(decoded));
+  }
+
+  /// Imports personas from a decoded export payload.
+  ///
+  /// Imported personas are always custom copies: a payload cannot replace a
+  /// shipped built-in or claim built-in status, and an id that already exists
+  /// locally gets a fresh one so nothing is overwritten. Returns the imported
+  /// personas in payload order.
+  Future<List<Persona>> importPayload(Map<String, dynamic> payload) async {
+    if (payload['format'] != personaExportFormat) {
+      throw const FormatException('Unrecognized persona export format.');
+    }
+    final version = (payload['schemaVersion'] as num?)?.toInt();
+    if (version == null || version > personaExportSchemaVersion) {
+      throw FormatException(
+        'Unsupported persona export schema version: $version.',
+      );
+    }
+
+    final rawPersonas = payload['personas'];
+    if (rawPersonas is! List) {
+      throw const FormatException('The import payload has no personas.');
+    }
+
+    final existingIds = {for (final persona in state.personas) persona.id};
+    final imported = <Persona>[];
+    for (final raw in rawPersonas) {
+      if (raw is! Map) continue;
+      final parsed = Persona.fromJson(Map<String, dynamic>.from(raw));
+      if (parsed == null) continue;
+
+      var persona = parsed.asCustom();
+      if (existingIds.contains(persona.id)) {
+        // Keep the name and content, take a fresh id: nothing local is lost.
+        persona = persona.duplicate(name: persona.name);
+      }
+      existingIds.add(persona.id);
+      imported.add(persona);
+    }
+
+    if (imported.isEmpty) return const [];
+
+    var snapshot = state.toSnapshot();
+    for (final persona in imported) {
+      snapshot = snapshot.upsert(persona);
+    }
+    state = state.copyWith(personas: snapshot.allPersonas, clearError: true);
+    await _persist();
+    return imported;
   }
 
   /// Clears the last error once it has been shown.

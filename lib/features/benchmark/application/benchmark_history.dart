@@ -332,7 +332,7 @@ extension BenchmarkRunRecordLabels on BenchmarkRunRecord {
   String get configurationLabel {
     final parts = <String>[
       if (contextTokens != null) '$contextTokens ctx',
-      if (backend != null) backend!,
+      ?backend,
       if (threads != null) '$threads threads',
     ];
     if (parts.isEmpty) {

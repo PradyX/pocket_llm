@@ -786,7 +786,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final detail = [
       if (isGenerating) 'Budget for the request now running',
       usage.detailLabel,
-      if (trimming != null) trimming,
+      ?trimming,
     ].join('\n');
 
     return Padding(
