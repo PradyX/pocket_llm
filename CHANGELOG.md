@@ -80,6 +80,12 @@ All notable changes to this project will be documented in this file.
   - Collections are created, renamed and removed on the **Documents** screen, which shows one collection at a time: the picker lists each collection with its own document and changed-file counts, and the retrieval preview always describes the collection on screen.
   - Chat retrieval searches the active collection only. A collection with nothing indexed adds no retrieval budget and no prompt section, so the selected collection is also how document grounding is turned off — there is no separate global switch to keep in sync.
   - The active collection is stored with the index and survives restarts; removing a collection returns the selection to the always-present one.
+- **Multimodal attachments (Roadmap Phase 7)**: a message can now carry several images instead of one.
+  - Up to four images attach to a single turn, each with its own thumbnail, an individual remove button and a Clear all action, so a local model can be asked to compare pictures. A turn with images still needs a question, and switching to a model without multimodality clears the pending images instead of sending something the model cannot read.
+  - Prompt assembly writes one `<image>` marker per attached image in attachment order and passes the same order to the runtime; formats without multimodality still ignore images rather than embedding markers the model would read as text.
+  - Assistant turns render every image of the message, not just the first, and regenerating a turn resends all of its images. Editing and resending stays available only for messages without attachments, because an edit cannot reproduce them.
+  - Attachments are stored per conversation under the message id; same-named images get a suffix instead of overwriting each other, so attaching `photo.jpg` twice keeps both files.
+  - Multi-select uses the platform's multi-image picker where it exists and falls back to one image at a time elsewhere, so adding images works the same way on every platform.
 
 ### Fixed
 - **Image turns could exceed the context window (Roadmap Phase 4)**: the previous history trimming charged image overhead for older messages but not for the newest turn, so a large image message could be sent with a prompt longer than the window the runtime was started with. Attachment overhead is now part of the single-turn budget as well.
