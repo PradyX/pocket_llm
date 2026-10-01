@@ -33,6 +33,7 @@ dependencies:
   flutter_markdown: ^0.7.3
   url_launcher: ^6.3.0
   file_selector: ^1.1.0
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:

@@ -5,9 +5,12 @@ import 'package:go_router/go_router.dart';
 import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/voice/application/transcription_controller.dart';
+import 'package:pocket_llm/features/voice/application/tts_controller.dart';
 import 'package:pocket_llm/features/voice/application/voice_controller.dart';
 import 'package:pocket_llm/features/voice/data/speech_to_text_service.dart';
+import 'package:pocket_llm/features/voice/domain/speech_voice.dart';
 import 'package:pocket_llm/features/voice/domain/voice_model_option.dart';
+import 'package:pocket_llm/features/voice/presentation/speech_voice_picker.dart';
 import 'package:pocket_llm/features/voice/presentation/voice_model_picker.dart';
 
 /// Voice: which local model runs speech, what it can hear, and what exists yet.
@@ -52,8 +55,10 @@ class _VoicePageState extends ConsumerState<VoicePage> {
                   const SizedBox(height: 6),
                   Text(
                     'Speech is decoded by a local GGUF model, the same way chat '
-                    'is. Clips and transcripts are never uploaded, and no '
-                    'voice component is downloaded unless you ask for it.',
+                    'is, and read aloud by the speech engine this device '
+                    'already has. Clips, text and transcripts are never '
+                    'uploaded, and no voice component is downloaded unless you '
+                    'ask for it.',
                     style: textTheme.bodySmall,
                   ),
                 ],
@@ -365,13 +370,33 @@ class _SelectedModel extends StatelessWidget {
   }
 }
 
-class _TextToSpeechCard extends StatelessWidget {
+class _TextToSpeechCard extends ConsumerStatefulWidget {
   const _TextToSpeechCard();
+
+  @override
+  ConsumerState<_TextToSpeechCard> createState() => _TextToSpeechCardState();
+}
+
+class _TextToSpeechCardState extends ConsumerState<_TextToSpeechCard> {
+  final _previewController = TextEditingController(
+    text:
+        'Pocket LLM reads text aloud with the voices installed on this '
+        'device.',
+  );
+
+  @override
+  void dispose() {
+    _previewController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final state = ref.watch(ttsControllerProvider);
+    final controller = ref.read(ttsControllerProvider.notifier);
+
     return Card(
       color: colorScheme.surfaceContainerLow,
       child: Padding(
@@ -381,16 +406,161 @@ class _TextToSpeechCard extends StatelessWidget {
           children: [
             Text('Text to speech', style: textTheme.titleSmall),
             const SizedBox(height: 8),
-            Text(
-              'Not available yet. The bundled runtime can decode audio for '
-              'input but has no speech-synthesis path, so Pocket LLM will not '
-              'pretend to read answers aloud until a local engine is chosen '
-              'and verified on this device.',
-              style: textTheme.bodySmall,
-            ),
+            if (!state.isSupported)
+              Text(
+                'This platform has no speech engine Pocket LLM can use. '
+                'Reading text aloud works on Android, iOS, macOS and Windows, '
+                'where the system speaks and nothing is sent anywhere. On '
+                'Linux this card stays off rather than offering a button that '
+                'fails.',
+                style: textTheme.bodySmall,
+              )
+            else
+              _buildControls(
+                context,
+                colorScheme,
+                textTheme,
+                state,
+                controller,
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildControls(
+    BuildContext context,
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+    TtsState state,
+    TtsController controller,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'The speech engine this device already has reads text aloud: it '
+          'runs locally, keeps working offline once the language voice data '
+          'is installed, and needs no model download.',
+          style: textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Voice', style: textTheme.labelLarge),
+                  Text(
+                    state.voiceLabel,
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => showSpeechVoicePicker(context),
+              icon: const Icon(Icons.record_voice_over_outlined, size: 18),
+              label: const Text('Choose voice'),
+            ),
+          ],
+        ),
+        if (state.selectedVoiceIsMissing)
+          Text(
+            'That voice is not in the list this device reports any more; it '
+            'will fall back to the device default.',
+            style: textTheme.labelSmall?.copyWith(color: colorScheme.error),
+          ),
+        if (state.noticeMessage != null)
+          Text(
+            state.noticeMessage!,
+            style: textTheme.labelSmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        Row(
+          children: [
+            Text('Speed', style: textTheme.labelLarge),
+            Expanded(
+              child: Slider(
+                value: state.rate,
+                min: minimumSpeechRate,
+                max: maximumSpeechRate,
+                divisions: 15,
+                label: state.rate.toStringAsFixed(2),
+                onChanged: controller.updateRate,
+                onChangeEnd: (_) => controller.storeRate(),
+              ),
+            ),
+            Text(state.rate.toStringAsFixed(2), style: textTheme.bodySmall),
+          ],
+        ),
+        const SizedBox(height: 4),
+        TextField(
+          controller: _previewController,
+          minLines: 1,
+          maxLines: 4,
+          decoration: InputDecoration(
+            labelText: 'Text to read aloud',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none,
+            ),
+            filled: true,
+            fillColor: colorScheme.surfaceContainerHighest,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            FilledButton.tonalIcon(
+              onPressed: state.isSpeaking
+                  ? null
+                  : () => controller.speak(_previewController.text),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Read aloud'),
+            ),
+            if (state.isSpeaking)
+              TextButton.icon(
+                onPressed: controller.stop,
+                icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                label: const Text('Stop'),
+                style: TextButton.styleFrom(foregroundColor: colorScheme.error),
+              ),
+          ],
+        ),
+        if (state.statusText.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            state.statusText,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        if (state.errorMessage != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            state.errorMessage!,
+            style: textTheme.bodySmall?.copyWith(color: colorScheme.error),
+          ),
+        ],
+        const SizedBox(height: 10),
+        Text(
+          'Reading assistant replies from the chat uses this same engine and is '
+          'the next step, together with a choice of reading only the replies '
+          'you ask for.',
+          style: textTheme.labelSmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
     );
   }
 }
