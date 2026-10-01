@@ -3,7 +3,8 @@
 /// Interpretation follows the GGUF v2/v3 layout used by llama.cpp:
 /// `general.*` keys describe the model, `<architecture>.*` keys describe the
 /// architecture, `tokenizer.ggml.*` keys describe the tokenizer and `clip.*`
-/// keys describe a vision projector (present in mmproj files).
+/// keys describe a multimodal projector (present in mmproj files), including
+/// whether it carries a vision and/or audio encoder.
 class GgufMetadata {
   final String architecture;
   final String name;
@@ -24,6 +25,11 @@ class GgufMetadata {
   final int? unkTokenId;
   final int tokenizerMergesCount;
   final bool hasVisionEncoder;
+
+  /// True when the projector carries an audio encoder, which is what lets a
+  /// model transcribe local speech.
+  final bool hasAudioEncoder;
+
   final String? projectorType;
   final Map<String, num> numericScalars;
   final Map<String, String> stringExtras;
@@ -48,6 +54,7 @@ class GgufMetadata {
     this.unkTokenId,
     this.tokenizerMergesCount = 0,
     this.hasVisionEncoder = false,
+    this.hasAudioEncoder = false,
     this.projectorType,
     this.numericScalars = const {},
     this.stringExtras = const {},
@@ -97,6 +104,7 @@ class GgufMetadata {
       'unkTokenId': unkTokenId,
       'tokenizerMergesCount': tokenizerMergesCount,
       'hasVisionEncoder': hasVisionEncoder,
+      'hasAudioEncoder': hasAudioEncoder,
       'projectorType': projectorType,
       'numericScalars': numericScalars,
       'stringExtras': stringExtras,
@@ -127,6 +135,7 @@ class GgufMetadata {
       tokenizerMergesCount:
           (json['tokenizerMergesCount'] as num?)?.toInt() ?? 0,
       hasVisionEncoder: json['hasVisionEncoder'] as bool? ?? false,
+      hasAudioEncoder: json['hasAudioEncoder'] as bool? ?? false,
       projectorType: json['projectorType'] as String?,
       numericScalars: rawNumerics is Map
           ? Map<String, num>.fromEntries(

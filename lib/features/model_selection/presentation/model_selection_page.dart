@@ -929,6 +929,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   IconData _capabilityIcon(ModelCapability capability) {
     return switch (capability) {
       ModelCapability.vision => Icons.visibility_rounded,
+      ModelCapability.audio => Icons.graphic_eq_rounded,
       ModelCapability.tools => Icons.build_rounded,
       ModelCapability.thinking => Icons.psychology_rounded,
       ModelCapability.coding => Icons.code_rounded,

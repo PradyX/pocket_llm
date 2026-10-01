@@ -11,6 +11,7 @@ import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
@@ -1040,6 +1041,20 @@ class _HomePageState extends ConsumerState<HomePage> {
             },
           ),
           ListTile(
+            leading: const Icon(Icons.mic_none_rounded),
+            title: const Text('Voice'),
+            subtitle: Text(
+              _voiceSubtitle(
+                ref.watch(voiceSettingsProvider),
+                ref.watch(modelSelectionControllerProvider).models,
+              ),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.voice);
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.face_retouching_natural),
             title: const Text('Personas'),
             subtitle: Text(
@@ -1728,6 +1743,21 @@ class _MarkdownCodeMessage extends StatelessWidget {
 
     return segments;
   }
+}
+
+/// Subtitle for the Voice drawer entry.
+///
+/// Only already-loaded state is read here, so opening the drawer never starts
+/// inspecting model files.
+String _voiceSubtitle(VoiceSettingsState voice, List<LlmModel> models) {
+  final modelId = voice.sttModelId;
+  if (!voice.hasSttModel || modelId == null) {
+    return 'Choose a local speech model';
+  }
+  for (final model in models) {
+    if (model.id == modelId) return 'Speech: ${model.name}';
+  }
+  return 'The chosen speech model is no longer installed';
 }
 
 /// Subtitle for the Documents drawer entry.

@@ -568,6 +568,7 @@ class GgufReader {
       tokenizerMergesCount: mergesCount ?? 0,
       hasVisionEncoder:
           _scalarBool(scalars, 'clip.has_vision_encoder') ?? false,
+      hasAudioEncoder: _scalarBool(scalars, 'clip.has_audio_encoder') ?? false,
       projectorType: _optionalString(
         stringValues['clip.projector_type'] ??
             stringValues['clip.vision.projection_type'],

@@ -2,6 +2,7 @@ import 'package:pocket_llm/features/model_selection/domain/gguf_metadata.dart';
 
 enum ModelCapability {
   vision('vision', 'Vision'),
+  audio('audio', 'Audio'),
   tools('tools', 'Tools'),
   thinking('thinking', 'Thinking'),
   coding('coding', 'Coding');
@@ -80,6 +81,12 @@ class LlmModel {
   /// Derived from [capabilities] — any model whose capabilities include
   /// [ModelCapability.vision] will automatically support image upload.
   bool get supportsVision => capabilities.contains(ModelCapability.vision);
+
+  /// Whether this model can transcribe local audio.
+  ///
+  /// Derived from [capabilities]; a model earns it when its projector carries
+  /// an audio encoder.
+  bool get supportsAudio => capabilities.contains(ModelCapability.audio);
 
   /// Whether the model file lives outside the app's model directory.
   bool get isExternal {
