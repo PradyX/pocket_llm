@@ -40,7 +40,8 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Per-message model attribution and generation stats
 - Export/import conversations as versioned JSON (clipboard flow)
 - Regenerate assistant reply + Edit & Resend user prompts
-- Generation stats per assistant message (`tok/s`, elapsed time, token count)
+- Generation stats per assistant message (`tok/s`, elapsed time, token count, input tokens)
+- Context usage readout above the composer (used vs. available input tokens, with a note when older messages were trimmed to fit)
 - Markdown-like code fence rendering + one-tap copy for code blocks
 - Adaptive generation mode for mobile performance tuning
 - Sampling presets: `Precise`, `Balanced`, `Creative`
@@ -69,7 +70,7 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 
 - Mobile-focused context setup (`nCtx`/`nBatch` tuned for device class)
 - Adaptive max-token behavior based on hardware + observed generation speed
-- Last 5 messages are sent as prompt context to keep runtime stable
+- **Token-aware context**: the prompt is assembled against the loaded model's context window and output reservation, keeping the system prompt and the newest turns, and dropping older ones only when the budget runs out
 - GGUF signature checks to reject invalid/corrupt downloads
 
 ## Tech Stack
@@ -172,6 +173,12 @@ dart run build_runner build --delete-conflicting-outputs
 - Conversations are stored locally as versioned JSON (`conversations/` under the app support directory).
 - Existing per-model chats from older versions are migrated into conversations automatically on first launch; the original secure-storage backup (`model_chat_threads_v1`) is left untouched.
 
+### Context and memory
+
+- Every request is assembled against a token budget derived from the model's context window, the tokens reserved for the answer and the safety margin; the system prompt always stays, and older turns are dropped oldest-first only when the budget runs out.
+- The readout above the composer shows the input budget in use and says when older or shortened messages were trimmed to fit; tap it for the window and reservation details.
+- Token counts are estimates (~4 characters per token plus per-message overhead) because the bundled runtime exposes no tokenizer, so the budget is kept conservative on purpose.
+
 ## Troubleshooting
 
 ### `HTTP 401/403` while downloading model
@@ -182,8 +189,8 @@ Use a public direct URL ending with `.gguf`.
 ### `Prompt token count exceeds batch capacity`
 
 Your prompt/context is too large for current runtime settings.
-The app already limits history context, but very long prompts can still overflow.
-Use shorter prompts or a larger-capability model/runtime config.
+The app assembles the prompt against a token budget derived from the model's context window and the configured output length; the readout above the composer shows how full that budget is. Token counts are estimates, so a very long message or attached image can still overflow.
+Start a new chat, shorten the prompt, or lower the maximum output tokens so more of the window is left for input.
 
 ### `Failed to initialize model`
 
