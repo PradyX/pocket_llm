@@ -42,6 +42,7 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Regenerate assistant reply + Edit & Resend user prompts
 - Generation stats per assistant message (`tok/s`, elapsed time, token count, input tokens)
 - Context usage readout above the composer (used vs. available input tokens, with a note when older messages were trimmed to fit)
+- **Inference profiles**: Balanced, Battery Saver, Maximum Performance, or your own saved runtime configuration
 - Markdown-like code fence rendering + one-tap copy for code blocks
 - Adaptive generation mode for mobile performance tuning
 - Sampling presets: `Precise`, `Balanced`, `Creative`
@@ -71,6 +72,7 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Mobile-focused context setup (`nCtx`/`nBatch` tuned for device class)
 - Adaptive max-token behavior based on hardware + observed generation speed
 - **Token-aware context**: the prompt is assembled against the loaded model's context window and output reservation, keeping the system prompt and the newest turns, and dropping older ones only when the budget runs out
+- **Inference profiles**: context size, threads, GPU offload and sampling in one named configuration, applied to every model
 - GGUF signature checks to reject invalid/corrupt downloads
 
 ## Tech Stack
@@ -179,6 +181,13 @@ dart run build_runner build --delete-conflicting-outputs
 - The readout above the composer shows the input budget in use and says when older or shortened messages were trimmed to fit; tap it for the window and reservation details.
 - Token counts are estimates (~4 characters per token plus per-message overhead) because the bundled runtime exposes no tokenizer, so the budget is kept conservative on purpose.
 
+### Inference Profiles
+
+- Open **Inference Profiles** in the drawer to see what the active profile resolves to on this device, and to switch between profiles.
+- Built-ins: `Balanced` (app defaults), `Battery Saver` (1024 context, 2 threads, CPU only, short answers) and `Maximum Performance` (8192 context, full GPU offload, longer answers). Built-ins are read-only — duplicate one to get an editable copy.
+- A custom profile sets only what you choose: context size, prompt batch size, threads, GPU layers, KV cache placement, sampling and maximum answer length. Everything else keeps the app default for the device.
+- Profiles are stored locally as versioned JSON (`inference_profiles/` under the app support directory) and apply to every model; switching profiles mid-conversation reloads the model with the new settings.
+
 ## Troubleshooting
 
 ### `HTTP 401/403` while downloading model
@@ -190,7 +199,7 @@ Use a public direct URL ending with `.gguf`.
 
 Your prompt/context is too large for current runtime settings.
 The app assembles the prompt against a token budget derived from the model's context window and the configured output length; the readout above the composer shows how full that budget is. Token counts are estimates, so a very long message or attached image can still overflow.
-Start a new chat, shorten the prompt, or lower the maximum output tokens so more of the window is left for input.
+Start a new chat, shorten the prompt, lower the maximum output tokens, or switch to a profile with a smaller context (for example `Battery Saver`).
 
 ### `Failed to initialize model`
 
