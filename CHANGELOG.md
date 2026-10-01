@@ -20,6 +20,14 @@ All notable changes to this project will be documented in this file.
   - New Model Details screen, reachable from any model in the model list, showing source/storage information and the parsed GGUF metadata.
   - Hugging Face repository browser: paste `author/repository` or a `huggingface.co` link to list GGUF quantization variants with sizes, then download the selected one through the existing resumable downloader (paired `mmproj` projectors are downloaded too).
   - Imported and repository models persist through the existing custom-model storage with versioned JSON metadata; models saved before Phase 2 keep working.
+- **Hardware intelligence (Roadmap Phase 3)**: the app now knows the device and whether a model fits.
+  - Local device profile: OS and version, CPU architecture, core count, physical and available memory, and free/total storage. Collected on demand, never uploaded.
+    - Linux and Android read `/proc/meminfo`; macOS uses `sysctl` plus `vm_stat`; platforms without a reader (currently iOS) report memory as unknown instead of guessing.
+  - Model compatibility rating: `Recommended`, `Should Run`, `May Be Slow`, `Memory Risk` and `Not Recommended`, derived from the model file size, its GGUF architecture metadata and the device memory budget.
+  - Memory estimate breakdown so the logic is visible rather than a black box: model weights, KV cache for the context actually used, vision projector weights and runtime overhead. The formula lives in `ModelCompatibilityEstimator` and is unit tested.
+  - Model Details shows the device summary, the rating and the estimate breakdown, with an explicit reminder that these are estimates, not guarantees of performance.
+  - Model list cards show the rating and required memory once their details are expanded, and the model screen shows the device summary next to storage usage.
+  - The chat runtime and the estimator share one context-size constant, so a rating always describes the context the model is really loaded with.
 
 ## [1.5.0] - 2026-03-24
 
