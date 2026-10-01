@@ -42,5 +42,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Required for text to speech: from Android 11 on, an app can only
+             see the packages it declares here, so without this the device's
+             speech engine cannot be found and reading aloud fails silently. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
     </queries>
 </manifest>
