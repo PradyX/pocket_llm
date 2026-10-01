@@ -1,10 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pocket_llm/features/benchmark/application/benchmark_history.dart';
 import 'package:pocket_llm/features/benchmark/application/benchmark_providers.dart';
 import 'package:pocket_llm/features/benchmark/application/benchmark_service.dart';
+import 'package:pocket_llm/features/benchmark/application/model_comparison_controller.dart';
+import 'package:pocket_llm/features/benchmark/application/model_comparison_service.dart';
 import 'package:pocket_llm/features/benchmark/domain/llmfit_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
@@ -197,46 +200,34 @@ class _BenchmarkScreenState extends ConsumerState<BenchmarkScreen> {
         selectionState.models.where((model) => model.isDownloaded).toList()
           ..sort(_compareModelsByParamSize);
     final generationStatus = ref.watch(homeGenerationStatusProvider);
+    final comparisonBusy = ref.watch(modelComparisonControllerProvider).isBusy;
     final showLlmfitTab = !Platform.isIOS;
 
-    if (!showLlmfitTab) {
-      return PopScope(
-        canPop: !_isRunningLocal,
-        child: Scaffold(
-          appBar: AppBar(title: const Text('Benchmark')),
-          body: _buildLocalBenchmarkTab(
-            context,
-            downloadedModels,
-            generationStatus.isGenerating,
-          ),
-        ),
-      );
-    }
+    final tabs = <Widget>[
+      const Tab(text: 'Local Benchmark'),
+      const Tab(text: 'Compare'),
+      if (showLlmfitTab) const Tab(text: 'LLMFit Benchmark'),
+    ];
+    final views = <Widget>[
+      _buildLocalBenchmarkTab(
+        context,
+        downloadedModels,
+        generationStatus.isGenerating,
+      ),
+      const _ModelComparisonTab(),
+      if (showLlmfitTab) _buildLlmfitBenchmarkTab(context),
+    ];
 
     return PopScope(
-      canPop: !_isRunningLocal && !_isRunningLlmfit,
+      canPop: !_isRunningLocal && !_isRunningLlmfit && !comparisonBusy,
       child: DefaultTabController(
-        length: 2,
+        length: tabs.length,
         child: Scaffold(
           appBar: AppBar(
             title: const Text('Benchmark'),
-            bottom: const TabBar(
-              tabs: [
-                Tab(text: 'Local Benchmark'),
-                Tab(text: 'LLMFit Benchmark'),
-              ],
-            ),
+            bottom: TabBar(tabs: tabs),
           ),
-          body: TabBarView(
-            children: [
-              _buildLocalBenchmarkTab(
-                context,
-                downloadedModels,
-                generationStatus.isGenerating,
-              ),
-              _buildLlmfitBenchmarkTab(context),
-            ],
-          ),
+          body: TabBarView(children: views),
         ),
       ),
     );
@@ -1043,6 +1034,466 @@ class _NoticeCard extends StatelessWidget {
                 style: textTheme.bodyMedium?.copyWith(color: foregroundColor),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One prompt, two to four installed models, answers shown independently.
+///
+/// This is the Phase 8 comparison surface, kept on the Benchmark page because
+/// the two are the same job: measuring what local models do on this device.
+class _ModelComparisonTab extends ConsumerStatefulWidget {
+  const _ModelComparisonTab();
+
+  @override
+  ConsumerState<_ModelComparisonTab> createState() =>
+      _ModelComparisonTabState();
+}
+
+class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
+  /// Typing lives in a text controller; the run state keeps the text so a tab
+  /// switch does not lose the prompt.
+  late final TextEditingController _promptController = TextEditingController(
+    text: ref.read(modelComparisonControllerProvider).prompt,
+  );
+
+  @override
+  void dispose() {
+    _promptController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final state = ref.watch(modelComparisonControllerProvider);
+    final controller = ref.read(modelComparisonControllerProvider.notifier);
+    final installedModels = ref.watch(installedComparisonModelsProvider);
+    final chatBusy = ref.watch(homeGenerationStatusProvider).isGenerating;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colorScheme.tertiaryContainer,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    Icons.compare_arrows_rounded,
+                    color: colorScheme.onTertiaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Model Comparison',
+                        style: textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Send one prompt to '
+                        '${ModelComparisonService.minimumModels}–'
+                        '${ModelComparisonService.maximumModels} installed '
+                        'models and see each answer with its own speed, tokens '
+                        'and memory numbers.',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Models',
+                        style: textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${state.selectedCount} of '
+                      '${ModelComparisonService.maximumModels} selected',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (installedModels.isEmpty)
+                  Text(
+                    'No local models are installed yet. Download or import a '
+                    'GGUF model to compare one.',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  )
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final model in installedModels)
+                        _comparisonModelChip(
+                          model: model,
+                          state: state,
+                          onToggle: () => controller.toggleModel(model.id),
+                        ),
+                    ],
+                  ),
+                const SizedBox(height: 10),
+                Text(
+                  'Models run one at a time — the next is loaded only after '
+                  'the previous answer finishes — so two models are never '
+                  'resident at once.',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Prompt',
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _promptController,
+                  enabled: !state.isBusy,
+                  minLines: 2,
+                  maxLines: 4,
+                  onChanged: controller.setPrompt,
+                  decoration: const InputDecoration(
+                    hintText: 'What should every model answer?',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Sent unchanged to every model, with the same '
+                  '${ModelComparisonService.defaultMaxTokens}-token output '
+                  'budget and the same context window.',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: state.canRun && !chatBusy
+                          ? controller.run
+                          : null,
+                      icon: state.isBusy
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.play_arrow_rounded),
+                      label: Text(
+                        state.isBusy ? 'Comparing...' : 'Compare Models',
+                      ),
+                    ),
+                    if (state.isBusy)
+                      OutlinedButton.icon(
+                        onPressed: controller.cancel,
+                        icon: const Icon(Icons.stop_rounded),
+                        label: const Text('Stop'),
+                      ),
+                    if (state.hasResults && !state.isBusy)
+                      TextButton.icon(
+                        onPressed: controller.clear,
+                        icon: const Icon(Icons.clear_all_rounded),
+                        label: const Text('Clear Results'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (chatBusy)
+          const Padding(
+            padding: EdgeInsets.only(top: 12),
+            child: _NoticeCard(
+              icon: Icons.info_outline_rounded,
+              text: 'Stop the current chat response before comparing models.',
+            ),
+          ),
+        if (state.errorMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: _NoticeCard(
+              icon: Icons.error_outline_rounded,
+              text: state.errorMessage!,
+              isError: true,
+            ),
+          ),
+        if (state.isBusy)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _progressLabel(state),
+                      style: textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    LinearProgressIndicator(
+                      value: state.queuedModelCount == 0
+                          ? null
+                          : state.results.length / state.queuedModelCount,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (state.hasResults) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 18, 4, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Answers',
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (state.wasStopped)
+                  Text(
+                    'Stopped — the last answer may be partial',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          ...state.results.map(
+            (result) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _ComparisonResultCard(result: result),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _comparisonModelChip({
+    required LlmModel model,
+    required ModelComparisonState state,
+    required VoidCallback onToggle,
+  }) {
+    final isSelected = state.selectedModelIds.contains(model.id);
+    final quantization = model.ggufMetadata?.quantization;
+
+    return FilterChip(
+      label: Text(model.name),
+      selected: isSelected,
+      // A full selection keeps its models and disables the rest until one is
+      // removed, which is clearer than silently dropping the oldest pick.
+      onSelected: state.isBusy || (state.isSelectionFull && !isSelected)
+          ? null
+          : (_) => onToggle(),
+      tooltip: [
+        model.parameterSize,
+        if (quantization != null && quantization.isNotEmpty) quantization,
+      ].join(' · '),
+    );
+  }
+
+  String _progressLabel(ModelComparisonState state) {
+    final running = state.runningModelName;
+    if (running == null) return 'Finishing comparison...';
+    final position = state.results.length + 1;
+    return 'Running $position of ${state.queuedModelCount}: $running...';
+  }
+}
+
+/// One model's answer plus the metrics captured for it.
+class _ComparisonResultCard extends StatelessWidget {
+  const _ComparisonResultCard({required this.result});
+
+  final LocalBenchmarkResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final isError = !result.isSuccess;
+    final totalTokens =
+        result.generatedTokens + (result.promptTokensEstimated ?? 0);
+    final answer = result.outputText.trim();
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    result.model.name,
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isError
+                        ? colorScheme.errorContainer
+                        : colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    isError ? 'Error' : result.model.parameterSize,
+                    style: textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: isError
+                          ? colorScheme.onErrorContainer
+                          : colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
+                if (!isError)
+                  IconButton(
+                    tooltip: 'Copy answer',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: answer));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Answer copied.'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_all_outlined, size: 20),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (isError)
+              Text(
+                result.errorMessage ?? 'Unknown comparison error.',
+                style: textTheme.bodyMedium?.copyWith(color: colorScheme.error),
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _MetricChip(
+                    label: 'Latency',
+                    value: '${result.latencyMs} ms',
+                  ),
+                  _MetricChip(
+                    label: 'Tokens/sec',
+                    value: result.tokensPerSecond.toStringAsFixed(1),
+                  ),
+                  _MetricChip(
+                    label: 'Total tokens (est.)',
+                    value: '$totalTokens',
+                  ),
+                  if (result.ttftMs != null)
+                    _MetricChip(
+                      label: 'First token',
+                      value: '${result.ttftMs} ms',
+                    ),
+                  if (result.promptTokensPerSecond != null)
+                    _MetricChip(
+                      label: 'Prompt tok/s (est.)',
+                      value: result.promptTokensPerSecond!.toStringAsFixed(1),
+                    ),
+                  if (result.peakMemoryBytes != null)
+                    _MetricChip(
+                      label: 'Peak memory',
+                      value: formatBytesCompact(result.peakMemoryBytes!),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _resultConfigurationLabel(result),
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                answer.isEmpty
+                    ? 'No text was produced before the run ended.'
+                    : answer,
+                style: textTheme.bodyMedium,
+              ),
+            ],
           ],
         ),
       ),
