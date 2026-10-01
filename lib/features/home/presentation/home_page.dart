@@ -10,6 +10,7 @@ import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
@@ -989,6 +990,15 @@ class _HomePageState extends ConsumerState<HomePage> {
             },
           ),
           ListTile(
+            leading: const Icon(Icons.folder_copy_outlined),
+            title: const Text('Documents'),
+            subtitle: Text(_documentsSubtitle(ref.watch(documentsProvider))),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.documents);
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.face_retouching_natural),
             title: const Text('Personas'),
             subtitle: Text(
@@ -1473,6 +1483,17 @@ class _MarkdownCodeMessage extends StatelessWidget {
 
     return segments;
   }
+}
+
+/// Subtitle for the Documents drawer entry.
+String _documentsSubtitle(DocumentsState state) {
+  if (!state.isReady) return 'Opening the local index…';
+  if (!state.hasDocuments) return 'Add local files to ask about them';
+  final documents = state.documents.length;
+  final changed = state.outdatedCount;
+  return '$documents ${documents == 1 ? 'document' : 'documents'} · '
+      '${state.chunkCount} chunks'
+      '${changed > 0 ? ' · $changed changed' : ''}';
 }
 
 class _MarkdownSegment {

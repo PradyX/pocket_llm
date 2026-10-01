@@ -1,5 +1,6 @@
 import 'package:pocket_llm/features/benchmark/presentation/benchmark_screen.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversations_page.dart';
+import 'package:pocket_llm/features/documents/presentation/documents_page.dart';
 import 'package:pocket_llm/features/home/presentation/home_page.dart';
 import 'package:pocket_llm/features/inference_profiles/presentation/inference_profiles_page.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_details_page.dart';
@@ -23,6 +24,7 @@ abstract class AppRoutes {
   static const conversations = '/conversations';
   static const inferenceProfiles = '/inference-profiles';
   static const personas = '/personas';
+  static const documents = '/documents';
   static const modelDetails = '/model-details';
 
   /// Route to the GGUF metadata inspector for [modelId].
@@ -68,6 +70,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.personas,
         builder: (context, state) => const PersonasPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.documents,
+        builder: (context, state) => const DocumentsPage(),
       ),
       GoRoute(
         path: AppRoutes.about,
