@@ -6,6 +6,7 @@ import 'package:pocket_llm/core/services/device_profile_service.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
+import 'package:pocket_llm/core/services/process_memory_probe.dart';
 import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 
 final llmServiceProvider = Provider<LlmService>((ref) {
@@ -41,6 +42,11 @@ final deviceProfileServiceProvider = Provider<DeviceProfileService>((ref) {
 /// Cached device profile for the current session.
 final deviceProfileProvider = FutureProvider<DeviceProfile>((ref) {
   return ref.watch(deviceProfileServiceProvider).collect();
+});
+
+/// Reads this process's memory use for benchmark records.
+final processMemoryProbeProvider = Provider<ProcessMemoryProbe>((ref) {
+  return ProcessMemoryProbe();
 });
 
 /// Estimates whether a model fits on this device.

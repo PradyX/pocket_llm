@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/features/benchmark/application/benchmark_history.dart';
+import 'package:pocket_llm/features/benchmark/application/benchmark_providers.dart';
 import 'package:pocket_llm/features/benchmark/application/benchmark_service.dart';
 import 'package:pocket_llm/features/benchmark/domain/llmfit_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
@@ -21,11 +23,71 @@ class _BenchmarkScreenState extends ConsumerState<BenchmarkScreen> {
   final _llmfitHorizontalController = ScrollController();
 
   List<LocalBenchmarkResult> _localResults = const [];
+  List<BenchmarkRunRecord> _history = const [];
+  bool _isLoadingHistory = true;
   LlmfitBenchmarkResult? _llmfitResult;
   bool _isRunningLocal = false;
   bool _isRunningLlmfit = false;
   String? _localError;
   String? _llmfitError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadHistory());
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      final history = await ref.read(benchmarkHistoryProvider.future);
+      final runs = history.loadRuns().reversed.toList(growable: false);
+      if (!mounted) return;
+      setState(() {
+        _history = runs;
+        _isLoadingHistory = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingHistory = false);
+    }
+  }
+
+  Future<void> _clearHistory() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear benchmark history?'),
+        content: const Text(
+          'This removes every saved benchmark run from this device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final history = await ref.read(benchmarkHistoryProvider.future);
+      history.clearRuns();
+      if (!mounted) return;
+      setState(() => _history = const []);
+      _showSnackBar('Benchmark history cleared.');
+    } catch (error) {
+      if (!mounted) return;
+      _showSnackBar('Could not clear benchmark history: $error');
+    }
+  }
 
   @override
   void dispose() {
@@ -58,6 +120,21 @@ class _BenchmarkScreenState extends ConsumerState<BenchmarkScreen> {
       final results = await ref
           .read(benchmarkServiceProvider)
           .runLocalBenchmark(models: models);
+
+      // Persist every run (including failures) so history stays comparable.
+      try {
+        final history = await ref.read(benchmarkHistoryProvider.future);
+        history.appendRuns(results);
+        final saved = history.loadRuns().reversed.toList(growable: false);
+        if (!mounted) return;
+        setState(() {
+          _localResults = results;
+          _history = saved;
+        });
+        return;
+      } catch (_) {
+        // Persistence failures must not hide fresh results.
+      }
 
       if (!mounted) return;
       setState(() {
@@ -314,6 +391,54 @@ class _BenchmarkScreenState extends ConsumerState<BenchmarkScreen> {
             (result) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: _LocalBenchmarkResultCard(result: result),
+            ),
+          ),
+        ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 22, 4, 10),
+          child: Row(
+            children: [
+              Text(
+                'History',
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              if (_history.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _isRunningLocal ? null : _clearHistory,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('Clear'),
+                ),
+            ],
+          ),
+        ),
+        if (_isLoadingHistory)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: LinearProgressIndicator(),
+          )
+        else if (_history.isEmpty)
+          const _NoticeCard(
+            icon: Icons.history_rounded,
+            text:
+                'No saved runs yet. Every benchmark is stored on this device so you can compare configurations over time.',
+          )
+        else ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Saved runs include the runtime configuration and device snapshot, so results stay comparable across releases.',
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          ..._history.map(
+            (record) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _BenchmarkHistoryCard(record: record),
             ),
           ),
         ],
@@ -618,7 +743,32 @@ class _LocalBenchmarkResultCard extends StatelessWidget {
                     label: 'Output',
                     value: '${result.generatedTokens} tok',
                   ),
+                  if (result.ttftMs != null)
+                    _MetricChip(
+                      label: 'First token',
+                      value: '${result.ttftMs} ms',
+                    ),
+                  if (result.promptTokensPerSecond != null)
+                    _MetricChip(
+                      label: 'Prompt tok/s (est.)',
+                      value: result.promptTokensPerSecond!.toStringAsFixed(1),
+                    ),
+                  if (result.peakMemoryBytes != null)
+                    _MetricChip(
+                      label: 'Peak memory',
+                      value: formatBytesCompact(result.peakMemoryBytes!),
+                    ),
                 ],
+              ),
+            if (!isError)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _resultConfigurationLabel(result),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
             if (isError)
               Text(
@@ -647,6 +797,143 @@ class _LocalBenchmarkResultCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// `4096 ctx · Metal · 8 threads · Q4_K_M` with honest fallbacks.
+String _resultConfigurationLabel(LocalBenchmarkResult result) {
+  final quantization = result.model.ggufMetadata?.quantization;
+  final parts = <String>[
+    if (result.contextTokens != null) '${result.contextTokens} ctx',
+    if (result.backend != null) result.backend!,
+    if (result.threads != null) '${result.threads} threads',
+    if (result.gpuLayers != null && result.gpuLayers! > 0)
+      '${result.gpuLayers} GPU layers',
+    if (result.offloadKqv == true) 'KV on GPU',
+    if (quantization != null && quantization.isNotEmpty) quantization,
+  ];
+  return parts.isEmpty
+      ? 'Runtime configuration was not reported by this build.'
+      : parts.join(' · ');
+}
+
+/// One persisted benchmark run.
+class _BenchmarkHistoryCard extends StatelessWidget {
+  final BenchmarkRunRecord record;
+
+  const _BenchmarkHistoryCard({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final isError = !record.isSuccess;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    record.displayTitle,
+                    style: textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (isError)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      'Error',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onErrorContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${formatRunTimestamp(record.timestamp)} · '
+              '${record.configurationLabel}',
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (!isError) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _MetricChip(
+                    label: 'Tokens/sec',
+                    value: record.tokensPerSecond.toStringAsFixed(1),
+                  ),
+                  if (record.ttftMs != null)
+                    _MetricChip(
+                      label: 'First token',
+                      value: '${record.ttftMs} ms',
+                    ),
+                  if (record.promptTokensPerSecond != null)
+                    _MetricChip(
+                      label: 'Prompt tok/s (est.)',
+                      value: record.promptTokensPerSecond!.toStringAsFixed(1),
+                    ),
+                  if (record.peakMemoryBytes != null)
+                    _MetricChip(
+                      label: 'Peak memory',
+                      value: formatBytesCompact(record.peakMemoryBytes!),
+                    ),
+                ],
+              ),
+              if (record.deviceSummary != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Device: ${record.deviceSummary}',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ] else if (record.errorMessage != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                record.errorMessage!,
+                style: textTheme.bodySmall?.copyWith(color: colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact byte label shared by the result and history cards.
+String formatBytesCompact(int bytes) {
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+  return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
 }
 
 class _MetricChip extends StatelessWidget {

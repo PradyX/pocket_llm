@@ -7,14 +7,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:pocket_llm/core/services/device_profile_service.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
+import 'package:pocket_llm/core/services/process_memory_probe.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
-import 'package:pocket_llm/features/benchmark/application/benchmark_history.dart';
 import 'package:pocket_llm/features/benchmark/domain/llmfit_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
+import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 
 final benchmarkServiceProvider = Provider<BenchmarkService>((ref) {
@@ -22,6 +24,8 @@ final benchmarkServiceProvider = Provider<BenchmarkService>((ref) {
     llmService: ref.read(llmServiceProvider),
     modelStorageService: ref.read(modelStorageServiceProvider),
     platformRuntimePathsService: ref.read(platformRuntimePathsServiceProvider),
+    deviceProfileService: ref.read(deviceProfileServiceProvider),
+    memoryProbe: ref.read(processMemoryProbeProvider),
   );
 });
 
@@ -37,12 +41,27 @@ class BenchmarkService {
   final LlmService llmService;
   final ModelStorageService modelStorageService;
   final PlatformRuntimePathsService platformRuntimePathsService;
+  final DeviceProfileService deviceProfileService;
+  final ProcessMemoryProbe memoryProbe;
 
   const BenchmarkService({
     required this.llmService,
     required this.modelStorageService,
     required this.platformRuntimePathsService,
+    required this.deviceProfileService,
+    required this.memoryProbe,
   });
+
+  /// Rough prompt token count used for the prompt-processing rate.
+  ///
+  /// The bundled runtime exposes no tokenizer through its isolate API, so this
+  /// uses the usual ~4 characters per token approximation and the UI marks the
+  /// resulting rate as estimated.
+  static int estimatePromptTokens(String prompt) {
+    final characters = prompt.runes.length;
+    if (characters <= 0) return 0;
+    return (characters / 4).ceil();
+  }
 
   Future<List<LocalBenchmarkResult>> runLocalBenchmark({
     required List<LlmModel> models,
@@ -144,21 +163,22 @@ class BenchmarkService {
   }
 
   Future<LocalBenchmarkResult> _runSingleModelBenchmark(LlmModel model) async {
-    final fileName = model.localFileName;
-    if (!model.isDownloaded || fileName == null || fileName.isEmpty) {
-      return LocalBenchmarkResult(
-        model: model,
-        latencyMs: 0,
-        tokensPerSecond: 0,
-        generatedTokens: 0,
-        outputText: '',
-        errorMessage: 'Model is not downloaded on this device.',
+    if (!model.isDownloaded) {
+      return _failedResult(model, 'Model is not downloaded on this device.');
+    }
+
+    // Managed downloads and imported/external references both resolve here.
+    final modelPath = await modelStorageService.resolveModelPath(model);
+    if (modelPath == null ||
+        !await modelStorageService.isModelPathDownloaded(modelPath)) {
+      return _failedResult(
+        model,
+        'Model file is missing or incomplete on this device.',
       );
     }
 
     try {
-      final modelPath = await modelStorageService.getLocalFilePath(fileName);
-      final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096;
+      final targetNCtx = ModelCompatibilityService.defaultContextTokens;
 
       await llmService.ensureModelLoaded(
         modelPath,
@@ -174,24 +194,24 @@ class BenchmarkService {
         systemPrompt: benchmarkSystemPrompt,
         promptFormatId: model.promptFormatId,
       );
+      final stopToken = modelStopToken(model.promptFormatId);
       final responseBuffer = StringBuffer();
       var generatedTokenCount = 0;
+      int? ttftMs;
       final stopwatch = Stopwatch()..start();
 
       await for (final token in llmService.generateResponse(
         promptBundle.prompt,
         maxTokens: benchmarkMaxTokens,
       )) {
-        final cleanToken = token.replaceAll(
-          modelStopToken(model.promptFormatId),
-          '',
-        );
+        final cleanToken = token.replaceAll(stopToken, '');
         if (cleanToken.isNotEmpty) {
+          ttftMs ??= stopwatch.elapsedMilliseconds;
           responseBuffer.write(cleanToken);
           generatedTokenCount++;
         }
 
-        if (token.contains(modelStopToken(model.promptFormatId))) {
+        if (token.contains(stopToken)) {
           break;
         }
       }
@@ -204,23 +224,46 @@ class BenchmarkService {
           : 0.0;
       final outputText = buildFinalResponseText(responseBuffer.toString());
 
+      final promptTokens = estimatePromptTokens(promptBundle.prompt);
+      final promptTokensPerSecond = ttftMs != null && ttftMs > 0
+          ? promptTokens / (ttftMs / 1000.0)
+          : null;
+      final device = await deviceProfileService.collect();
+      final peakMemoryBytes = await memoryProbe.readResidentMemoryBytes();
+
       return LocalBenchmarkResult(
         model: model,
         latencyMs: elapsedMs,
         tokensPerSecond: tokensPerSecond,
         generatedTokens: generatedTokenCount,
         outputText: outputText,
+        ttftMs: ttftMs,
+        promptTokensEstimated: promptTokens > 0 ? promptTokens : null,
+        promptTokensPerSecond: promptTokensPerSecond,
+        contextTokens: llmService.configuredContextSize,
+        threads: llmService.configuredThreads,
+        gpuLayers: llmService.configuredGpuLayers,
+        offloadKqv: llmService.configuredOffloadKqv,
+        backend: llmService.runtimeBackend,
+        peakMemoryBytes: peakMemoryBytes,
+        deviceSummary: device.summaryLabel,
+        deviceCpuCores: device.cpuCores,
+        deviceMemoryBytes: device.totalMemoryBytes,
       );
     } catch (error) {
-      return LocalBenchmarkResult(
-        model: model,
-        latencyMs: 0,
-        tokensPerSecond: 0,
-        generatedTokens: 0,
-        outputText: '',
-        errorMessage: error.toString(),
-      );
+      return _failedResult(model, error.toString());
     }
+  }
+
+  static LocalBenchmarkResult _failedResult(LlmModel model, String message) {
+    return LocalBenchmarkResult(
+      model: model,
+      latencyMs: 0,
+      tokensPerSecond: 0,
+      generatedTokens: 0,
+      outputText: '',
+      errorMessage: message,
+    );
   }
 
   Future<File?> _resolveLlmfitExecutable() async {

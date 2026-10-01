@@ -24,6 +24,10 @@ class LlmService {
   bool _stopRequested = false;
   int _configuredNCtx = 0;
   int _configuredNBatch = 0;
+  int _configuredThreads = 0;
+  int _configuredThreadsBatch = 0;
+  int _configuredGpuLayers = 0;
+  bool _configuredOffloadKqv = false;
   double _configuredTemperature = _defaultTemperature;
   double _configuredTopP = _defaultTopP;
   int _configuredTopK = _defaultTopK;
@@ -37,6 +41,28 @@ class LlmService {
   bool get isGenerating => _isGenerating;
   bool get isStopRequested => _stopRequested;
   String? get loadedModelPath => _loadedModelPath;
+
+  /// Effective runtime configuration of the loaded model.
+  ///
+  /// These reflect what the engine was actually started with (including the
+  /// defaults this service applies), so diagnostics and benchmark records can
+  /// describe a run instead of guessing.
+  int get configuredContextSize => _configuredNCtx;
+  int get configuredBatchSize => _configuredNBatch;
+  int get configuredThreads => _configuredThreads;
+  int get configuredThreadsBatch => _configuredThreadsBatch;
+  int get configuredGpuLayers => _configuredGpuLayers;
+  bool get configuredOffloadKqv => _configuredOffloadKqv;
+
+  /// Best-effort label for the compute backend of the loaded model.
+  ///
+  /// Metal is the only GPU path the bundled runtime uses; everything else is
+  /// reported as CPU when no layers are offloaded.
+  String get runtimeBackend {
+    if (!isLoaded) return 'unknown';
+    if (Platform.isMacOS || Platform.isIOS) return 'Metal';
+    return _configuredGpuLayers > 0 ? 'GPU offload' : 'CPU';
+  }
 
   Future<void> loadModel(
     String modelPath, {
@@ -101,6 +127,10 @@ class LlmService {
       offloadKqv: offloadKqv ?? !isMobile,
     );
     _nPredict = nPredict ?? -1;
+    _configuredThreads = contextParams.nThreads;
+    _configuredThreadsBatch = contextParams.nThreadsBatch;
+    _configuredGpuLayers = modelParams.gpuLayers;
+    _configuredOffloadKqv = contextParams.offloadKqv;
     final samplerParams = SamplerParams(
       temperature: temperature ?? _defaultTemperature,
       topP: topP ?? _defaultTopP,
@@ -159,6 +189,10 @@ class LlmService {
     _stopRequested = false;
     _configuredNCtx = 0;
     _configuredNBatch = 0;
+    _configuredThreads = 0;
+    _configuredThreadsBatch = 0;
+    _configuredGpuLayers = 0;
+    _configuredOffloadKqv = false;
     _configuredTemperature = _defaultTemperature;
     _configuredTopP = _defaultTopP;
     _configuredTopK = _defaultTopK;

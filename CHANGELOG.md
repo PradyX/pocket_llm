@@ -20,7 +20,7 @@ All notable changes to this project will be documented in this file.
   - New Model Details screen, reachable from any model in the model list, showing source/storage information and the parsed GGUF metadata.
   - Hugging Face repository browser: paste `author/repository` or a `huggingface.co` link to list GGUF quantization variants with sizes, then download the selected one through the existing resumable downloader (paired `mmproj` projectors are downloaded too).
   - Imported and repository models persist through the existing custom-model storage with versioned JSON metadata; models saved before Phase 2 keep working.
-- **Hardware intelligence (Roadmap Phase 3)**: the app now knows the device and whether a model fits.
+- **Hardware intelligence (Roadmap Phase 3)**: the app now knows the device, whether a model fits, and how fast it actually ran.
   - Local device profile: OS and version, CPU architecture, core count, physical and available memory, and free/total storage. Collected on demand, never uploaded.
     - Linux and Android read `/proc/meminfo`; macOS uses `sysctl` plus `vm_stat`; platforms without a reader (currently iOS) report memory as unknown instead of guessing.
   - Model compatibility rating: `Recommended`, `Should Run`, `May Be Slow`, `Memory Risk` and `Not Recommended`, derived from the model file size, its GGUF architecture metadata and the device memory budget.
@@ -28,6 +28,12 @@ All notable changes to this project will be documented in this file.
   - Model Details shows the device summary, the rating and the estimate breakdown, with an explicit reminder that these are estimates, not guarantees of performance.
   - Model list cards show the rating and required memory once their details are expanded, and the model screen shows the device summary next to storage usage.
   - The chat runtime and the estimator share one context-size constant, so a rating always describes the context the model is really loaded with.
+  - Benchmark records capture the runtime configuration (context size, quantization, backend, thread count, GPU layers, KV offload), time to first token, prompt-processing rate and memory use, plus a device snapshot, so runs from different releases can be compared honestly.
+    - Peak memory comes from `VmHWM` on Linux and Android; macOS has no high-water mark available to Dart, so the value is sampled after the run and labelled as such. Platforms without a probe store `null`.
+    - The prompt-processing rate is marked as an estimate: the bundled runtime exposes no tokenizer through its isolate API, so prompt tokens are approximated from prompt length.
+  - Benchmark history is now versioned storage (schema v2). Existing v1 history is read as-is and upgraded on the next write, and a history file that cannot be parsed is copied to `history.json.corrupt-<time>` instead of being overwritten.
+  - The Benchmark screen saves every run (including failures) and lists the saved history with a clear action; Model Details shows the latest measured run for the model next to its estimate.
+  - Imported and externally referenced models can be benchmarked now as well, not just managed downloads.
 
 ## [1.5.0] - 2026-03-24
 

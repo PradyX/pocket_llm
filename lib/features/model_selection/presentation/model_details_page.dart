@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pocket_llm/core/services/device_profile_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
+import 'package:pocket_llm/features/benchmark/application/benchmark_history.dart';
+import 'package:pocket_llm/features/benchmark/application/benchmark_providers.dart';
 import 'package:pocket_llm/features/model_selection/data/gguf_reader.dart';
 import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/gguf_metadata.dart';
@@ -30,6 +32,7 @@ class _ModelDetailsPageState extends ConsumerState<ModelDetailsPage> {
   ModelFitReport? _fit;
   bool _fitLoading = false;
   String? _fitError;
+  BenchmarkRunRecord? _lastBenchmark;
 
   @override
   void initState() {
@@ -37,7 +40,26 @@ class _ModelDetailsPageState extends ConsumerState<ModelDetailsPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadMetadata();
       _loadFit();
+      _loadLastBenchmark();
     });
+  }
+
+  /// Latest successful benchmark saved for this model, when there is one.
+  Future<void> _loadLastBenchmark() async {
+    try {
+      final history = await ref.read(benchmarkHistoryProvider.future);
+      BenchmarkRunRecord? latest;
+      for (final run in history.loadRuns()) {
+        if (run.modelId != widget.modelId || !run.isSuccess) continue;
+        if (latest == null || run.timestamp.isAfter(latest.timestamp)) {
+          latest = run;
+        }
+      }
+      if (!mounted) return;
+      setState(() => _lastBenchmark = latest);
+    } catch (_) {
+      // Benchmark history is optional information on this screen.
+    }
   }
 
   LlmModel? _findModel() {
@@ -379,6 +401,57 @@ class _ModelDetailsPageState extends ConsumerState<ModelDetailsPage> {
             color: colorScheme.onSurfaceVariant,
           ),
         ),
+      ),
+    );
+
+    final lastRun = _lastBenchmark;
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: _sectionHeader(context, 'Measured on this device'),
+      ),
+    );
+    if (lastRun == null) {
+      widgets.add(
+        Text(
+          'No benchmark has been saved for this model yet. Run one from the '
+          'Benchmark screen to compare measured speed.',
+          style: textTheme.bodySmall,
+        ),
+      );
+      return widgets;
+    }
+
+    widgets.add(
+      _row(
+        context,
+        'Generation',
+        '${lastRun.tokensPerSecond.toStringAsFixed(1)} tok/s',
+      ),
+    );
+    if (lastRun.ttftMs != null) {
+      widgets.add(_row(context, 'First token', '${lastRun.ttftMs} ms'));
+    }
+    if (lastRun.promptTokensPerSecond != null) {
+      widgets.add(
+        _row(
+          context,
+          'Prompt (est.)',
+          '${lastRun.promptTokensPerSecond!.toStringAsFixed(1)} tok/s',
+        ),
+      );
+    }
+    if (lastRun.peakMemoryBytes != null) {
+      widgets.add(
+        _row(context, 'Peak memory', _formatBytes(lastRun.peakMemoryBytes!)),
+      );
+    }
+    widgets.add(
+      _row(
+        context,
+        'Run',
+        '${lastRun.configurationLabel} · '
+            '${formatRunTimestamp(lastRun.timestamp)}',
       ),
     );
     return widgets;
