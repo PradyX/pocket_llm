@@ -153,11 +153,23 @@ class Message {
     return null;
   }
 
-  /// Path of the image attachment, if any.
+  /// Path of the first image attachment, if any.
   String? get imagePath => imageAttachment?.path;
 
-  /// Label of the image attachment, if any.
+  /// Label of the first image attachment, if any.
   String? get imageLabel => imageAttachment?.label;
+
+  /// Paths of every image attachment, in the order they were added.
+  List<String> get imagePaths => [
+    for (final attachment in attachments)
+      if (attachment.type == AttachmentType.image) attachment.path,
+  ];
+
+  /// Image attachments, in the order they were added.
+  List<MessageAttachment> get imageAttachments => [
+    for (final attachment in attachments)
+      if (attachment.type == AttachmentType.image) attachment,
+  ];
 
   Message copyWith({
     String? conversationId,

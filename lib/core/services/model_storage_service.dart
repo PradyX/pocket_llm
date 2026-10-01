@@ -76,6 +76,29 @@ class ModelStorageService {
     return attachmentsDir.path;
   }
 
+  /// Target file name for a copied attachment.
+  ///
+  /// `messageId_name.ext`, with [uniqueSuffix] inserted when a message carries
+  /// several files that share a name.
+  String attachmentFileName({
+    required String messageId,
+    required String sourcePath,
+    String? preferredFileName,
+    String? uniqueSuffix,
+  }) {
+    final originalName = (preferredFileName ?? p.basename(sourcePath)).trim();
+    final normalizedName = originalName.isEmpty ? 'image' : originalName;
+    final sanitizedBase = _sanitizeFileName(
+      p.basenameWithoutExtension(normalizedName),
+    ).replaceAll(RegExp(r'^_+|_+$'), '');
+    final extension = p.extension(normalizedName).toLowerCase();
+    final suffix = (uniqueSuffix ?? '').trim();
+    return '${messageId}_'
+        '${suffix.isEmpty ? '' : '${suffix}_'}'
+        '${sanitizedBase.isEmpty ? 'image' : sanitizedBase}'
+        '$extension';
+  }
+
   /// Removes the attachment directory of a conversation (used when the
   /// conversation itself is deleted).
   Future<void> deleteConversationAttachments(String conversationId) async {
@@ -91,6 +114,10 @@ class ModelStorageService {
     required String messageId,
     required String sourcePath,
     String? preferredFileName,
+
+    /// Distinguishes several attachments of the same message that share a file
+    /// name, so one never overwrites another.
+    String? uniqueSuffix,
   }) async {
     final sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
@@ -101,15 +128,14 @@ class ModelStorageService {
     final conversationDir = Directory(p.join(attachmentsDir, conversationId));
     await conversationDir.create(recursive: true);
 
-    final originalName = (preferredFileName ?? p.basename(sourcePath)).trim();
-    final normalizedName = originalName.isEmpty ? 'image' : originalName;
-    final sanitizedBase = _sanitizeFileName(
-      p.basenameWithoutExtension(normalizedName),
-    );
-    final extension = p.extension(normalizedName).toLowerCase();
     final targetPath = p.join(
       conversationDir.path,
-      '${messageId}_${sanitizedBase.isEmpty ? 'image' : sanitizedBase}$extension',
+      attachmentFileName(
+        messageId: messageId,
+        sourcePath: sourcePath,
+        preferredFileName: preferredFileName,
+        uniqueSuffix: uniqueSuffix,
+      ),
     );
 
     final copiedFile = await sourceFile.copy(targetPath);

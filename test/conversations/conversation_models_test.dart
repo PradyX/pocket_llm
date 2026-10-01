@@ -152,6 +152,42 @@ void main() {
       expect(restored.generationStats?.generatedTokens, 5);
     });
 
+    test('reports every image attachment in order', () {
+      final message = Message.create(
+        conversationId: 'c-1',
+        role: MessageRole.user,
+        content: 'Compare these',
+        attachments: [
+          MessageAttachment.create(
+            type: AttachmentType.image,
+            path: '/tmp/one.jpg',
+            label: 'one.jpg',
+          ),
+          MessageAttachment.create(
+            type: AttachmentType.document,
+            path: '/tmp/notes.txt',
+          ),
+          MessageAttachment.create(
+            type: AttachmentType.image,
+            path: '/tmp/two.jpg',
+            label: 'two.jpg',
+          ),
+        ],
+      );
+
+      expect(message.imagePaths, ['/tmp/one.jpg', '/tmp/two.jpg']);
+      expect(message.imageAttachments.map((a) => a.label), [
+        'one.jpg',
+        'two.jpg',
+      ]);
+      // Single-image accessors keep pointing at the first image.
+      expect(message.imagePath, '/tmp/one.jpg');
+      expect(message.imageLabel, 'one.jpg');
+
+      final restored = Message.fromJson(message.toJson());
+      expect(restored.imagePaths, ['/tmp/one.jpg', '/tmp/two.jpg']);
+    });
+
     test('round-trips prompt and context token stats', () {
       final message = Message.create(
         conversationId: 'c-1',

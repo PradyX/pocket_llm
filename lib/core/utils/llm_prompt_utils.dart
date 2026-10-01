@@ -1,12 +1,21 @@
 class LlmPromptMessage {
   final bool isUser;
   final String text;
-  final String? imagePath;
 
-  const LlmPromptMessage.user(this.text, {this.imagePath}) : isUser = true;
+  /// Images attached to this message, in the order they were added.
+  final List<String> imagePaths;
+
+  const LlmPromptMessage.user(this.text, {this.imagePaths = const []})
+    : isUser = true;
   const LlmPromptMessage.assistant(this.text)
     : isUser = false,
-      imagePath = null;
+      imagePaths = const [];
+
+  /// Paths that actually point at an image, in order.
+  List<String> get usableImagePaths => [
+    for (final path in imagePaths)
+      if (path.trim().isNotEmpty) path,
+  ];
 }
 
 class BuiltLlmPrompt {
@@ -71,9 +80,11 @@ BuiltLlmPrompt _buildGemma3Prompt(
   for (final message in messages) {
     if (message.isUser) {
       promptBuffer.write('<start_of_turn>user\n');
-      if (message.imagePath != null && message.imagePath!.trim().isNotEmpty) {
+      // One marker per image, in attachment order, so the model sees the same
+      // order the message records.
+      for (final imagePath in message.usableImagePaths) {
         promptBuffer.write('<image>\n');
-        imagePaths.add(message.imagePath!);
+        imagePaths.add(imagePath);
       }
       if (message.text.trim().isNotEmpty) {
         promptBuffer.write('${message.text.trim()}\n');

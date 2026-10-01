@@ -34,7 +34,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _scrollScheduled = false;
   ProviderSubscription<List<Message>>? _messagesSubscription;
   ProviderSubscription<ModelSelectionState>? _modelSelectionSubscription;
-  XFile? _draftImage;
+  final List<XFile> _draftImages = [];
+
+  /// More images than this would cost more context than a local model can
+  /// afford per turn, so the composer stops taking them.
+  static const int _maxDraftImages = 4;
 
   @override
   void dispose() {
@@ -55,10 +59,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     _modelSelectionSubscription = ref.listenManual(
       modelSelectionControllerProvider,
       (_, next) {
-        if (_draftImage == null) return;
+        if (_draftImages.isEmpty) return;
         if (_isVisionReady(next.selectedModel)) return;
 
-        setState(() => _draftImage = null);
+        setState(_draftImages.clear);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -86,9 +90,9 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     final selectedModel = selectionState.selectedModel;
     final text = _messageController.text.trim();
-    final draftImage = _draftImage;
+    final draftImages = List<XFile>.of(_draftImages);
 
-    if (draftImage != null && !_isVisionReady(selectedModel)) {
+    if (draftImages.isNotEmpty && !_isVisionReady(selectedModel)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -101,10 +105,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     if (text.isEmpty) {
-      if (draftImage != null) {
+      if (draftImages.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Add a question before sending the image.'),
+          SnackBar(
+            content: Text(
+              'Add a question before sending '
+              '${draftImages.length == 1 ? 'the image' : 'the images'}.',
+            ),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -114,15 +121,14 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     FocusScope.of(context).unfocus();
     _messageController.clear();
-    setState(() => _draftImage = null);
+    setState(_draftImages.clear);
     _scheduleScrollToBottom(animated: true);
 
     await ref
         .read(homeControllerProvider.notifier)
         .sendMessage(
           text,
-          imagePath: draftImage?.path,
-          imageLabel: draftImage != null ? p.basename(draftImage.path) : null,
+          imagePaths: [for (final file in draftImages) file.path],
         );
 
     if (!mounted) return;
@@ -132,12 +138,45 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _pickImage(LlmModel? selectedModel) async {
     if (!_isVisionReady(selectedModel)) return;
 
-    final pickedFile = await _imagePicker.pickImage(
-      source: ImageSource.gallery,
-    );
-    if (pickedFile == null) return;
+    final remaining = _maxDraftImages - _draftImages.length;
+    if (remaining <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'A message can carry up to $_maxDraftImages images. Remove one to '
+            'add another.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
-    setState(() => _draftImage = pickedFile);
+    List<XFile> pickedFiles;
+    try {
+      pickedFiles = await _imagePicker.pickMultiImage();
+    } catch (_) {
+      // Some platforms only offer the single-image picker; adding one image
+      // at a time still builds a multi-image message.
+      final single = await _imagePicker.pickImage(source: ImageSource.gallery);
+      pickedFiles = single == null ? const [] : [single];
+    }
+    if (pickedFiles.isEmpty) return;
+
+    final accepted = pickedFiles.take(remaining).toList(growable: false);
+    setState(() => _draftImages.addAll(accepted));
+
+    if (pickedFiles.length > accepted.length && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Only $_maxDraftImages images fit in one message, so the rest were '
+            'not added.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _startNewConversation() async {
@@ -540,7 +579,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         onEditResend:
                             (!isGenerating &&
                                 message.isUser &&
-                                message.imagePath == null)
+                                message.attachments.isEmpty)
                             ? () => _editAndResendMessage(message)
                             : null,
                       );
@@ -702,10 +741,10 @@ class _HomePageState extends ConsumerState<HomePage> {
               contextUsage,
               isGenerating,
             ),
-          if (_draftImage != null)
+          if (_draftImages.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: _buildDraftImagePreview(context, colorScheme, textTheme),
+              child: _buildDraftImagesPreview(context, colorScheme, textTheme),
             ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -856,15 +895,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _buildDraftImagePreview(
+  Widget _buildDraftImagesPreview(
     BuildContext context,
     ColorScheme colorScheme,
     TextTheme textTheme,
   ) {
-    final draftImage = _draftImage;
-    final imageFile = draftImage != null ? File(draftImage.path) : null;
-    final imageExists = imageFile?.existsSync() ?? false;
-    final label = draftImage != null ? p.basename(draftImage.path) : 'Image';
+    final count = _draftImages.length;
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -872,53 +908,37 @@ class _HomePageState extends ConsumerState<HomePage> {
         color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(18),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              width: 56,
-              height: 56,
-              child: imageExists
-                  ? Image.file(imageFile!, fit: BoxFit.cover)
-                  : DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHigh,
-                      ),
-                      child: Icon(
-                        Icons.image_not_supported_outlined,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '1 image attached',
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  count == 1 ? '1 image attached' : '$count images attached',
                   style: textTheme.labelLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+              ),
+              if (count > 1)
+                TextButton(
+                  onPressed: () => setState(_draftImages.clear),
+                  child: const Text('Clear all'),
                 ),
-              ],
-            ),
+            ],
           ),
-          IconButton(
-            tooltip: 'Remove image',
-            onPressed: () => setState(() => _draftImage = null),
-            icon: const Icon(Icons.close_rounded),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (var index = 0; index < count; index++)
+                _DraftImageThumb(
+                  file: _draftImages[index],
+                  onRemove: () => setState(() => _draftImages.removeAt(index)),
+                ),
+            ],
           ),
         ],
       ),
@@ -1116,7 +1136,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
     final hasExternalUserEdit =
         isUser &&
         widget.onEditResend != null &&
-        widget.message.imagePath == null;
+        widget.message.attachments.isEmpty;
     final text = widget.message.content;
     final actionForeground = isUser
         ? colorScheme.onPrimary
@@ -1174,13 +1194,19 @@ class _ChatBubbleState extends State<_ChatBubble> {
                 ],
               ),
             ),
-          if (widget.message.imagePath != null) ...[
+          for (
+            var index = 0;
+            index < widget.message.imageAttachments.length;
+            index++
+          ) ...[
             _MessageImage(
-              imagePath: widget.message.imagePath!,
-              imageLabel: widget.message.imageLabel,
+              imagePath: widget.message.imageAttachments[index].path,
+              imageLabel: widget.message.imageAttachments[index].label,
               isUser: isUser,
             ),
-            if (text.trim().isNotEmpty) const SizedBox(height: 12),
+            if (index < widget.message.imageAttachments.length - 1 ||
+                text.trim().isNotEmpty)
+              const SizedBox(height: 12),
           ],
           if (hasCodeFences)
             _MarkdownCodeMessage(
@@ -1416,6 +1442,91 @@ class _MessageSources extends ConsumerWidget {
       if (chunk.index == source.chunkIndex) return chunk.text;
     }
     return null;
+  }
+}
+
+/// One pending image in the composer, with a remove button.
+class _DraftImageThumb extends StatelessWidget {
+  const _DraftImageThumb({required this.file, required this.onRemove});
+
+  final XFile file;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final imageFile = File(file.path);
+    final imageExists = imageFile.existsSync();
+    final label = p.basename(file.path);
+
+    return Tooltip(
+      message: label,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: imageExists
+                      ? Image.file(imageFile, fit: BoxFit.cover)
+                      : DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHigh,
+                          ),
+                          child: Icon(
+                            Icons.image_not_supported_outlined,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                ),
+              ),
+              Positioned(
+                top: -6,
+                right: -6,
+                child: Material(
+                  color: colorScheme.surfaceContainerHighest,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: onRemove,
+                    child: Tooltip(
+                      message: 'Remove image',
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 14,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          SizedBox(
+            width: 64,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

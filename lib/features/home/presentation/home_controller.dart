@@ -145,16 +145,15 @@ class HomeController extends _$HomeController {
     return const [];
   }
 
+  /// Sends [text] with any number of attached images, in the order given.
   Future<void> sendMessage(
     String text, {
-    String? imagePath,
-    String? imageLabel,
+    List<String> imagePaths = const [],
   }) async {
     await _runPrompt(
       promptText: text,
       appendUserMessage: true,
-      imagePath: imagePath,
-      imageLabel: imageLabel,
+      imagePaths: imagePaths,
     );
   }
 
@@ -211,8 +210,7 @@ class HomeController extends _$HomeController {
     required String promptText,
     required bool appendUserMessage,
     List<Message>? baseMessages,
-    String? imagePath,
-    String? imageLabel,
+    List<String> imagePaths = const [],
   }) async {
     final generationStatus = ref.read(homeGenerationStatusProvider);
     if (generationStatus.isGenerating) return;
@@ -247,20 +245,29 @@ class HomeController extends _$HomeController {
     try {
       if (appendUserMessage) {
         final userMessageId = IdGenerator.message();
-        MessageAttachment? attachment;
+        final usableImagePaths = [
+          for (final path in imagePaths)
+            if (path.trim().isNotEmpty) path,
+        ];
+        final attachments = <MessageAttachment>[];
 
-        if (imagePath != null && imagePath.trim().isNotEmpty) {
-          final label = (imageLabel ?? p.basename(imagePath)).trim();
+        for (var index = 0; index < usableImagePaths.length; index++) {
+          final imagePath = usableImagePaths[index];
+          final label = p.basename(imagePath).trim();
           final storedImagePath = await _storageService.copyAttachmentToChat(
             conversationId: conversationId,
             messageId: userMessageId,
             sourcePath: imagePath,
             preferredFileName: label,
+            // Two images can share a file name; keep both files.
+            uniqueSuffix: usableImagePaths.length > 1 ? '$index' : null,
           );
-          attachment = MessageAttachment.create(
-            type: AttachmentType.image,
-            path: storedImagePath,
-            label: label,
+          attachments.add(
+            MessageAttachment.create(
+              type: AttachmentType.image,
+              path: storedImagePath,
+              label: label.isEmpty ? 'image' : label,
+            ),
           );
         }
 
@@ -272,7 +279,7 @@ class HomeController extends _$HomeController {
             role: MessageRole.user,
             content: trimmed,
             createdAt: DateTime.now(),
-            attachments: attachment == null ? const [] : [attachment],
+            attachments: attachments,
             tokenCount: TokenEstimator.estimateText(trimmed),
           ),
         ];
@@ -440,7 +447,10 @@ class HomeController extends _$HomeController {
         assembly.messages
             .map(
               (msg) => msg.isUser
-                  ? LlmPromptMessage.user(msg.content, imagePath: msg.imagePath)
+                  ? LlmPromptMessage.user(
+                      msg.content,
+                      imagePaths: msg.imagePaths,
+                    )
                   : LlmPromptMessage.assistant(msg.content),
             )
             .toList(),
