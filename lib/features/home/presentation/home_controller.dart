@@ -260,10 +260,7 @@ class HomeController extends _$HomeController {
           // Two images can share a file name; keep both files.
           final suffix = usableImagePaths.length > 1 ? '$index' : null;
 
-          final prepared = await _prepareImage(
-            imagePath,
-            attachmentSettings,
-          );
+          final prepared = await _prepareImage(imagePath, attachmentSettings);
           final storedImagePath = prepared == null
               ? await _storageService.copyAttachmentToChat(
                   conversationId: conversationId,
@@ -728,8 +725,9 @@ class HomeController extends _$HomeController {
   Future<PreparedAttachmentImage?> _prepareImage(
     String path,
     AttachmentSettingsState settings,
-  ) {
-    if (settings.keepsOriginalImages) return Future<PreparedAttachmentImage?>.value();
+  ) {    if (settings.keepsOriginalImages) {
+      return Future<PreparedAttachmentImage?>.value();
+    }
     return const AttachmentImageService().prepare(
       path: path,
       options: settings.imageOptions,
