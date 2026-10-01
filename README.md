@@ -43,6 +43,7 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Generation stats per assistant message (`tok/s`, elapsed time, token count, input tokens)
 - Context usage readout above the composer (used vs. available input tokens, with a note when older messages were trimmed to fit)
 - **Inference profiles**: Balanced, Battery Saver, Maximum Performance, or your own saved runtime configuration
+- **Personas**: reusable system prompts (General, Coding, Research, Creative, Concise, or your own) chosen per conversation
 - Markdown-like code fence rendering + one-tap copy for code blocks
 - Adaptive generation mode for mobile performance tuning
 - Sampling presets: `Precise`, `Balanced`, `Creative`
@@ -73,6 +74,7 @@ Pocket LLM focuses on bringing **personal AI to your pocket** — lightweight, p
 - Adaptive max-token behavior based on hardware + observed generation speed
 - **Token-aware context**: the prompt is assembled against the loaded model's context window and output reservation, keeping the system prompt and the newest turns, and dropping older ones only when the budget runs out
 - **Inference profiles**: context size, threads, GPU offload and sampling in one named configuration, applied to every model
+- **Personas**: the system prompt lives with the conversation, not with the model, so the same chat history can switch voice without losing context
 - GGUF signature checks to reject invalid/corrupt downloads
 
 ## Tech Stack
@@ -188,6 +190,14 @@ dart run build_runner build --delete-conflicting-outputs
 - A custom profile sets only what you choose: context size, prompt batch size, threads, GPU layers, KV cache placement, sampling and maximum answer length. Everything else keeps the app default for the device.
 - Profiles are stored locally as versioned JSON (`inference_profiles/` under the app support directory) and apply to every model; switching profiles mid-conversation reloads the model with the new settings.
 
+### Personas
+
+- Tap the persona chip in the chat header to pick the persona for that conversation, or open **Personas** in the drawer to manage them.
+- Built-ins: `General` (the app default prompt), `Coding`, `Research`, `Creative` and `Concise`. They are read-only — duplicate one to edit it.
+- A custom persona sets a system prompt and can prefer a model and an inference profile; the editor shows what the prompt costs in tokens. Unset preferences keep the app defaults.
+- Each conversation remembers its persona, so switching voice never touches history. Conversations from older versions keep working and use the current default persona.
+- Personas are stored locally as versioned JSON (`personas/` under the app support directory).
+
 ## Troubleshooting
 
 ### `HTTP 401/403` while downloading model
@@ -200,6 +210,10 @@ Use a public direct URL ending with `.gguf`.
 Your prompt/context is too large for current runtime settings.
 The app assembles the prompt against a token budget derived from the model's context window and the configured output length; the readout above the composer shows how full that budget is. Token counts are estimates, so a very long message or attached image can still overflow.
 Start a new chat, shorten the prompt, lower the maximum output tokens, or switch to a profile with a smaller context (for example `Battery Saver`).
+
+### Responses ignore my persona
+
+A persona only replaces the system prompt. If the model was trained with a strong chat format, very short prompts can be overridden by the conversation itself — make the persona prompt explicit about tone, length and structure, and check the token cost shown in the editor.
 
 ### `Failed to initialize model`
 
