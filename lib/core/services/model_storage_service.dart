@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 
 class DownloadMetadata {
   final int totalSize;
@@ -134,11 +135,39 @@ class ModelStorageService {
 
   Future<bool> isModelDownloaded(String fileName) async {
     final dir = await getModelDir();
-    final file = File(p.join(dir, fileName));
+    return isModelPathDownloaded(p.join(dir, fileName));
+  }
+
+  /// Resolves the absolute path of a model's main GGUF file.
+  ///
+  /// External (imported) references point at their original location; managed
+  /// models live inside the app's model directory.
+  Future<String?> resolveModelPath(LlmModel model) async {
+    final external = model.externalPath;
+    if (external != null && external.trim().isNotEmpty) return external;
+    final fileName = model.localFileName;
+    if (fileName == null || fileName.trim().isEmpty) return null;
+    return getLocalFilePath(fileName);
+  }
+
+  /// Resolves the absolute path of a model's vision projector file.
+  Future<String?> resolveMmprojPath(LlmModel model) async {
+    final external = model.externalMmprojPath;
+    if (external != null && external.trim().isNotEmpty) return external;
+    final fileName = model.mmprojLocalFileName;
+    if (fileName == null || fileName.trim().isEmpty) return null;
+    return getLocalFilePath(fileName);
+  }
+
+  /// Checks that a model file exists at [path], is not a partial download
+  /// (no chunked-download metadata) and carries GGUF magic bytes.
+  Future<bool> isModelPathDownloaded(String? path) async {
+    if (path == null || path.trim().isEmpty) return false;
+    final file = File(path);
     if (!await file.exists()) return false;
 
-    // Presence of metadata means chunked download is incomplete/resumable.
-    final metadataFile = File('${file.path}.json');
+    // Presence of metadata means a chunked download is incomplete/resumable.
+    final metadataFile = File('$path.json');
     if (await metadataFile.exists()) return false;
 
     // Validate GGUF magic bytes to avoid marking HTML/error files as models.
@@ -146,18 +175,14 @@ class ModelStorageService {
     final raf = await file.open(mode: FileMode.read);
     try {
       final magic = await raf.read(4);
-      if (magic.length != 4 ||
-          magic[0] != 0x47 ||
-          magic[1] != 0x47 ||
-          magic[2] != 0x55 ||
-          magic[3] != 0x46) {
-        return false;
-      }
+      if (magic.length != 4) return false;
+      return magic[0] == 0x47 &&
+          magic[1] == 0x47 &&
+          magic[2] == 0x55 &&
+          magic[3] == 0x46;
     } finally {
       await raf.close();
     }
-
-    return true;
   }
 
   Future<int> getLocalFileSize(String fileName) async {

@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/presentation/hugging_face_repository_dialog.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_import_dialog.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// Choices offered when the user taps "Add Model".
+enum _AddModelAction { importFile, huggingFaceRepo, directUrl }
 
 class ModelSelectionPage extends ConsumerStatefulWidget {
   const ModelSelectionPage({super.key});
@@ -99,7 +106,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Model Selection')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showAddModelDialog(context),
+        onPressed: _showAddModelSheet,
         icon: const Icon(Icons.add_rounded),
         label: const Text('Add Model'),
       ),
@@ -386,6 +393,23 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                           ),
                         ),
                         const SizedBox(height: 10),
+                        if (model.isDownloaded)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: () => context.push(
+                                AppRoutes.modelDetailsFor(model.id),
+                              ),
+                              icon: const Icon(
+                                Icons.science_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('GGUF Metadata'),
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                          ),
                         _buildDetailRow(context, 'ID', model.id),
                         _buildDetailRow(context, 'Name', model.name),
                         _buildDetailRow(
@@ -398,6 +422,17 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                           'Type',
                           model.isCustom ? 'Custom' : 'Built-in',
                         ),
+                        _buildDetailRow(
+                          context,
+                          'Source',
+                          model.effectiveSource.label,
+                        ),
+                        if (model.isExternal)
+                          _buildDetailRow(
+                            context,
+                            'External File',
+                            model.externalPath ?? 'N/A',
+                          ),
                         _buildDetailRow(
                           context,
                           'Downloaded',
@@ -823,6 +858,70 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
+  /// Bottom sheet with the three ways a model can enter the app: a local
+  /// GGUF import, a Hugging Face repository or a direct download link.
+  Future<void> _showAddModelSheet() async {
+    final action = await showModalBottomSheet<_AddModelAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Add a model',
+                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_open_rounded),
+              title: const Text('Import GGUF from this device'),
+              subtitle: const Text(
+                'Read metadata, then copy it in or keep it where it is',
+              ),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(_AddModelAction.importFile),
+            ),
+            ListTile(
+              leading: const Icon(Icons.travel_explore_rounded),
+              title: const Text('Browse a Hugging Face repository'),
+              subtitle: const Text('author/repository or huggingface.co link'),
+              onTap: () => Navigator.of(
+                sheetContext,
+              ).pop(_AddModelAction.huggingFaceRepo),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link_rounded),
+              title: const Text('Add a direct download link'),
+              subtitle: const Text('Any direct .gguf URL'),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(_AddModelAction.directUrl),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || action == null) return;
+    final controller = ref.read(modelSelectionControllerProvider.notifier);
+    switch (action) {
+      case _AddModelAction.importFile:
+        await showImportLocalModelDialog(context, controller);
+      case _AddModelAction.huggingFaceRepo:
+        await showHuggingFaceRepositoryDialog(context, controller);
+      case _AddModelAction.directUrl:
+        await _showAddModelDialog(context);
+    }
+  }
+
   Future<void> _showAddModelDialog(BuildContext context) async {
     String downloadUrl = '';
     String name = '';
@@ -1023,13 +1122,19 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   }
 
   void _showDeleteConfirmation(BuildContext context, LlmModel model) {
+    final message = model.isExternal
+        ? 'Remove ${model.name} from Pocket LLM? The original file at '
+              '${model.externalPath} stays on your device.'
+        : model.modelSource == ModelSource.imported
+        ? 'Remove ${model.name}? The imported copy stored by Pocket LLM will '
+              'be deleted to free up storage space.'
+        : 'Are you sure you want to delete ${model.name}? This will free up '
+              'storage space.';
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Model?'),
-        content: Text(
-          'Are you sure you want to delete ${model.name}? This will free up storage space.',
-        ),
+        title: Text(model.isExternal ? 'Remove Model?' : 'Delete Model?'),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),

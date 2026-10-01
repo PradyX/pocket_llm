@@ -1,3 +1,5 @@
+import 'package:pocket_llm/features/model_selection/domain/gguf_metadata.dart';
+
 enum ModelCapability {
   vision('vision', 'Vision'),
   tools('tools', 'Tools'),
@@ -18,8 +20,35 @@ enum ModelCapability {
   }
 }
 
-/// Represents a local LLM model available for inference.
+/// Where a model comes from and how it is stored on this device.
+///
+/// Managed models live inside the app's model directory. External models stay
+/// where the user keeps them and are only referenced by path; removing them
+/// from the catalog never touches the original file.
+enum ModelSource {
+  catalog('Built-in catalog'),
+  discovered('Hugging Face discovery'),
+  customUrl('Custom download link'),
+  imported('Imported from device');
+
+  const ModelSource(this.label);
+
+  /// Human-readable label for the model's origin.
+  final String label;
+
+  static ModelSource? tryParse(String? value) {
+    if (value == null) return null;
+    final normalized = value.trim().toLowerCase();
+    for (final source in values) {
+      if (source.name == normalized) return source;
+    }
+    return null;
+  }
+}
+
 class LlmModel {
+  static const _unset = Object();
+
   final String id;
   final String name;
   final String parameterSize;
@@ -33,10 +62,36 @@ class LlmModel {
   final bool isDownloaded;
   final bool isCustom;
 
+  /// Where this model came from; null for catalog models saved before Phase 2.
+  final ModelSource? modelSource;
+
+  /// Absolute path of the model file when it lives outside the app's model
+  /// directory (external reference). Never mixed with managed downloads.
+  final String? externalPath;
+
+  /// Absolute path of an external vision projector paired with an external
+  /// model file.
+  final String? externalMmprojPath;
+
+  /// GGUF metadata snapshot attached by local parsing before first run.
+  final GgufMetadata? ggufMetadata;
+
   /// Whether this model supports vision/image chat.
   /// Derived from [capabilities] — any model whose capabilities include
   /// [ModelCapability.vision] will automatically support image upload.
   bool get supportsVision => capabilities.contains(ModelCapability.vision);
+
+  /// Whether the model file lives outside the app's model directory.
+  bool get isExternal {
+    final path = externalPath;
+    return path != null && path.trim().isNotEmpty;
+  }
+
+  /// Effective source, resolving models saved before Phase 2.
+  ModelSource get effectiveSource {
+    return modelSource ??
+        (isCustom ? ModelSource.customUrl : ModelSource.catalog);
+  }
 
   const LlmModel({
     required this.id,
@@ -51,21 +106,32 @@ class LlmModel {
     this.promptFormatId = 'chatml',
     this.isDownloaded = false,
     this.isCustom = false,
+    this.modelSource,
+    this.externalPath,
+    this.externalMmprojPath,
+    this.ggufMetadata,
   });
 
   LlmModel copyWith({
+    String? name,
+    String? parameterSize,
+    String? description,
     List<ModelCapability>? capabilities,
     bool? isDownloaded,
     String? localFileName,
     String? mmprojLocalFileName,
     String? promptFormatId,
     bool? isCustom,
+    Object? modelSource = _unset,
+    Object? externalPath = _unset,
+    Object? externalMmprojPath = _unset,
+    Object? ggufMetadata = _unset,
   }) {
     return LlmModel(
       id: id,
-      name: name,
-      parameterSize: parameterSize,
-      description: description,
+      name: name ?? this.name,
+      parameterSize: parameterSize ?? this.parameterSize,
+      description: description ?? this.description,
       capabilities: capabilities ?? this.capabilities,
       downloadUrl: downloadUrl,
       localFileName: localFileName ?? this.localFileName,
@@ -74,6 +140,18 @@ class LlmModel {
       promptFormatId: promptFormatId ?? this.promptFormatId,
       isDownloaded: isDownloaded ?? this.isDownloaded,
       isCustom: isCustom ?? this.isCustom,
+      modelSource: modelSource == _unset
+          ? this.modelSource
+          : modelSource as ModelSource?,
+      externalPath: externalPath == _unset
+          ? this.externalPath
+          : externalPath as String?,
+      externalMmprojPath: externalMmprojPath == _unset
+          ? this.externalMmprojPath
+          : externalMmprojPath as String?,
+      ggufMetadata: ggufMetadata == _unset
+          ? this.ggufMetadata
+          : ggufMetadata as GgufMetadata?,
     );
   }
 
@@ -91,6 +169,10 @@ class LlmModel {
       'promptFormatId': promptFormatId,
       'isDownloaded': isDownloaded,
       'isCustom': isCustom,
+      'modelSource': modelSource?.name,
+      'externalPath': externalPath,
+      'externalMmprojPath': externalMmprojPath,
+      'ggufMetadata': ggufMetadata?.toJson(),
     };
   }
 
@@ -111,6 +193,7 @@ class LlmModel {
       capabilities.add(ModelCapability.vision);
     }
 
+    final metadataJson = json['ggufMetadata'];
     return LlmModel(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? 'Custom Model',
@@ -125,6 +208,12 @@ class LlmModel {
       promptFormatId: json['promptFormatId'] as String? ?? 'chatml',
       isDownloaded: json['isDownloaded'] as bool? ?? false,
       isCustom: json['isCustom'] as bool? ?? true,
+      modelSource: ModelSource.tryParse(json['modelSource'] as String?),
+      externalPath: json['externalPath'] as String?,
+      externalMmprojPath: json['externalMmprojPath'] as String?,
+      ggufMetadata: metadataJson is Map
+          ? GgufMetadata.fromJson(Map<String, dynamic>.from(metadataJson))
+          : null,
     );
   }
 

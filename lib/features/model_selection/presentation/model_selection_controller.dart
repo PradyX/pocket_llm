@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:pocket_llm/core/services/hugging_face_model_capability_service.dart';
 import 'package:pocket_llm/core/services/hugging_face_model_discovery_service.dart';
+import 'package:pocket_llm/core/services/hugging_face_repository_service.dart';
 import 'package:pocket_llm/core/services/local_notification_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/storage_info_service.dart';
+import 'package:pocket_llm/features/model_selection/data/gguf_reader.dart';
+import 'package:pocket_llm/features/model_selection/data/model_import_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/domain/model_import.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
 import 'package:pocket_llm/storage/secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -33,6 +37,9 @@ class ModelSelectionController extends _$ModelSelectionController {
       HuggingFaceModelCapabilityService();
   late final HuggingFaceModelDiscoveryService _discoveryService =
       HuggingFaceModelDiscoveryService();
+  late final ModelImportService _importService = ModelImportService(
+    storageService: _storageService,
+  );
   final Map<String, CancelToken> _cancelTokens = {};
 
   @override
@@ -457,6 +464,29 @@ class ModelSelectionController extends _$ModelSelectionController {
   }
 
   Future<void> deleteModel(LlmModel model) async {
+    // Imported models cannot be re-downloaded, so remove them from the
+    // catalog entirely. External files are never touched on disk.
+    if (model.modelSource == ModelSource.imported) {
+      try {
+        if (!model.isExternal) {
+          final managedFiles = [
+            model.localFileName,
+            model.mmprojLocalFileName,
+          ].whereType<String>();
+          for (final fileName in managedFiles) {
+            if (fileName.trim().isEmpty) continue;
+            await _storageService.deleteModel(fileName);
+          }
+        }
+        await _removeModelFromList(model);
+      } catch (e) {
+        state = state.copyWith(
+          error: 'Failed to remove ${model.name}: ${_friendlyDownloadError(e)}',
+        );
+      }
+      return;
+    }
+
     final assets = _downloadAssetsForModel(model);
     if (assets.isEmpty) return;
 
@@ -496,6 +526,182 @@ class ModelSelectionController extends _$ModelSelectionController {
     await _refreshStorageInfo();
   }
 
+  Future<void> _removeModelFromList(LlmModel model) async {
+    final updatedModels = state.models.where((m) => m.id != model.id).toList();
+
+    String? newSelectedId = state.selectedModelId;
+    if (newSelectedId == model.id) {
+      newSelectedId = null;
+      try {
+        newSelectedId = updatedModels.firstWhere((m) => m.isDownloaded).id;
+      } catch (_) {
+        newSelectedId = null;
+      }
+    }
+
+    state = state.copyWith(
+      models: updatedModels,
+      selectedModelId: newSelectedId,
+    );
+    await _persistCustomModels(updatedModels);
+    await _refreshStorageInfo();
+  }
+
+  /// Opens the file picker and parses a local GGUF file for import.
+  ///
+  /// Returns null when the user cancels; validation failures are surfaced
+  /// through [state.error].
+  Future<PendingModelImport?> pickModelForImport({
+    ImportedFile? projector,
+  }) async {
+    try {
+      return await _importService.pickModelFile(projector: projector);
+    } on GgufFormatException catch (error) {
+      state = state.copyWith(error: error.message);
+      return null;
+    } catch (error) {
+      state = state.copyWith(error: 'Could not read the selected file: $error');
+      return null;
+    }
+  }
+
+  /// Opens the file picker for a vision-projector (mmproj) file.
+  Future<ImportedFile?> pickProjectorFileForImport() async {
+    try {
+      return await _importService.pickProjectorFile();
+    } catch (error) {
+      state = state.copyWith(
+        error: 'Could not read the projector file: $error',
+      );
+      return null;
+    }
+  }
+
+  /// Checks a parsed import against the models already installed.
+  Future<ImportDuplicateInfo?> findImportDuplicate(
+    PendingModelImport pending,
+  ) async {
+    return _importService.findDuplicate(
+      pending,
+      installed: [
+        for (final model in state.models)
+          if (model.modelSource == ModelSource.imported)
+            LocalModelRecord(
+              managedFileName: model.localFileName,
+              externalPath: model.externalPath,
+            ),
+      ],
+    );
+  }
+
+  /// Copies a parsed GGUF into app storage or references it in place, then
+  /// registers it in the catalog.
+  Future<LlmModel> importLocalModel({
+    required PendingModelImport pending,
+    required bool copyToApp,
+    void Function(int copiedBytes, int totalBytes)? onProgress,
+    Future<void> Function()? shouldCancel,
+  }) async {
+    final CompletedModelImport completed;
+    if (copyToApp) {
+      completed = await _importService.copyIntoManagedStorage(
+        pending,
+        onProgress: onProgress,
+        shouldCancel: shouldCancel,
+      );
+    } else {
+      completed = _importService.referenceInPlace(pending);
+    }
+
+    final model = _modelFromImport(completed);
+    final updatedModels = [...state.models, model];
+    state = state.copyWith(
+      models: updatedModels,
+      error: null,
+      selectedModelId: state.selectedModelId ?? model.id,
+    );
+    await _persistCustomModels(updatedModels);
+    await _refreshStorageInfo();
+    return model;
+  }
+
+  LlmModel _modelFromImport(CompletedModelImport completed) {
+    final metadata = completed.metadata;
+    final hasProjector =
+        completed.projectorManagedFileName != null ||
+        completed.projectorExternalPath != null;
+    final architecture = metadata.architecture;
+    final quantization = metadata.quantization;
+    return LlmModel(
+      id:
+          'imported-${_slugify(completed.name)}-'
+          '${DateTime.now().millisecondsSinceEpoch}',
+      name: completed.name,
+      parameterSize: completed.parameterSize,
+      description:
+          'Imported local GGUF'
+          '${architecture.isEmpty ? '' : ' • $architecture'}'
+          ' • $quantization',
+      capabilities: [if (hasProjector) ModelCapability.vision],
+      localFileName: completed.managedFileName,
+      mmprojLocalFileName: completed.projectorManagedFileName,
+      externalPath: completed.externalPath,
+      externalMmprojPath: completed.projectorExternalPath,
+      promptFormatId:
+          HuggingFaceModelDiscoveryService.promptFormatForArchitecture(
+            architecture,
+          ),
+      isDownloaded: true,
+      isCustom: true,
+      modelSource: ModelSource.imported,
+      ggufMetadata: metadata,
+    );
+  }
+
+  /// Whether a repository variant is already present in app storage.
+  Future<bool> isHfVariantInstalled(HuggingFaceModelVariant variant) {
+    return _storageService.isModelDownloaded(variant.fileName);
+  }
+
+  /// Registers a Hugging Face repository variant and starts its resumable
+  /// download (skipped when the file already exists).
+  Future<void> addModelFromHuggingFaceRepo({
+    required HuggingFaceRepository repository,
+    required HuggingFaceModelVariant variant,
+  }) async {
+    final model = HuggingFaceRepositoryService.modelForVariant(
+      repository: repository,
+      variant: variant,
+    );
+
+    final existingIndex = state.models.indexWhere((m) => m.id == model.id);
+    if (existingIndex >= 0) {
+      final existing = state.models[existingIndex];
+      if (existing.isDownloaded) {
+        state = state.copyWith(
+          error: '${model.name} is already installed on this device.',
+        );
+        return;
+      }
+      unawaited(downloadModel(existing));
+      return;
+    }
+
+    final isDownloaded = await _isModelBundleDownloaded(model);
+    final registered = model.copyWith(isDownloaded: isDownloaded);
+    final updatedModels = [...state.models, registered];
+    state = state.copyWith(
+      models: updatedModels,
+      error: null,
+      selectedModelId:
+          state.selectedModelId ?? (isDownloaded ? model.id : null),
+    );
+    await _persistCustomModels(updatedModels);
+    if (!isDownloaded) {
+      unawaited(downloadModel(registered));
+    }
+  }
+
   Future<List<LlmModel>> _applyCachedCapabilities(List<LlmModel> models) async {
     final cachedCapabilities = await _capabilityService.readCachedCapabilities(
       models,
@@ -530,6 +736,14 @@ class ModelSelectionController extends _$ModelSelectionController {
       for (final entry in raw) {
         if (entry is! Map) continue;
         final model = LlmModel.fromJson(Map<String, dynamic>.from(entry));
+        if (model.modelSource == ModelSource.imported) {
+          final hasManagedFile =
+              model.localFileName != null &&
+              model.localFileName!.trim().isNotEmpty;
+          if (!model.isExternal && !hasManagedFile) continue;
+          models.add(model.copyWith(isCustom: true));
+          continue;
+        }
         if (model.downloadUrl == null ||
             model.downloadUrl!.trim().isEmpty ||
             model.localFileName == null ||
@@ -642,6 +856,25 @@ class ModelSelectionController extends _$ModelSelectionController {
   }
 
   Future<bool> _isModelBundleDownloaded(LlmModel model) async {
+    if (model.isExternal) {
+      return _storageService.isModelPathDownloaded(model.externalPath);
+    }
+
+    if (model.modelSource == ModelSource.imported) {
+      final localFileName = model.localFileName;
+      if (localFileName == null || localFileName.trim().isEmpty) {
+        return false;
+      }
+      if (!await _storageService.isModelDownloaded(localFileName)) {
+        return false;
+      }
+      final mmproj = model.mmprojLocalFileName;
+      if (mmproj != null && mmproj.trim().isNotEmpty) {
+        return _storageService.isModelDownloaded(mmproj);
+      }
+      return true;
+    }
+
     final assets = _downloadAssetsForModel(model);
     if (assets.isEmpty) return false;
 

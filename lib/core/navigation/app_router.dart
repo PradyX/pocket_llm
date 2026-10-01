@@ -1,6 +1,7 @@
 import 'package:pocket_llm/features/benchmark/presentation/benchmark_screen.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversations_page.dart';
 import 'package:pocket_llm/features/home/presentation/home_page.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_details_page.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_page.dart';
 import 'package:pocket_llm/features/settings/presentation/settings_page.dart';
 import 'package:pocket_llm/features/about/presentation/about_page.dart';
@@ -18,6 +19,12 @@ abstract class AppRoutes {
   static const benchmark = '/benchmark';
   static const about = '/about';
   static const conversations = '/conversations';
+  static const modelDetails = '/model-details';
+
+  /// Route to the GGUF metadata inspector for [modelId].
+  static String modelDetailsFor(String modelId) {
+    return '$modelDetails?id=${Uri.encodeQueryComponent(modelId)}';
+  }
 }
 
 @riverpod
@@ -40,6 +47,11 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.modelSelection,
         builder: (context, state) => const ModelSelectionPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.modelDetails,
+        builder: (context, state) =>
+            ModelDetailsPage(modelId: state.uri.queryParameters['id'] ?? ''),
       ),
       GoRoute(
         path: AppRoutes.benchmark,

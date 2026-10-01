@@ -243,9 +243,7 @@ class HomeController extends _$HomeController {
 
       await Future<void>.delayed(const Duration(milliseconds: 220));
 
-      if (selectedModel != null &&
-          selectedModel.isDownloaded &&
-          selectedModel.localFileName != null) {
+      if (selectedModel != null && selectedModel.isDownloaded) {
         await _generateNativeResponse(selectedModel);
       } else {
         await _addPlaceholderResponse();
@@ -302,8 +300,9 @@ class HomeController extends _$HomeController {
   }
 
   Future<void> _generateNativeResponse(LlmModel selectedModel) async {
-    final localFileName = selectedModel.localFileName;
-    if (localFileName == null || localFileName.trim().isEmpty) {
+    final modelPath = await _storageService.resolveModelPath(selectedModel);
+    if (modelPath == null ||
+        !await _storageService.isModelPathDownloaded(modelPath)) {
       throw Exception('Selected model file is missing.');
     }
 
@@ -384,29 +383,33 @@ class HomeController extends _$HomeController {
       );
 
       _setStatus(text: 'Loading model...', isGenerating: true);
-      final modelPath = await _storageService.getLocalFilePath(localFileName);
       final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096;
 
       String? mmprojPath;
       if (promptBundle.imagePaths.isNotEmpty) {
-        if (!selectedModel.supportsVision ||
-            selectedModel.mmprojLocalFileName == null ||
-            selectedModel.mmprojLocalFileName!.trim().isEmpty) {
+        if (!selectedModel.supportsVision) {
           throw Exception(
             'This model does not support image chat in Pocket LLM.',
           );
         }
 
-        final projectorFileName = selectedModel.mmprojLocalFileName!;
-        final isProjectorReady = await _storageService.isModelDownloaded(
-          projectorFileName,
+        final resolvedMmproj = await _storageService.resolveMmprojPath(
+          selectedModel,
+        );
+        final isProjectorReady = await _storageService.isModelPathDownloaded(
+          resolvedMmproj,
         );
         if (!isProjectorReady) {
           throw Exception(
-            'Vision projector is missing or incomplete. Re-download ${selectedModel.name}.',
+            selectedModel.isExternal
+                ? 'The referenced vision projector is missing or incomplete. '
+                      'Import ${selectedModel.name} again or attach a new '
+                      'projector file.'
+                : 'Vision projector is missing or incomplete. Re-download '
+                      '${selectedModel.name}.',
           );
         }
-        mmprojPath = await _storageService.getLocalFilePath(projectorFileName);
+        mmprojPath = resolvedMmproj;
       }
 
       await _llmService.ensureModelLoaded(

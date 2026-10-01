@@ -14,10 +14,7 @@ class HuggingFaceModelDiscoveryService {
   static const _fetchLimit = 50;
 
   /// Pipeline tags we consider usable for on-device chat inference.
-  static const _allowedPipelines = {
-    'text-generation',
-    'image-text-to-text',
-  };
+  static const _allowedPipelines = {'text-generation', 'image-text-to-text'};
 
   /// Preferred GGUF quantization suffixes, in priority order.
   static const _preferredQuantSuffixes = [
@@ -68,10 +65,9 @@ class HuggingFaceModelDiscoveryService {
       }
 
       if (discovered.isNotEmpty) {
-        await _writeCache(_DiscoveryCache(
-          models: discovered,
-          fetchedAt: DateTime.now(),
-        ));
+        await _writeCache(
+          _DiscoveryCache(models: discovered, fetchedAt: DateTime.now()),
+        );
       }
 
       return discovered;
@@ -174,10 +170,10 @@ class HuggingFaceModelDiscoveryService {
       final json = data is Map<String, dynamic>
           ? data
           : data is Map
-              ? Map<String, dynamic>.from(data)
-              : data is String
-                  ? jsonDecode(data) as Map<String, dynamic>
-                  : null;
+          ? Map<String, dynamic>.from(data)
+          : data is String
+          ? jsonDecode(data) as Map<String, dynamic>
+          : null;
       if (json == null) return null;
 
       return _parseModelFromDetail(raw, json);
@@ -235,7 +231,7 @@ class HuggingFaceModelDiscoveryService {
     final totalBytes = ggufMeta is Map ? ggufMeta['total'] : null;
 
     // Derive prompt format from architecture.
-    final promptFormatId = _architectureToPromptFormat(architecture);
+    final promptFormatId = promptFormatForArchitecture(architecture);
 
     // Derive parameter size from total model bytes.
     final parameterSize = _estimateParameterSize(totalBytes);
@@ -293,7 +289,7 @@ class HuggingFaceModelDiscoveryService {
     return nonF16 ?? ggufFiles.first;
   }
 
-  String _architectureToPromptFormat(String architecture) {
+  static String promptFormatForArchitecture(String architecture) {
     return switch (architecture) {
       'gemma3' => 'gemma3',
       _ => 'chatml',
@@ -328,12 +324,14 @@ class HuggingFaceModelDiscoveryService {
     final seedText = allSignals.join(' ');
 
     // Vision
-    if (tags.any((t) => const {
-              'multimodal',
-              'vision',
-              'image-text-to-text',
-              'visual-question-answering',
-            }.contains(t.toLowerCase())) ||
+    if (tags.any(
+          (t) => const {
+            'multimodal',
+            'vision',
+            'image-text-to-text',
+            'visual-question-answering',
+          }.contains(t.toLowerCase()),
+        ) ||
         pipelineTag.toLowerCase().contains('image') ||
         pipelineTag.toLowerCase().contains('vision')) {
       capabilities.add(ModelCapability.vision);
@@ -351,13 +349,15 @@ class HuggingFaceModelDiscoveryService {
     }
 
     // Tools
-    if (tags.any((t) => const {
-          'tools',
-          'tool-use',
-          'tool_use',
-          'function-calling',
-          'function_calling',
-        }.contains(t.toLowerCase()))) {
+    if (tags.any(
+      (t) => const {
+        'tools',
+        'tool-use',
+        'tool_use',
+        'function-calling',
+        'function_calling',
+      }.contains(t.toLowerCase()),
+    )) {
       capabilities.add(ModelCapability.tools);
     }
 
@@ -380,7 +380,10 @@ class HuggingFaceModelDiscoveryService {
     return name.isEmpty ? repoId : name;
   }
 
-  String _buildDescription(_RawHfModel raw, List<ModelCapability> capabilities) {
+  String _buildDescription(
+    _RawHfModel raw,
+    List<ModelCapability> capabilities,
+  ) {
     final parts = <String>[];
     if (raw.downloads > 0) {
       parts.add('${_formatDownloads(raw.downloads)} downloads');
@@ -419,10 +422,7 @@ class HuggingFaceModelDiscoveryService {
 
   Future<void> _writeCache(_DiscoveryCache cache) async {
     try {
-      await SecureStorage.instance.write(
-        key: _cacheKey,
-        value: cache.toJson(),
-      );
+      await SecureStorage.instance.write(key: _cacheKey, value: cache.toJson());
     } catch (_) {
       // Best-effort caching.
     }
