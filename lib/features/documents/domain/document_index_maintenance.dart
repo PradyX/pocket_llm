@@ -31,6 +31,11 @@ String _hex(int value) => value.toRadixString(16).padLeft(8, '0');
 /// version, retrieval backend), so a change in any of those is detectable
 /// without re-reading the original file. Whether the *file* changed is checked
 /// separately against its size and timestamp.
+///
+/// [embeddingDimensions] is only compared when the caller knows the width the
+/// collection's backend will produce; passing null means "no expectation", so
+/// an embedded document is not reported stale merely because its collection
+/// does not pin a width.
 String? documentReindexReason(
   IndexedDocument document, {
   required DocumentChunkingConfig chunking,
@@ -47,6 +52,7 @@ String? documentReindexReason(
     return 'the retrieval backend changed';
   }
   if (embeddingModelId != null &&
+      embeddingDimensions != null &&
       document.embeddingDimensions != embeddingDimensions) {
     return 'the embedding dimensions changed';
   }

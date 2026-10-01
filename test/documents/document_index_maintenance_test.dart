@@ -109,6 +109,17 @@ void main() {
       );
     });
 
+    test('does not require a width when the caller has no expectation', () {
+      expect(
+        documentReindexReason(
+          document(embeddingModelId: 'model-a', embeddingDimensions: 384),
+          chunking: const DocumentChunkingConfig(),
+          embeddingModelId: 'model-a',
+        ),
+        isNull,
+      );
+    });
+
     test('ignores dimensions for lexical indexes', () {
       expect(
         documentReindexReason(
