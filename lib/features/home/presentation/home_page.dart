@@ -11,6 +11,7 @@ import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
+import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
@@ -842,6 +843,17 @@ class _HomePageState extends ConsumerState<HomePage> {
             onTap: () {
               Navigator.pop(context);
               context.push(AppRoutes.benchmark);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.tune_rounded),
+            title: const Text('Inference Profiles'),
+            subtitle: Text(
+              'Active: ${ref.watch(inferenceProfilesProvider).activeProfile.name}',
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.inferenceProfiles);
             },
           ),
           ListTile(

@@ -64,6 +64,27 @@ class LlmService {
     return _configuredGpuLayers > 0 ? 'GPU offload' : 'CPU';
   }
 
+  /// Threads the runtime uses when a request does not specify them.
+  ///
+  /// Shared with the inference-profile resolver so a profile that overrides
+  /// nothing reproduces the runtime's own defaults.
+  static int defaultComputeThreads({required bool isMobile}) {
+    final cpuCount = Platform.numberOfProcessors;
+    return math.max(2, math.min(isMobile ? 4 : 8, cpuCount));
+  }
+
+  /// GPU layers the runtime uses when a request does not specify them.
+  static int defaultGpuLayers({required bool isVisionLoad}) {
+    if (Platform.isAndroid) return 0;
+    return isVisionLoad ? 24 : 32;
+  }
+
+  /// Whether the KV cache is kept on the GPU when a request does not say.
+  static bool defaultOffloadKqv({required bool isMobile}) => !isMobile;
+
+  /// True when this platform can offload layers to the GPU at all.
+  static bool get supportsGpuOffload => !Platform.isAndroid;
+
   Future<void> loadModel(
     String modelPath, {
     int? nGpuLayers,
@@ -90,8 +111,7 @@ class LlmService {
     );
 
     final isMobile = Platform.isAndroid || Platform.isIOS;
-    final cpuCount = Platform.numberOfProcessors;
-    final defaultThreads = math.max(2, math.min(isMobile ? 4 : 8, cpuCount));
+    final defaultThreads = defaultComputeThreads(isMobile: isMobile);
     final resolvedNCtx = nCtx ?? (isMobile ? 1024 : 2048);
 
     _validateGgufFile(modelPath, label: 'Model');
@@ -109,13 +129,7 @@ class LlmService {
     final isVisionLoad = normalizedMmprojPath != null;
     final modelParams = ModelParams(
       path: modelPath,
-      gpuLayers:
-          nGpuLayers ??
-          (Platform.isAndroid
-              ? 0
-              : isVisionLoad
-              ? 24
-              : 32),
+      gpuLayers: nGpuLayers ?? defaultGpuLayers(isVisionLoad: isVisionLoad),
     );
     final resolvedNBatch = math.min(nBatch ?? 512, resolvedNCtx);
     final contextParams = ContextParams(
@@ -124,7 +138,7 @@ class LlmService {
       nUbatch: resolvedNBatch,
       nThreads: nThreads ?? defaultThreads,
       nThreadsBatch: nThreadsBatch ?? defaultThreads,
-      offloadKqv: offloadKqv ?? !isMobile,
+      offloadKqv: offloadKqv ?? defaultOffloadKqv(isMobile: isMobile),
     );
     _nPredict = nPredict ?? -1;
     _configuredThreads = contextParams.nThreads;
@@ -221,9 +235,15 @@ class LlmService {
         ? mmprojPath.trim()
         : null;
 
+    // Every setting a profile can control forces a reload, otherwise switching
+    // profiles would silently keep the previous configuration.
     final requiresReloadForConfig =
         (nCtx != null && nCtx != _configuredNCtx) ||
         (nBatch != null && nBatch != _configuredNBatch) ||
+        (nThreads != null && nThreads != _configuredThreads) ||
+        (nThreadsBatch != null && nThreadsBatch != _configuredThreadsBatch) ||
+        (nGpuLayers != null && nGpuLayers != _configuredGpuLayers) ||
+        (offloadKqv != null && offloadKqv != _configuredOffloadKqv) ||
         (resolvedTopK != _configuredTopK) ||
         (resolvedTemperature - _configuredTemperature).abs() > 0.001 ||
         (resolvedTopP - _configuredTopP).abs() > 0.001 ||

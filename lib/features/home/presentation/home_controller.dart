@@ -17,7 +17,7 @@ import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
-import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
+import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -335,8 +335,20 @@ class HomeController extends _$HomeController {
       final useStructuredAndroidResponses = _androidToolCallingEnabled;
       final inferenceSettings = ref.read(inferenceSettingsProvider);
       final adaptiveMode = inferenceSettings.adaptiveMode;
-      final sampling = inferenceSettings.resolvedSampling;
-      final maxTokens = _resolveMaxTokens(adaptiveMode: adaptiveMode);
+
+      // Inference profile (roadmap Phase 5): the active profile overrides the
+      // app settings only where it sets a value, and the request is built from
+      // what the runtime will really be started with.
+      final resolvedConfig = ref
+          .read(inferenceProfileResolverProvider)
+          .resolve(
+            profile: ref.read(inferenceProfilesProvider).activeProfile,
+            settings: inferenceSettings.copyWith(
+              maxTokens: _resolveMaxTokens(adaptiveMode: adaptiveMode),
+            ),
+            declaredContextTokens: selectedModel.ggufMetadata?.contextLength,
+          );
+      final maxTokens = resolvedConfig.maxOutputTokens;
 
       _setStatus(
         text: 'Preparing response...',
@@ -347,12 +359,12 @@ class HomeController extends _$HomeController {
       );
       await Future<void>.delayed(const Duration(milliseconds: 180));
 
-      // Token-aware context (roadmap Phase 4): the model's declared context,
-      // the platform context and the output reservation decide how much
-      // history is sent. The estimator and the runtime share one constant.
-      final targetNCtx = ModelCompatibilityService.defaultContextTokens;
+      // Token-aware context (roadmap Phase 4): the context the profile resolves
+      // to, the model's declared limit and the output reservation decide how
+      // much history is sent, so the budget can never describe a different
+      // window than the one the runtime is loaded with.
       final contextPolicy = ContextPolicy.forModel(
-        runtimeContextTokens: targetNCtx,
+        runtimeContextTokens: resolvedConfig.contextTokens,
         declaredContextTokens: selectedModel.ggufMetadata?.contextLength,
         reservedOutputTokens: maxTokens,
       );
@@ -366,7 +378,7 @@ class HomeController extends _$HomeController {
       );
 
       _setStatus(
-        text: 'Loading model...',
+        text: 'Loading model with ${resolvedConfig.profileName}...',
         isGenerating: true,
         contextUsage: assembly.usage,
       );
@@ -412,11 +424,15 @@ class HomeController extends _$HomeController {
 
       await _llmService.ensureModelLoaded(
         modelPath,
-        nCtx: targetNCtx,
-        nBatch: targetNCtx,
-        temperature: sampling.temperature,
-        topP: sampling.topP,
-        topK: 40,
+        nCtx: resolvedConfig.contextTokens,
+        nBatch: resolvedConfig.batchTokens,
+        nThreads: resolvedConfig.threads,
+        nThreadsBatch: resolvedConfig.threadsBatch,
+        nGpuLayers: resolvedConfig.gpuLayers,
+        offloadKqv: resolvedConfig.offloadKqv,
+        temperature: resolvedConfig.temperature,
+        topP: resolvedConfig.topP,
+        topK: resolvedConfig.topK,
         mmprojPath: mmprojPath,
       );
 
