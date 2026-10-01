@@ -1622,10 +1622,20 @@ class _MarkdownCodeMessage extends StatelessWidget {
 /// Subtitle for the Documents drawer entry.
 String _documentsSubtitle(DocumentsState state) {
   if (!state.isReady) return 'Opening the local index…';
-  if (!state.hasDocuments) return 'Add local files to ask about them';
   final documents = state.documents.length;
+  if (documents == 0) {
+    return state.totalDocumentCount > 0
+        ? 'Nothing in "${state.activeCollection?.name ?? 'this collection'}"'
+        : 'Add local files to ask about them';
+  }
+
   final changed = state.outdatedCount;
-  return '$documents ${documents == 1 ? 'document' : 'documents'} · '
+  // Name the collection once there is more than one, so the subtitle says what
+  // chat will actually search.
+  final prefix = state.collections.length > 1
+      ? '${state.activeCollection?.name} · '
+      : '';
+  return '$prefix$documents ${documents == 1 ? 'document' : 'documents'} · '
       '${state.chunkCount} chunks'
       '${changed > 0 ? ' · $changed changed' : ''}';
 }

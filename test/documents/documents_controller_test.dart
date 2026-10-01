@@ -7,6 +7,7 @@ import 'package:pocket_llm/features/documents/application/document_library.dart'
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/documents/data/document_extraction_service.dart';
 import 'package:pocket_llm/features/documents/data/document_index_store.dart';
+import 'package:pocket_llm/features/documents/domain/document.dart';
 
 void main() {
   late Directory tempDir;
@@ -306,5 +307,130 @@ void main() {
 
     notifier.clearStatus();
     expect(state(container).statusMessage, isNull);
+  });
+
+  group('knowledge collections', () {
+    test('starts on the always-present collection', () async {
+      final container = buildContainer();
+      await loaded(container);
+
+      final current = state(container);
+      expect(current.collections, hasLength(1));
+      expect(current.activeCollectionId, defaultCollectionId);
+      expect(current.activeCollection?.isDefault, isTrue);
+      expect(current.totalDocumentCount, 0);
+    });
+
+    test('creates a collection and indexes picked files into it', () async {
+      final file = await writeFile(
+        'notes.txt',
+        'Research material about zebras and their stripes.',
+      );
+      final container = buildContainer(picked: [file.path]);
+      final notifier = await loaded(container);
+
+      final collection = notifier.createCollection('Research')!;
+
+      expect(state(container).activeCollectionId, collection.id);
+      expect(state(container).statusMessage, contains('Created'));
+      expect(state(container).activeCollection?.name, 'Research');
+
+      await notifier.pickDocuments();
+
+      expect(state(container).documents, hasLength(1));
+      expect(state(container).documentCountIn(collection.id), 1);
+      expect(state(container).documentCountIn(defaultCollectionId), 0);
+      expect(state(container).totalDocumentCount, 1);
+
+      notifier.search('zebras');
+      expect(state(container).searchResults, hasLength(1));
+    });
+
+    test('shows and searches one collection at a time', () async {
+      final file = await writeFile('work.txt', 'Docker deployment notes.');
+      final container = buildContainer(picked: [file.path]);
+      final notifier = await loaded(container);
+
+      final work = notifier.createCollection('Work')!;
+      await notifier.pickDocuments();
+      expect(state(container).documents, hasLength(1));
+
+      notifier.setActiveCollection(defaultCollectionId);
+      final general = state(container);
+      expect(general.activeCollectionId, defaultCollectionId);
+      expect(general.documents, isEmpty);
+      expect(general.chunkCount, 0);
+      // The preview follows the collection, so it never shows another one's
+      // chunks.
+      notifier.search('docker');
+      expect(state(container).searchResults, isEmpty);
+
+      notifier.setActiveCollection(work.id);
+      expect(state(container).documents, hasLength(1));
+      notifier.search('docker');
+      expect(state(container).searchResults, hasLength(1));
+    });
+
+    test('renames a collection and refuses a blank name', () async {
+      final container = buildContainer();
+      final notifier = await loaded(container);
+      final collection = notifier.createCollection('Temp')!;
+
+      expect(notifier.renameCollection(collection.id, '  Reading  '), isTrue);
+      expect(state(container).activeCollection?.name, 'Reading');
+      expect(state(container).statusMessage, contains('Renamed'));
+
+      expect(notifier.renameCollection(collection.id, '   '), isFalse);
+      expect(state(container).errorMessage, contains('name'));
+      expect(state(container).activeCollection?.name, 'Reading');
+    });
+
+    test('removes a collection and forgets only its index', () async {
+      final file = await writeFile(
+        'notes.txt',
+        'Disposable indexed content lives here.',
+      );
+      final container = buildContainer(picked: [file.path]);
+      final notifier = await loaded(container);
+
+      final collection = notifier.createCollection('Temporary')!;
+      await notifier.pickDocuments();
+      expect(state(container).totalDocumentCount, 1);
+
+      notifier.removeCollection(collection.id);
+
+      final current = state(container);
+      expect(current.collections.map((entry) => entry.id), [
+        defaultCollectionId,
+      ]);
+      expect(current.activeCollectionId, defaultCollectionId);
+      expect(current.totalDocumentCount, 0);
+      expect(current.statusMessage, contains('not touched'));
+      expect(file.existsSync(), isTrue);
+      expect(DocumentIndexStore(indexFile).read()!.documents, isEmpty);
+    });
+
+    test('refuses to remove the always-present collection', () async {
+      final container = buildContainer();
+      final notifier = await loaded(container);
+
+      notifier.removeCollection(defaultCollectionId);
+
+      expect(state(container).errorMessage, contains('cannot be removed'));
+      expect(state(container).collections, hasLength(1));
+    });
+
+    test('remembers the active collection across a reload', () async {
+      final container = buildContainer();
+      final notifier = await loaded(container);
+      final collection = notifier.createCollection('Research')!;
+
+      final reopened = buildContainer();
+      await loaded(reopened);
+
+      expect(state(reopened).activeCollectionId, collection.id);
+      expect(state(reopened).activeCollection?.name, 'Research');
+      expect(state(reopened).collections, hasLength(2));
+    });
   });
 }

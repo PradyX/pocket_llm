@@ -383,9 +383,10 @@ class HomeController extends _$HomeController {
           );
       final maxTokens = resolvedConfig.maxOutputTokens;
 
-      // Local documents (roadmap Phase 6A): retrieval is best-effort, so an
-      // index that cannot be opened never breaks a chat request.
-      final documentRetriever = await _availableDocumentRetriever();
+      // Local documents (roadmap Phases 6A/6B): retrieval is best-effort, so an
+      // index that cannot be opened never breaks a chat request, and answers
+      // are grounded in the active knowledge collection only.
+      final documentRetrieval = await _availableDocumentRetrieval();
 
       _setStatus(
         text: 'Preparing response...',
@@ -404,16 +405,17 @@ class HomeController extends _$HomeController {
         runtimeContextTokens: resolvedConfig.contextTokens,
         declaredContextTokens: selectedModel.ggufMetadata?.contextLength,
         reservedOutputTokens: maxTokens,
-        retrievalTokens: documentRetriever == null
+        retrievalTokens: documentRetrieval == null
             ? 0
             : ContextPolicy.defaultRetrievalTokens,
       );
-      final documentContext = documentRetriever == null
+      final documentContext = documentRetrieval == null
           ? DocumentContext.empty
           : const DocumentContextBuilder().build(
-              retriever: documentRetriever,
+              retriever: documentRetrieval.retriever,
               query: _latestUserText(),
               tokenBudget: contextPolicy.retrievalTokens,
+              collectionId: documentRetrieval.collectionId,
             );
       final assembly = const ConversationContextBuilder().build(
         messages: [
@@ -683,15 +685,22 @@ class HomeController extends _$HomeController {
     _llmService.stopGeneration();
   }
 
-  /// Retriever over the local document index, or null when nothing is indexed.
+  /// Retriever over the active knowledge collection, or null when nothing is
+  /// retrievable from it.
   ///
   /// A failure here is reported as "no documents" rather than breaking the
-  /// request: retrieval is an addition to the chat, never a requirement.
-  Future<DocumentRetriever?> _availableDocumentRetriever() async {
+  /// request: retrieval is an addition to the chat, never a requirement. The
+  /// collection is decided on the Documents screen, so chat never silently
+  /// searches material the user did not select.
+  Future<_DocumentRetrieval?> _availableDocumentRetrieval() async {
     try {
       final library = await ref.read(documentLibraryProvider.future);
-      if (library.documents.isEmpty) return null;
-      return library.retriever;
+      final collectionId = library.activeCollectionId;
+      if (library.chunkCountIn(collectionId) == 0) return null;
+      return _DocumentRetrieval(
+        retriever: library.retriever,
+        collectionId: collectionId,
+      );
     } catch (error) {
       debugPrint('HomeController: could not open the document index: $error');
       return null;
@@ -923,4 +932,16 @@ class HomeController extends _$HomeController {
         return executionResult.message;
     }
   }
+}
+
+/// The retriever a request uses, bound to the knowledge collection it may
+/// search, so prompt assembly cannot widen the scope on its own.
+class _DocumentRetrieval {
+  const _DocumentRetrieval({
+    required this.retriever,
+    required this.collectionId,
+  });
+
+  final DocumentRetriever retriever;
+  final String collectionId;
 }

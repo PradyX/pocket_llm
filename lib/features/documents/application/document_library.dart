@@ -129,6 +129,10 @@ class DocumentLibrary {
   /// Total retrievable chunks.
   int get chunkCount => _retriever.chunkCount;
 
+  /// Retrievable chunks indexed for one collection.
+  int chunkCountIn(String collectionId) =>
+      _retriever.chunkCountIn(collectionId);
+
   /// Retrieval backend over the current index, used for prompt assembly.
   DocumentRetriever get retriever => _retriever;
 

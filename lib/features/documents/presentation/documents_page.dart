@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/documents/domain/document.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
+import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
 import 'package:pocket_llm/features/model_selection/domain/model_compatibility.dart'
     show ModelMemoryEstimate;
 
@@ -79,6 +80,14 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
               ),
             ),
           ),
+          if (state.isReady && state.collections.isNotEmpty)
+            _CollectionBar(
+              state: state,
+              onSelect: notifier.setActiveCollection,
+              onCreate: () => _createCollection(notifier),
+              onRename: () => _renameCollection(notifier),
+              onRemove: () => _confirmRemoveCollection(notifier),
+            ),
           if (state.isReadOnly)
             _NoticeCard(
               icon: Icons.lock_outline,
@@ -120,6 +129,8 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
             _EmptyState(
               canAdd: !state.isReadOnly,
               onAdd: notifier.pickDocuments,
+              collectionName: state.activeCollection?.name,
+              hasDocumentsElsewhere: state.totalDocumentCount > 0,
             ),
           if (state.hasDocuments) ...[
             const SizedBox(height: 8),
@@ -178,6 +189,103 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _createCollection(DocumentsNotifier notifier) async {
+    final name = await _promptCollectionName(
+      title: 'New collection',
+      actionLabel: 'Create',
+    );
+    if (name == null) return;
+    notifier.createCollection(name);
+  }
+
+  Future<void> _renameCollection(DocumentsNotifier notifier) async {
+    final active = ref.read(documentsProvider).activeCollection;
+    if (active == null) return;
+    final name = await _promptCollectionName(
+      title: 'Rename "${active.name}"',
+      actionLabel: 'Rename',
+      initialValue: active.name,
+    );
+    if (name == null) return;
+    notifier.renameCollection(active.id, name);
+  }
+
+  Future<void> _confirmRemoveCollection(DocumentsNotifier notifier) async {
+    final state = ref.read(documentsProvider);
+    final active = state.activeCollection;
+    if (active == null || active.isDefault) return;
+    final documents = state.documentCountIn(active.id);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove collection?'),
+        content: Text(
+          documents == 0
+              ? 'Pocket LLM will forget "${active.name}". The always-present '
+                    'collection stays.'
+              : 'Pocket LLM will forget "${active.name}" and the index of '
+                    '$documents ${documents == 1 ? 'document' : 'documents'} '
+                    'in it. The files themselves stay where they are.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed ?? false) notifier.removeCollection(active.id);
+  }
+
+  /// Asks for a collection name, or returns null when the dialog is dismissed.
+  Future<String?> _promptCollectionName({
+    required String title,
+    required String actionLabel,
+    String initialValue = '',
+  }) {
+    final controller = TextEditingController(text: initialValue);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: KnowledgeCollectionLimits.maxNameLength,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            hintText: 'Work, Research, Personal notes…',
+          ),
+          onSubmitted: (value) {
+            final name = value.trim();
+            if (name.isNotEmpty) Navigator.of(context).pop(name);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+              Navigator.of(context).pop(name);
+            },
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    ).whenComplete(controller.dispose);
   }
 
   Future<void> _confirmRemove(
@@ -295,15 +403,23 @@ class _ProgressCard extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.canAdd, required this.onAdd});
+  const _EmptyState({
+    required this.canAdd,
+    required this.onAdd,
+    required this.collectionName,
+    required this.hasDocumentsElsewhere,
+  });
 
   final bool canAdd;
   final VoidCallback onAdd;
+  final String? collectionName;
+  final bool hasDocumentsElsewhere;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final name = collectionName ?? 'this collection';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 40),
       child: Column(
@@ -314,12 +430,18 @@ class _EmptyState extends StatelessWidget {
             color: colorScheme.onSurfaceVariant,
           ),
           const SizedBox(height: 12),
-          Text('No documents yet', style: textTheme.titleMedium),
+          Text(
+            hasDocumentsElsewhere ? 'Nothing in "$name"' : 'No documents yet',
+            style: textTheme.titleMedium,
+          ),
           const SizedBox(height: 6),
           Text(
-            'Add a text, markdown or source file to ask questions about it. '
-            'PDFs are recognized, but text extraction for them is not '
-            'available yet.',
+            hasDocumentsElsewhere
+                ? 'Pick another collection above, or add files here. Each '
+                      'collection is searched on its own.'
+                : 'Add a text, markdown or source file to ask questions about '
+                      'it. PDFs are recognized, but text extraction for them '
+                      'is not available yet.',
             textAlign: TextAlign.center,
             style: textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
@@ -336,6 +458,107 @@ class _EmptyState extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Picks the knowledge collection the screen shows and chat retrieves from.
+class _CollectionBar extends StatelessWidget {
+  const _CollectionBar({
+    required this.state,
+    required this.onSelect,
+    required this.onCreate,
+    required this.onRename,
+    required this.onRemove,
+  });
+
+  final DocumentsState state;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onCreate;
+  final VoidCallback onRename;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final active = state.activeCollection;
+
+    return Card(
+      color: colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Collection',
+                    style: textTheme.labelMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: state.activeCollectionId,
+                      onChanged: (value) {
+                        if (value != null) onSelect(value);
+                      },
+                      items: [
+                        for (final collection in state.collections)
+                          DropdownMenuItem(
+                            value: collection.id,
+                            child: Text(
+                              _labelFor(collection),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    active?.retrievalLabel ?? 'lexical search',
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'New collection',
+              onPressed: state.isIndexing ? null : onCreate,
+              icon: const Icon(Icons.create_new_folder_outlined),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Collection actions',
+              enabled: !state.isIndexing,
+              onSelected: (value) {
+                if (value == 'rename') onRename();
+                if (value == 'remove') onRemove();
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                if (active != null && !active.isDefault)
+                  const PopupMenuItem(value: 'remove', child: Text('Remove')),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// `Research · 3 documents · 1 changed`.
+  String _labelFor(KnowledgeCollection collection) {
+    final documents = state.documentCountIn(collection.id);
+    final changed = state.changedCountIn(collection.id);
+    final buffer = StringBuffer(collection.name)
+      ..write(' · $documents ${documents == 1 ? 'document' : 'documents'}');
+    if (changed > 0) buffer.write(' · $changed changed');
+    return buffer.toString();
   }
 }
 
