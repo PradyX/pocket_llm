@@ -156,14 +156,23 @@ class HomeController extends _$HomeController {
   }
 
   /// Sends [text] with any number of attached images, in the order given.
+  ///
+  /// [reusedAttachments] maps the stored path of an image to the attachment it
+  /// came from when it is taken from this conversation's history. Those bytes
+  /// are already the app's own prepared copy, so they are copied into the new
+  /// message instead of being prepared (and so re-encoded) again: reusing an
+  /// image cannot cost quality, and it still works when the file the user
+  /// picked the first time has been moved or deleted.
   Future<void> sendMessage(
     String text, {
     List<String> imagePaths = const [],
+    Map<String, MessageAttachment> reusedAttachments = const {},
   }) async {
     await _runPrompt(
       promptText: text,
       appendUserMessage: true,
       imagePaths: imagePaths,
+      reusedAttachments: reusedAttachments,
     );
   }
 
@@ -221,6 +230,7 @@ class HomeController extends _$HomeController {
     required bool appendUserMessage,
     List<Message>? baseMessages,
     List<String> imagePaths = const [],
+    Map<String, MessageAttachment> reusedAttachments = const {},
   }) async {
     final generationStatus = ref.read(homeGenerationStatusProvider);
     if (generationStatus.isGenerating) return;
@@ -264,11 +274,15 @@ class HomeController extends _$HomeController {
 
         for (var index = 0; index < usableImagePaths.length; index++) {
           final imagePath = usableImagePaths[index];
-          final label = p.basename(imagePath).trim();
+          final reused = reusedAttachments[imagePath];
+          final label = (reused?.label ?? p.basename(imagePath)).trim();
           // Two images can share a file name; keep both files.
           final suffix = usableImagePaths.length > 1 ? '$index' : null;
 
-          final prepared = await _prepareImage(imagePath, attachmentSettings);
+          // A reused image keeps the copy it was sent with, byte for byte.
+          final prepared = reused == null
+              ? await _prepareImage(imagePath, attachmentSettings)
+              : null;
           final storedImagePath = prepared == null
               ? await _storageService.copyAttachmentToChat(
                   conversationId: conversationId,
@@ -289,7 +303,9 @@ class HomeController extends _$HomeController {
               type: AttachmentType.image,
               path: storedImagePath,
               label: label.isEmpty ? 'image' : label,
-              metadata: prepared == null
+              metadata: reused != null
+                  ? {...reused.metadata, 'reusedFromHistory': true}
+                  : prepared == null
                   ? const {}
                   : {
                       'width': prepared.width,

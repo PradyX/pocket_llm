@@ -9,7 +9,9 @@ import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
+import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
+import 'package:pocket_llm/features/home/domain/attachment_history.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
@@ -37,6 +39,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   ProviderSubscription<ModelSelectionState>? _modelSelectionSubscription;
   ProviderSubscription<String?>? _composerDraftSubscription;
   final List<XFile> _draftImages = [];
+
+  /// Draft images taken from this conversation's history, keyed by their
+  /// stored path, so they can be sent as the copies they already are instead
+  /// of being prepared again.
+  final Map<String, MessageAttachment> _reusedImages = {};
 
   /// More images than this would cost more context than a local model can
   /// afford per turn, so the composer stops taking them.
@@ -79,7 +86,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         if (_draftImages.isEmpty) return;
         if (_isVisionReady(next.selectedModel)) return;
 
-        setState(_draftImages.clear);
+        _clearDraftImages();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -157,7 +164,12 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     FocusScope.of(context).unfocus();
     _messageController.clear();
-    setState(_draftImages.clear);
+    final reusedImages = {
+      for (final file in draftImages)
+        if (_reusedImages.containsKey(file.path))
+          file.path: _reusedImages[file.path]!,
+    };
+    _clearDraftImages();
     _scheduleScrollToBottom(animated: true);
 
     await ref
@@ -165,6 +177,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         .sendMessage(
           text,
           imagePaths: [for (final file in draftImages) file.path],
+          reusedAttachments: reusedImages,
         );
 
     if (!mounted) return;
@@ -176,15 +189,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     final remaining = _maxDraftImages - _draftImages.length;
     if (remaining <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'A message can carry up to $_maxDraftImages images. Remove one to '
-            'add another.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showDraftLimitMessage();
       return;
     }
 
@@ -213,6 +218,79 @@ class _HomePageState extends ConsumerState<HomePage> {
         ),
       );
     }
+  }
+
+  /// Empties the composer's images, including the copies reused from history.
+  void _clearDraftImages() {
+    setState(() {
+      _draftImages.clear();
+      _reusedImages.clear();
+    });
+  }
+
+  void _removeDraftImage(int index) {
+    setState(() {
+      _reusedImages.remove(_draftImages[index].path);
+      _draftImages.removeAt(index);
+    });
+  }
+
+  void _showDraftLimitMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'A message can carry up to $_maxDraftImages images. Remove one to '
+          'add another.',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// Offers the images this conversation already holds.
+  ///
+  /// The listed files are the copies Pocket LLM stored when they were first
+  /// sent, so reusing one costs no preparation and still works when the file
+  /// the user picked the first time has moved or been deleted. Copies that are
+  /// no longer on the device are filtered out instead of being offered and
+  /// then failing.
+  Future<void> _showAttachmentHistory(
+    List<AttachmentHistoryEntry> entries,
+  ) async {
+    if (_maxDraftImages - _draftImages.length <= 0) {
+      _showDraftLimitMessage();
+      return;
+    }
+
+    final available = [
+      for (final entry in entries)
+        if (File(entry.path).existsSync()) entry,
+    ];
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Those images are no longer on this device.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final attachedPaths = {for (final file in _draftImages) file.path};
+    final chosen = await showModalBottomSheet<AttachmentHistoryEntry>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => _AttachmentHistorySheet(
+        entries: available,
+        attachedPaths: attachedPaths,
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    setState(() {
+      _draftImages.add(XFile(chosen.path));
+      _reusedImages[chosen.path] = chosen.attachment;
+    });
   }
 
   Future<void> _startNewConversation() async {
@@ -713,6 +791,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     final progressText = generationText.isEmpty
         ? 'Assistant is responding...'
         : generationText;
+    final historyImages = collectImageHistory(
+      ref.watch(homeControllerProvider),
+    );
 
     return Container(
       padding: EdgeInsets.only(
@@ -785,6 +866,21 @@ class _HomePageState extends ConsumerState<HomePage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              if (canAttachImage && historyImages.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8, bottom: 2),
+                  child: IconButton(
+                    tooltip: 'Images from this chat',
+                    onPressed: canCompose
+                        ? () => _showAttachmentHistory(historyImages)
+                        : null,
+                    icon: const Icon(Icons.collections_rounded),
+                    style: IconButton.styleFrom(
+                      backgroundColor: colorScheme.surfaceContainerHighest,
+                      foregroundColor: colorScheme.primary,
+                    ),
+                  ),
+                ),
               if (canAttachImage)
                 Padding(
                   padding: const EdgeInsets.only(right: 8, bottom: 2),
@@ -937,6 +1033,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     TextTheme textTheme,
   ) {
     final count = _draftImages.length;
+    final reusedCount = _reusedImages.length;
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -959,11 +1056,24 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
               if (count > 1)
                 TextButton(
-                  onPressed: () => setState(_draftImages.clear),
+                  onPressed: _clearDraftImages,
                   child: const Text('Clear all'),
                 ),
             ],
           ),
+          if (reusedCount > 0) ...[
+            const SizedBox(height: 2),
+            Text(
+              reusedCount == 1
+                  ? '1 image is a copy this chat already stores and is sent as '
+                        'it is.'
+                  : '$reusedCount images are copies this chat already stores '
+                        'and are sent as they are.',
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           const SizedBox(height: 6),
           Wrap(
             spacing: 10,
@@ -972,7 +1082,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               for (var index = 0; index < count; index++)
                 _DraftImageThumb(
                   file: _draftImages[index],
-                  onRemove: () => setState(() => _draftImages.removeAt(index)),
+                  onRemove: () => _removeDraftImage(index),
                 ),
             ],
           ),
@@ -1496,6 +1606,130 @@ class _MessageSources extends ConsumerWidget {
 }
 
 /// One pending image in the composer, with a remove button.
+/// Images this conversation already holds, offered for reuse.
+class _AttachmentHistorySheet extends StatelessWidget {
+  const _AttachmentHistorySheet({
+    required this.entries,
+    required this.attachedPaths,
+  });
+
+  final List<AttachmentHistoryEntry> entries;
+  final Set<String> attachedPaths;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Images from this chat', style: textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'A reused image is the copy stored with the original message, so '
+              'it is not prepared again and stays available even when the '
+              'picked file has moved.',
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  final isAttached = attachedPaths.contains(entry.path);
+                  return _HistoryImageTile(
+                    entry: entry,
+                    isAttached: isAttached,
+                    onTap: isAttached
+                        ? null
+                        : () => Navigator.of(context).pop(entry),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryImageTile extends StatelessWidget {
+  const _HistoryImageTile({
+    required this.entry,
+    required this.isAttached,
+    required this.onTap,
+  });
+
+  final AttachmentHistoryEntry entry;
+  final bool isAttached;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: 56,
+                height: 56,
+                child: Image.file(
+                  File(entry.path),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.broken_image_outlined,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.label,
+                    style: textTheme.bodyMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    isAttached ? 'Already attached' : 'Attach this copy',
+                    style: textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!isAttached)
+              Icon(Icons.add_circle_outline, color: colorScheme.primary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _DraftImageThumb extends StatelessWidget {
   const _DraftImageThumb({required this.file, required this.onRemove});
 
