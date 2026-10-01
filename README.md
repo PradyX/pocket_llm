@@ -196,7 +196,7 @@ dart run build_runner build --delete-conflicting-outputs
 - Built-ins: `General` (the app default prompt), `Coding`, `Research`, `Creative` and `Concise`. They are read-only — duplicate one to edit it.
 - A custom persona sets a system prompt and can prefer a model and an inference profile; the editor shows what the prompt costs in tokens. Unset preferences keep the app defaults.
 - Each conversation remembers its persona, so switching voice never touches history. Conversations from older versions keep working and use the current default persona.
-- Personas are stored locally as versioned JSON (`personas/` under the app support directory).
+- Personas are stored locally as versioned JSON (`personas/` under the app support directory), and a persona can be copied to the clipboard and imported back as a custom copy.
 
 ## Troubleshooting
 

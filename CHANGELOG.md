@@ -56,6 +56,7 @@ All notable changes to this project will be documented in this file.
   - A persona can prefer a model and an inference profile. Choosing a persona that prefers an installed model switches to it and says so in a message; when a persona pins a profile, that profile takes over for that conversation, otherwise the app-wide active profile applies.
   - On Android the structured tool-calling contract is appended to the persona prompt instead of replacing it, so tool calls keep working with a custom voice.
   - Personas are stored in a versioned file (`personas/personas.json`, schema v1) with the same guarantees as profiles: clamped values, a `.corrupt-<time>` backup before any rewrite, and read-only handling of files written by a newer build. Both stores now share one versioned-document implementation.
+  - A persona (or every persona) can be exported to the clipboard as versioned JSON and imported back as an editable custom copy: an import can never shadow a shipped built-in, and an id that already exists locally gets a fresh one, so importing never overwrites local work.
   - New **Personas** screen (drawer → Personas) with built-in and custom sections, set-default, duplicate, edit and delete; the chat header shows the active persona and switches it in place, and new chats record the current default persona.
 
 ### Fixed
