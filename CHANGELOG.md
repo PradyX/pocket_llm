@@ -34,6 +34,17 @@ All notable changes to this project will be documented in this file.
   - Benchmark history is now versioned storage (schema v2). Existing v1 history is read as-is and upgraded on the next write, and a history file that cannot be parsed is copied to `history.json.corrupt-<time>` instead of being overwritten.
   - The Benchmark screen saves every run (including failures) and lists the saved history with a clear action; Model Details shows the latest measured run for the model next to its estimate.
   - Imported and externally referenced models can be benchmarked now as well, not just managed downloads.
+- **Context & session management (Roadmap Phase 4)**: prompts are now assembled against a token budget instead of fixed character limits.
+  - `ContextPolicy` describes the budget of one request: the effective context window, the tokens reserved for the answer, a safety margin and a per-message truncation threshold. The window is capped by the model's declared GGUF context length when that is smaller than the platform default, and the answer reservation is clamped so at least half the window stays available for input.
+  - `ConversationContextBuilder` assembles model input deterministically: the system prompt is always preserved and charged first, output tokens are reserved before any history is considered, the newest turn is always kept, and older turns are added newest-first until the budget runs out. Older turns that no longer fit are dropped (sliding context); summarisation is not enabled yet.
+  - A message longer than the per-message threshold keeps its head and tail with the middle elided, because instructions sit at the start of a prompt and the question at the end.
+  - Attached images are charged against the budget, so an image turn is budgeted rather than free.
+  - Token counts are estimates (`ceil(characters / 4)` plus per-message overhead) and documented as such: the bundled runtime exposes no tokenizer through its isolate API, so the estimator deliberately stays conservative.
+  - The chat screen shows a context usage readout above the composer: used versus available input tokens, a progress bar, and the window and answer reservation, plus an explicit note when older or shortened messages were trimmed to fit. Prompt assembly is no longer silent about what it left out.
+  - Assistant messages store the estimated prompt tokens and the context window they ran with, and the per-message stats line shows input tokens next to the output count.
+
+### Fixed
+- **Image turns could exceed the context window (Roadmap Phase 4)**: the previous history trimming charged image overhead for older messages but not for the newest turn, so a large image message could be sent with a prompt longer than the window the runtime was started with. Attachment overhead is now part of the single-turn budget as well.
 
 ## [1.5.0] - 2026-03-24
 
