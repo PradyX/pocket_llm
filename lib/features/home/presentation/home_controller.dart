@@ -5,7 +5,9 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
+import 'package:pocket_llm/core/settings/attachment_settings_provider.dart';
 import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
+import 'package:pocket_llm/core/services/attachment_image_service.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
@@ -250,23 +252,46 @@ class HomeController extends _$HomeController {
             if (path.trim().isNotEmpty) path,
         ];
         final attachments = <MessageAttachment>[];
+        final attachmentSettings = ref.read(attachmentSettingsProvider);
 
         for (var index = 0; index < usableImagePaths.length; index++) {
           final imagePath = usableImagePaths[index];
           final label = p.basename(imagePath).trim();
-          final storedImagePath = await _storageService.copyAttachmentToChat(
-            conversationId: conversationId,
-            messageId: userMessageId,
-            sourcePath: imagePath,
-            preferredFileName: label,
-            // Two images can share a file name; keep both files.
-            uniqueSuffix: usableImagePaths.length > 1 ? '$index' : null,
+          // Two images can share a file name; keep both files.
+          final suffix = usableImagePaths.length > 1 ? '$index' : null;
+
+          final prepared = await _prepareImage(
+            imagePath,
+            attachmentSettings,
           );
+          final storedImagePath = prepared == null
+              ? await _storageService.copyAttachmentToChat(
+                  conversationId: conversationId,
+                  messageId: userMessageId,
+                  sourcePath: imagePath,
+                  preferredFileName: label,
+                  uniqueSuffix: suffix,
+                )
+              : await _storageService.writeAttachmentBytes(
+                  conversationId: conversationId,
+                  messageId: userMessageId,
+                  bytes: prepared.bytes,
+                  preferredFileName: _withExtension(label, prepared.extension),
+                  uniqueSuffix: suffix,
+                );
           attachments.add(
             MessageAttachment.create(
               type: AttachmentType.image,
               path: storedImagePath,
               label: label.isEmpty ? 'image' : label,
+              metadata: prepared == null
+                  ? const {}
+                  : {
+                      'width': prepared.width,
+                      'height': prepared.height,
+                      'bytes': prepared.byteSize,
+                      'originalBytes': prepared.originalByteSize,
+                    },
             ),
           );
         }
@@ -693,6 +718,28 @@ class HomeController extends _$HomeController {
     _stopRequestedByUser = true;
     _setStatus(text: 'Stopping generation...', isGenerating: true);
     _llmService.stopGeneration();
+  }
+
+  /// Prepares one attached image, or null when it should be stored untouched.
+  ///
+  /// Optimization is an addition to the chat, never a requirement: an image the
+  /// pure-Dart decoder cannot read (HEIC, for example) is attached as it is
+  /// instead of being dropped.
+  Future<PreparedAttachmentImage?> _prepareImage(
+    String path,
+    AttachmentSettingsState settings,
+  ) {
+    if (settings.keepsOriginalImages) return Future<PreparedAttachmentImage?>.value();
+    return const AttachmentImageService().prepare(
+      path: path,
+      options: settings.imageOptions,
+    );
+  }
+
+  /// `holiday.jpg` or `photo.png`, depending on the encoded format.
+  static String _withExtension(String name, String extension) {
+    final base = p.basenameWithoutExtension(name).trim();
+    return '${base.isEmpty ? 'image' : base}.$extension';
   }
 
   /// Retriever over the active knowledge collection, or null when nothing is

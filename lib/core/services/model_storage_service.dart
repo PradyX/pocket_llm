@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -124,22 +125,68 @@ class ModelStorageService {
       throw Exception('Selected image could not be found.');
     }
 
+    final target = await _attachmentTarget(
+      conversationId: conversationId,
+      messageId: messageId,
+      sourcePath: sourcePath,
+      preferredFileName: preferredFileName,
+      uniqueSuffix: uniqueSuffix,
+    );
+
+    final copiedFile = await sourceFile.copy(target.path);
+    return copiedFile.path;
+  }
+
+  /// Stores prepared image [bytes] as an attachment of [messageId].
+  ///
+  /// Used when an image was downscaled or re-encoded before sending; the
+  /// original file on disk is never touched.
+  Future<String> writeAttachmentBytes({
+    required String conversationId,
+    required String messageId,
+    required Uint8List bytes,
+    String? preferredFileName,
+    String? uniqueSuffix,
+  }) async {
+    if (bytes.isEmpty) {
+      throw Exception('Prepared image was empty.');
+    }
+
+    final target = await _attachmentTarget(
+      conversationId: conversationId,
+      messageId: messageId,
+      // Only used when no prepared name is given; prepared bytes are JPEG unless
+      // the image kept transparency.
+      sourcePath: preferredFileName ?? 'image.jpg',
+      preferredFileName: preferredFileName,
+      uniqueSuffix: uniqueSuffix,
+    );
+    await target.writeAsBytes(bytes, flush: true);
+    return target.path;
+  }
+
+  /// Resolves the target file of an attachment inside its conversation folder.
+  Future<File> _attachmentTarget({
+    required String conversationId,
+    required String messageId,
+    required String sourcePath,
+    String? preferredFileName,
+    String? uniqueSuffix,
+  }) async {
     final attachmentsDir = await getAttachmentsDir();
     final conversationDir = Directory(p.join(attachmentsDir, conversationId));
     await conversationDir.create(recursive: true);
-
-    final targetPath = p.join(
-      conversationDir.path,
-      attachmentFileName(
-        messageId: messageId,
-        sourcePath: sourcePath,
-        preferredFileName: preferredFileName,
-        uniqueSuffix: uniqueSuffix,
+    return File(
+      p.join(
+        conversationDir.path,
+        attachmentFileName(
+          messageId: messageId,
+          sourcePath: sourcePath,
+          preferredFileName: preferredFileName,
+          uniqueSuffix: uniqueSuffix,
+        ),
       ),
     );
-
-    final copiedFile = await sourceFile.copy(targetPath);
-    return copiedFile.path;
   }
 
   Future<void> deleteFileIfExists(String path) async {

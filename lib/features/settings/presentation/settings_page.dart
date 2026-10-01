@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:pocket_llm/core/settings/attachment_settings_provider.dart';
 import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
+import 'package:pocket_llm/core/services/attachment_image_service.dart';
 import 'package:pocket_llm/core/theme/theme_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +13,7 @@ class SettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeNotifierProvider);
     final inferenceSettings = ref.watch(inferenceSettingsProvider);
+    final attachmentSettings = ref.watch(attachmentSettingsProvider);
     final sampling = inferenceSettings.resolvedSampling;
 
     return Scaffold(
@@ -236,8 +239,94 @@ class SettingsPage extends ConsumerWidget {
               ],
             ),
           ),
+          const SizedBox(height: 24),
+          Text(
+            'Images',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Optimize Images Before Sending'),
+                  subtitle: const Text(
+                    'Downscales large photos and re-encodes them to a size a '
+                    'local model can afford. Re-encoding also removes their '
+                    'metadata.',
+                  ),
+                  value: attachmentSettings.optimizeImages,
+                  onChanged: (value) {
+                    ref
+                        .read(attachmentSettingsProvider.notifier)
+                        .setOptimizeImages(value);
+                  },
+                ),
+                if (attachmentSettings.optimizeImages)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Row(
+                      children: [
+                        const Expanded(child: Text('Longest edge')),
+                        DropdownButton<int>(
+                          value: attachmentSettings.maxImageEdge,
+                          onChanged: (value) {
+                            if (value == null) return;
+                            ref
+                                .read(attachmentSettingsProvider.notifier)
+                                .setMaxImageEdge(value);
+                          },
+                          items: [
+                            for (final edge in _maxEdgeOptions(
+                              attachmentSettings.maxImageEdge,
+                            ))
+                              DropdownMenuItem(
+                                value: edge,
+                                child: Text('$edge px'),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                SwitchListTile(
+                  title: const Text('Remove Image Metadata'),
+                  subtitle: Text(
+                    attachmentSettings.optimizeImages
+                        ? 'Optimizing already stores images without EXIF/GPS.'
+                        : 'Re-encodes images without EXIF/GPS before they are '
+                              'stored.',
+                  ),
+                  // Optimizing implies a re-encode, so the switch reports what
+                  // really happens and only the re-encode-only path can change
+                  // it.
+                  value:
+                      attachmentSettings.optimizeImages ||
+                      attachmentSettings.stripMetadata,
+                  onChanged: attachmentSettings.optimizeImages
+                      ? null
+                      : (value) {
+                          ref
+                              .read(attachmentSettingsProvider.notifier)
+                              .setStripMetadata(value);
+                        },
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Max-edge choices, keeping any stored value selectable.
+  static List<int> _maxEdgeOptions(int current) {
+    const options = [768, 1280, 1600, AttachmentImageOptions.maxMaxEdge];
+    if (options.contains(current)) return options;
+    return [...options, current]..sort();
   }
 }
