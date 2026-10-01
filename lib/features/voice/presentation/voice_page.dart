@@ -5,9 +5,11 @@ import 'package:go_router/go_router.dart';
 import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
+import 'package:pocket_llm/features/voice/application/recording_controller.dart';
 import 'package:pocket_llm/features/voice/application/transcription_controller.dart';
 import 'package:pocket_llm/features/voice/application/tts_controller.dart';
 import 'package:pocket_llm/features/voice/application/voice_controller.dart';
+import 'package:pocket_llm/features/voice/data/microphone_recorder.dart';
 import 'package:pocket_llm/features/voice/data/speech_to_text_service.dart';
 import 'package:pocket_llm/features/voice/domain/speech_voice.dart';
 import 'package:pocket_llm/features/voice/domain/voice_model_option.dart';
@@ -86,8 +88,11 @@ class _SpeechToTextCard extends ConsumerWidget {
     final voiceState = ref.watch(voiceControllerProvider);
     final transcription = ref.watch(transcriptionControllerProvider);
     final controller = ref.read(transcriptionControllerProvider.notifier);
+    final recording = ref.watch(recordingControllerProvider);
+    final recordingController = ref.read(recordingControllerProvider.notifier);
     final selected = voiceState.selectedOption;
     final canTranscribe = voiceState.isSelectionReady && !transcription.isBusy;
+    final canRecord = canTranscribe && !recording.isRecording;
 
     return Card(
       color: colorScheme.surfaceContainerLow,
@@ -134,6 +139,11 @@ class _SpeechToTextCard extends ConsumerWidget {
                   ),
                 ),
                 FilledButton.icon(
+                  onPressed: canRecord ? recordingController.start : null,
+                  icon: const Icon(Icons.mic_rounded),
+                  label: const Text('Record'),
+                ),
+                FilledButton.icon(
                   onPressed: canTranscribe ? () => controller.start() : null,
                   icon: const Icon(Icons.audio_file_rounded),
                   label: Text(
@@ -144,6 +154,17 @@ class _SpeechToTextCard extends ConsumerWidget {
                 ),
               ],
             ),
+            if (recording.isRecording ||
+                recording.hasRecording ||
+                recording.errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _RecordingRow(
+                  state: recording,
+                  onTranscribe: () => _transcribeRecording(ref),
+                  onDiscard: recordingController.cancel,
+                ),
+              ),
             const SizedBox(height: 14),
             _TranscriptionPanel(
               state: transcription,
@@ -156,6 +177,25 @@ class _SpeechToTextCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Stops the microphone, transcribes the clip and removes it.
+  ///
+  /// A clip that produced no transcript is kept, so a failure can be retried
+  /// from the same row instead of asking the user to speak again.
+  Future<void> _transcribeRecording(WidgetRef ref) async {
+    final path = await ref.read(recordingControllerProvider.notifier).stop();
+    if (path == null) return;
+
+    await ref
+        .read(transcriptionControllerProvider.notifier)
+        .start(audioPath: path);
+    if (ref.read(transcriptionControllerProvider).hasTranscript) {
+      // The transcript is what the user keeps, so the audio is removed here
+      // rather than left lying in app storage.
+      await ref.read(microphoneRecorderProvider).deleteRecording(path);
+      ref.read(recordingControllerProvider.notifier).clearRecording();
+    }
   }
 
   void _copyTranscript(BuildContext context, String transcript) {
@@ -175,6 +215,102 @@ class _SpeechToTextCard extends ConsumerWidget {
   void _useInChat(BuildContext context, WidgetRef ref, String transcript) {
     ref.read(composerDraftProvider.notifier).state = transcript;
     context.go(AppRoutes.home);
+  }
+}
+
+/// The microphone row: what is being captured, and what to do with it.
+class _RecordingRow extends StatelessWidget {
+  const _RecordingRow({
+    required this.state,
+    required this.onTranscribe,
+    required this.onDiscard,
+  });
+
+  final RecordingState state;
+  final VoidCallback onTranscribe;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final limit = '${maximumRecordingLength.inMinutes} min';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (state.isRecording)
+                Icon(
+                  Icons.fiber_manual_record,
+                  size: 14,
+                  color: colorScheme.error,
+                ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  state.isRecording
+                      ? 'Recording ${_formatElapsed(state.elapsed)} · up to '
+                            '$limit'
+                      : 'Recorded ${_formatElapsed(state.elapsed)}',
+                  style: textTheme.bodyMedium,
+                ),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: onTranscribe,
+                icon: const Icon(Icons.stop_rounded, size: 18),
+                label: Text(
+                  state.isRecording ? 'Stop & transcribe' : 'Transcribe',
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: onDiscard,
+                style: TextButton.styleFrom(foregroundColor: colorScheme.error),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'The clip stays on this device and is removed once it has been '
+            'transcribed; nothing is uploaded.',
+            style: textTheme.labelSmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (state.noticeMessage != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              state.noticeMessage!,
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (state.errorMessage != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              state.errorMessage!,
+              style: textTheme.labelSmall?.copyWith(color: colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _formatElapsed(Duration elapsed) {
+    final minutes = elapsed.inMinutes.toString().padLeft(2, '0');
+    final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 }
 

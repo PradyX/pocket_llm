@@ -22,6 +22,8 @@
 		<string>????</string>
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Pocket LLM records voice locally so it can be transcribed on this device. Recordings are never uploaded.</string>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
 		<key>UILaunchStoryboardName</key>
