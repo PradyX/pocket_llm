@@ -37,12 +37,14 @@ class ConversationRepository {
     String? id,
     String? title,
     String? activeModelId,
+    String? personaId,
     String? systemPrompt,
   }) async {
     final conversation = Conversation.create(
       id: id,
       title: title,
       activeModelId: activeModelId,
+      personaId: personaId,
       systemPrompt: systemPrompt,
     );
     await _store.createConversation(conversation);
@@ -86,6 +88,25 @@ class ConversationRepository {
     return _update(
       conversationId,
       (conversation) => conversation.copyWith(activeModelId: modelId),
+    );
+  }
+
+  /// Sets (or clears) the persona this conversation chats with.
+  Future<Conversation> setPersona(String conversationId, String? personaId) {
+    return _update(
+      conversationId,
+      (conversation) => conversation.copyWith(personaId: personaId),
+    );
+  }
+
+  /// Sets (or clears) the inference profile this conversation prefers.
+  Future<Conversation> setInferenceProfile(
+    String conversationId,
+    String? profileId,
+  ) {
+    return _update(
+      conversationId,
+      (conversation) => conversation.copyWith(inferenceProfileId: profileId),
     );
   }
 

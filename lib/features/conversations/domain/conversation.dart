@@ -40,6 +40,7 @@ class Conversation {
     String? id,
     String? title,
     String? activeModelId,
+    String? personaId,
     String? systemPrompt,
   }) {
     final trimmedTitle = (title ?? '').trim();
@@ -50,6 +51,7 @@ class Conversation {
       createdAt: now,
       updatedAt: now,
       activeModelId: activeModelId,
+      personaId: personaId,
       systemPrompt: systemPrompt,
     );
   }
@@ -61,6 +63,8 @@ class Conversation {
     String? title,
     DateTime? updatedAt,
     Object? activeModelId = _unset,
+    Object? personaId = _unset,
+    Object? inferenceProfileId = _unset,
     Object? systemPrompt = _unset,
     bool? isPinned,
   }) {
@@ -72,8 +76,10 @@ class Conversation {
       activeModelId: activeModelId == _unset
           ? this.activeModelId
           : activeModelId as String?,
-      personaId: personaId,
-      inferenceProfileId: inferenceProfileId,
+      personaId: personaId == _unset ? this.personaId : personaId as String?,
+      inferenceProfileId: inferenceProfileId == _unset
+          ? this.inferenceProfileId
+          : inferenceProfileId as String?,
       systemPrompt: systemPrompt == _unset
           ? this.systemPrompt
           : systemPrompt as String?,

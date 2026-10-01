@@ -18,6 +18,10 @@ import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
+import 'package:pocket_llm/features/inference_profiles/domain/inference_profile.dart';
+import 'package:pocket_llm/features/personas/application/personas_controller.dart';
+import 'package:pocket_llm/features/personas/domain/persona.dart';
+import 'package:pocket_llm/features/personas/domain/persona_prompt.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -79,9 +83,32 @@ class HomeController extends _$HomeController {
       ref.read(modelStorageServiceProvider);
   bool get _androidToolCallingEnabled => Platform.isAndroid;
 
-  String get _systemPrompt => _androidToolCallingEnabled
-      ? buildAndroidToolCallingSystemPrompt()
-      : defaultAssistantSystemPrompt;
+  /// Persona the active conversation chats with.
+  ///
+  /// Falls back to the app default persona when the conversation has none or
+  /// points at one that no longer exists.
+  Persona get _activePersona {
+    final conversation = ref
+        .read(conversationControllerProvider)
+        .activeConversation;
+    return ref.read(personasProvider).resolve(conversation?.personaId);
+  }
+
+  /// Profile for this request: a persona may pin one, otherwise the app's
+  /// active profile applies.
+  InferenceProfile _effectiveProfile(Persona persona) {
+    final profiles = ref.read(inferenceProfilesProvider);
+    final pinnedId = persona.inferenceProfileId;
+    if (pinnedId == null) return profiles.activeProfile;
+    return profiles.profileById(pinnedId) ?? profiles.activeProfile;
+  }
+
+  /// System prompt for one request: the persona, plus the Android tool
+  /// contract that the structured-response parser depends on.
+  String get _systemPrompt => composePersonaSystemPrompt(
+    persona: _activePersona,
+    androidToolCalling: _androidToolCallingEnabled,
+  );
 
   @override
   List<Message> build() {
@@ -289,6 +316,7 @@ class HomeController extends _$HomeController {
         activeModelId: ref
             .read(modelSelectionControllerProvider)
             .selectedModelId,
+        personaId: ref.read(personasProvider).defaultPersonaId,
       );
       _activeConversationId = conversation.id;
       return conversation.id;
@@ -342,7 +370,7 @@ class HomeController extends _$HomeController {
       final resolvedConfig = ref
           .read(inferenceProfileResolverProvider)
           .resolve(
-            profile: ref.read(inferenceProfilesProvider).activeProfile,
+            profile: _effectiveProfile(_activePersona),
             settings: inferenceSettings.copyWith(
               maxTokens: _resolveMaxTokens(adaptiveMode: adaptiveMode),
             ),
@@ -378,7 +406,9 @@ class HomeController extends _$HomeController {
       );
 
       _setStatus(
-        text: 'Loading model with ${resolvedConfig.profileName}...',
+        text:
+            'Loading ${_activePersona.name} with '
+            '${resolvedConfig.profileName}...',
         isGenerating: true,
         contextUsage: assembly.usage,
       );

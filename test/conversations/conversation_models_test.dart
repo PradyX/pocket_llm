@@ -43,6 +43,50 @@ void main() {
       final cleared = conversation.copyWith(activeModelId: null);
       expect(cleared.activeModelId, isNull);
     });
+
+    test('keeps the persona and profile bindings through JSON', () {
+      final conversation = Conversation.create(
+        id: 'c-1',
+        title: 'Chat',
+      ).copyWith(personaId: 'persona-1', inferenceProfileId: 'profile-1');
+
+      final restored = Conversation.fromJson(conversation.toJson());
+      expect(restored.personaId, 'persona-1');
+      expect(restored.inferenceProfileId, 'profile-1');
+    });
+
+    test('reads conversations saved before personas existed', () {
+      final restored = Conversation.fromJson(const {
+        'id': 'c-1',
+        'title': 'Old chat',
+        'activeModelId': 'm-1',
+      });
+
+      expect(restored.personaId, isNull);
+      expect(restored.inferenceProfileId, isNull);
+      expect(restored.activeModelId, 'm-1');
+    });
+
+    test('copyWith sets and clears the persona binding', () {
+      final conversation = Conversation.create(id: 'c-1', title: 'Chat');
+      final bound = conversation.copyWith(personaId: 'persona-1');
+      expect(bound.personaId, 'persona-1');
+
+      final cleared = bound.copyWith(personaId: null);
+      expect(cleared.personaId, isNull);
+      expect(cleared.inferenceProfileId, isNull);
+    });
+
+    test('withId keeps the persona and profile bindings', () {
+      final conversation = Conversation.create(
+        id: 'c-1',
+        title: 'Chat',
+      ).copyWith(personaId: 'persona-1', inferenceProfileId: 'profile-1');
+
+      final moved = conversation.withId('c-2');
+      expect(moved.personaId, 'persona-1');
+      expect(moved.inferenceProfileId, 'profile-1');
+    });
   });
 
   group('ConversationSummary', () {

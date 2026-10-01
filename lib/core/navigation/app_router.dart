@@ -4,6 +4,7 @@ import 'package:pocket_llm/features/home/presentation/home_page.dart';
 import 'package:pocket_llm/features/inference_profiles/presentation/inference_profiles_page.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_details_page.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_page.dart';
+import 'package:pocket_llm/features/personas/presentation/personas_page.dart';
 import 'package:pocket_llm/features/settings/presentation/settings_page.dart';
 import 'package:pocket_llm/features/about/presentation/about_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,6 +22,7 @@ abstract class AppRoutes {
   static const about = '/about';
   static const conversations = '/conversations';
   static const inferenceProfiles = '/inference-profiles';
+  static const personas = '/personas';
   static const modelDetails = '/model-details';
 
   /// Route to the GGUF metadata inspector for [modelId].
@@ -62,6 +64,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.inferenceProfiles,
         builder: (context, state) => const InferenceProfilesPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.personas,
+        builder: (context, state) => const PersonasPage(),
       ),
       GoRoute(
         path: AppRoutes.about,

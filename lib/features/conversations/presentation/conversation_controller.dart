@@ -158,11 +158,13 @@ class ConversationController extends _$ConversationController {
     String? id,
     String? title,
     String? activeModelId,
+    String? personaId,
   }) async {
     final conversation = await _repository.createConversation(
       id: id,
       title: title,
       activeModelId: activeModelId,
+      personaId: personaId,
     );
     final summaries = await _repository.loadSummaries();
     state = state.copyWith(
@@ -204,6 +206,34 @@ class ConversationController extends _$ConversationController {
       return;
     }
     final updated = await _repository.setActiveModel(conversationId, modelId);
+    _replaceConversation(updated);
+  }
+
+  /// Sets (or clears) the persona used by a conversation.
+  ///
+  /// The persona is stored on the conversation, so switching chats keeps each
+  /// one's voice without duplicating history.
+  Future<void> setPersona(String conversationId, String? personaId) async {
+    if (_findSummary(conversationId)?.conversation.personaId == personaId) {
+      return;
+    }
+    final updated = await _repository.setPersona(conversationId, personaId);
+    _replaceConversation(updated);
+  }
+
+  /// Sets (or clears) the inference profile a conversation prefers.
+  Future<void> setInferenceProfile(
+    String conversationId,
+    String? profileId,
+  ) async {
+    if (_findSummary(conversationId)?.conversation.inferenceProfileId ==
+        profileId) {
+      return;
+    }
+    final updated = await _repository.setInferenceProfile(
+      conversationId,
+      profileId,
+    );
     _replaceConversation(updated);
   }
 

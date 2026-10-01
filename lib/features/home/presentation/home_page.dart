@@ -14,6 +14,8 @@ import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
+import 'package:pocket_llm/features/personas/application/personas_controller.dart';
+import 'package:pocket_llm/features/personas/domain/persona.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -143,7 +145,104 @@ class _HomePageState extends ConsumerState<HomePage> {
           activeModelId: ref
               .read(modelSelectionControllerProvider)
               .selectedModelId,
+          // Record the default persona so later default changes do not alter
+          // what this conversation already uses.
+          personaId: ref.read(personasProvider).defaultPersonaId,
         );
+  }
+
+  /// Chooses the persona for the active conversation, or the app default when
+  /// no conversation exists yet.
+  Future<void> _pickPersona() async {
+    final personasState = ref.read(personasProvider);
+    final conversation = ref
+        .read(conversationControllerProvider)
+        .activeConversation;
+    final currentId = conversation?.personaId ?? personasState.defaultPersonaId;
+
+    final chosenId = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: RadioGroup<String>(
+          groupValue: currentId,
+          onChanged: (value) => Navigator.of(sheetContext).pop(value),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  conversation == null
+                      ? 'Default persona for new chats'
+                      : 'Persona for this chat',
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+              ),
+              for (final persona in personasState.personas)
+                RadioListTile<String>(
+                  value: persona.id,
+                  title: Text(persona.name),
+                  subtitle: Text(
+                    persona.description.isEmpty
+                        ? persona.promptLabel
+                        : persona.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.tune_rounded),
+                title: const Text('Manage personas'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  context.push(AppRoutes.personas);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (chosenId == null || chosenId == currentId || !mounted) return;
+
+    if (conversation == null) {
+      await ref.read(personasProvider.notifier).selectDefault(chosenId);
+      return;
+    }
+
+    await ref
+        .read(conversationControllerProvider.notifier)
+        .setPersona(conversation.id, chosenId);
+    if (!mounted) return;
+
+    final persona = ref.read(personasProvider).personaById(chosenId);
+    final preferredModelId = persona?.defaultModelId;
+    if (preferredModelId == null) return;
+
+    final selection = ref.read(modelSelectionControllerProvider);
+    LlmModel? preferredModel;
+    for (final model in selection.models) {
+      if (model.id == preferredModelId && model.isDownloaded) {
+        preferredModel = model;
+        break;
+      }
+    }
+    if (preferredModel == null ||
+        selection.selectedModelId == preferredModelId) {
+      return;
+    }
+
+    ref
+        .read(modelSelectionControllerProvider.notifier)
+        .selectModel(preferredModel);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Switched to ${preferredModel.name} for this persona.'),
+      ),
+    );
   }
 
   Future<void> _regenerateMessage(Message message) async {
@@ -235,6 +334,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     final hasDownloadedModel = downloadedModels.isNotEmpty;
     final hasModelDropdown = downloadedModels.length > 1;
     final canAttachImage = _isVisionReady(selectedModel);
+    final activePersona = ref
+        .watch(personasProvider)
+        .resolve(activeConversation?.personaId);
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isGenerating = generationStatus.isGenerating;
@@ -364,6 +466,47 @@ class _HomePageState extends ConsumerState<HomePage> {
                           overflow: TextOverflow.ellipsis,
                           style: textTheme.labelSmall?.copyWith(
                             color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: isGenerating ? null : _pickPersona,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.face_retouching_natural,
+                                size: 13,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 4),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 120,
+                                ),
+                                child: Text(
+                                  activePersona.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: colorScheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Icon(
+                                Icons.expand_more_rounded,
+                                size: 14,
+                                color: colorScheme.primary,
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -843,6 +986,17 @@ class _HomePageState extends ConsumerState<HomePage> {
             onTap: () {
               Navigator.pop(context);
               context.push(AppRoutes.benchmark);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.face_retouching_natural),
+            title: const Text('Personas'),
+            subtitle: Text(
+              'Default: ${ref.watch(personasProvider).defaultPersona.name}',
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.personas);
             },
           ),
           ListTile(

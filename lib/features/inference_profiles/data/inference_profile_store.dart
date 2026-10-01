@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:pocket_llm/core/utils/logger.dart';
+import 'package:pocket_llm/core/data/versioned_json_document.dart';
 import 'package:pocket_llm/features/inference_profiles/domain/inference_profile.dart';
 
 /// Persisted profile selection: the custom profiles plus which profile is active.
@@ -100,7 +99,13 @@ class InferenceProfilesSnapshot {
 /// A file written by a newer build is left untouched: reads fall back to the
 /// built-ins and writes are refused rather than downgrading newer data.
 class InferenceProfileStore {
-  InferenceProfileStore(this._file);
+  InferenceProfileStore(File file)
+    : _document = VersionedJsonDocument(
+        file: file,
+        currentVersion: currentVersion,
+        label: 'InferenceProfileStore',
+        isPayloadUsable: _hasUsableProfiles,
+      );
 
   /// Current on-disk schema version.
   static const int currentVersion = 1;
@@ -115,40 +120,19 @@ class InferenceProfileStore {
     );
   }
 
-  final File _file;
-  bool _readOnly = false;
+  final VersionedJsonDocument _document;
 
   /// Absolute path of the profile file (used by diagnostics and tests).
-  String get filePath => _file.path;
+  String get filePath => _document.filePath;
 
   /// True when the file belongs to a newer build and must not be rewritten.
-  bool get isReadOnly => _readOnly;
+  bool get isReadOnly => _document.isReadOnly;
 
   /// Loads the persisted selection, falling back to built-ins when the file is
   /// missing, empty or unreadable.
   InferenceProfilesSnapshot load() {
-    if (!_file.existsSync()) return InferenceProfilesSnapshot.empty;
-
-    final Object? decoded;
-    try {
-      final raw = _file.readAsStringSync().trim();
-      if (raw.isEmpty) return InferenceProfilesSnapshot.empty;
-      decoded = jsonDecode(raw);
-    } catch (_) {
-      return InferenceProfilesSnapshot.empty;
-    }
-
-    if (decoded is! Map) return InferenceProfilesSnapshot.empty;
-
-    final version = decoded['version'];
-    if (version is int && version > currentVersion) {
-      _readOnly = true;
-      AppLogger.debug(
-        'InferenceProfileStore: schema version $version is not supported by '
-        'this build; leaving the file untouched.',
-      );
-      return InferenceProfilesSnapshot.empty;
-    }
+    final decoded = _document.read();
+    if (decoded == null) return InferenceProfilesSnapshot.empty;
 
     final rawProfiles = decoded['profiles'];
     final profiles = <InferenceProfile>[];
@@ -177,52 +161,12 @@ class InferenceProfileStore {
 
   /// Writes [snapshot]. Returns false when the store is read-only.
   bool save(InferenceProfilesSnapshot snapshot) {
-    if (_readOnly) {
-      AppLogger.debug(
-        'InferenceProfileStore: refusing to overwrite a newer schema.',
-      );
-      return false;
-    }
-
-    _backupUnreadablePayload();
-    try {
-      _file.parent.createSync(recursive: true);
-      _file.writeAsStringSync(
-        const JsonEncoder.withIndent('  ').convert(snapshot.toJson()),
-        flush: true,
-      );
-      return true;
-    } catch (error, stack) {
-      AppLogger.error('InferenceProfileStore: could not save', error, stack);
-      return false;
-    }
+    return _document.write(snapshot.toJson());
   }
 
-  /// Copies a payload aside when it cannot be read, so a rewrite cannot
-  /// destroy it. A payload where no single entry parsed counts as unreadable.
-  void _backupUnreadablePayload() {
-    if (!_file.existsSync()) return;
-    try {
-      final raw = _file.readAsStringSync().trim();
-      if (raw.isEmpty || _isReadable(raw)) return;
-      final backup = File(
-        '${_file.path}.corrupt-${DateTime.now().millisecondsSinceEpoch}',
-      );
-      _file.copySync(backup.path);
-    } catch (_) {
-      // A failed backup must not block saving the new selection.
-    }
-  }
-
-  static bool _isReadable(String raw) {
-    final Object? decoded;
-    try {
-      decoded = jsonDecode(raw);
-    } catch (_) {
-      return false;
-    }
-    if (decoded is! Map) return false;
-    final rawProfiles = decoded['profiles'];
+  /// True when a payload carries no readable profile at all.
+  static bool _hasUsableProfiles(Map<String, dynamic> payload) {
+    final rawProfiles = payload['profiles'];
     if (rawProfiles is! List) return true;
     if (rawProfiles.isEmpty) return true;
     for (final entry in rawProfiles) {
