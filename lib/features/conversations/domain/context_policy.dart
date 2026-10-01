@@ -67,6 +67,7 @@ class ContextPolicy {
     required this.reservedOutputTokens,
     this.safetyMarginTokens = defaultSafetyMarginTokens,
     this.maxMessageTokens = defaultMaxMessageTokens,
+    this.retrievalTokens = 0,
   });
 
   /// Tokens kept free for the model's answer and runtime slack.
@@ -77,6 +78,17 @@ class ContextPolicy {
 
   /// Smallest output reservation, even when the user asks for less.
   static const int minimumReservedOutputTokens = 64;
+
+  /// Retrieval budget asked for when local documents are available.
+  static const int defaultRetrievalTokens = 900;
+
+  /// Share of the usable input budget retrieval may take; the rest stays
+  /// available for the conversation itself.
+  static const int maximumRetrievalShare = 3;
+
+  /// Maximum tokens the retrieved local document section may use; 0 disables
+  /// document retrieval for the request.
+  final int retrievalTokens;
 
   /// Total context window the runtime will be started with.
   final int contextTokens;
@@ -90,9 +102,13 @@ class ContextPolicy {
   /// Per-message truncation threshold.
   final int maxMessageTokens;
 
-  /// Tokens available for the system prompt plus conversation history.
+  /// Tokens available for the system prompt, retrieved documents and the
+  /// conversation history.
   int get usableInputTokens =>
       math.max(0, contextTokens - reservedOutputTokens - safetyMarginTokens);
+
+  /// Largest retrieval budget this policy allows.
+  int get maximumRetrievalTokens => usableInputTokens ~/ maximumRetrievalShare;
 
   /// Builds a policy for a model, honouring its declared context limit.
   ///
@@ -105,6 +121,7 @@ class ContextPolicy {
     int? declaredContextTokens,
     int safetyMarginTokens = defaultSafetyMarginTokens,
     int maxMessageTokens = defaultMaxMessageTokens,
+    int retrievalTokens = 0,
   }) {
     final runtime = runtimeContextTokens <= 0 ? 2048 : runtimeContextTokens;
     final declared = declaredContextTokens;
@@ -116,11 +133,16 @@ class ContextPolicy {
       minimumReservedOutputTokens,
       maxReservation,
     );
-    return ContextPolicy(
+    final policy = ContextPolicy(
       contextTokens: context,
       reservedOutputTokens: reserved,
       safetyMarginTokens: safetyMarginTokens,
       maxMessageTokens: maxMessageTokens,
+    );
+    // Retrieved documents never take more than their share of the input, so a
+    // long document cannot crowd out the conversation that asked about it.
+    return policy.copyWith(
+      retrievalTokens: retrievalTokens.clamp(0, policy.maximumRetrievalTokens),
     );
   }
 
@@ -129,12 +151,14 @@ class ContextPolicy {
     int? reservedOutputTokens,
     int? safetyMarginTokens,
     int? maxMessageTokens,
+    int? retrievalTokens,
   }) {
     return ContextPolicy(
       contextTokens: contextTokens ?? this.contextTokens,
       reservedOutputTokens: reservedOutputTokens ?? this.reservedOutputTokens,
       safetyMarginTokens: safetyMarginTokens ?? this.safetyMarginTokens,
       maxMessageTokens: maxMessageTokens ?? this.maxMessageTokens,
+      retrievalTokens: retrievalTokens ?? this.retrievalTokens,
     );
   }
 }
@@ -149,6 +173,8 @@ class ContextUsage {
     required this.includedMessages,
     required this.droppedMessages,
     required this.truncatedMessages,
+    this.retrievalTokens = 0,
+    this.retrievedSources = 0,
   });
 
   /// Input tokens used by the system prompt plus the included history.
@@ -167,6 +193,12 @@ class ContextUsage {
   final int droppedMessages;
   final int truncatedMessages;
 
+  /// Tokens spent on the retrieved local document section.
+  final int retrievalTokens;
+
+  /// Number of document chunks given to the model.
+  final int retrievedSources;
+
   /// True when the assembly left part of the input budget unused.
   bool get hasTrailingRoom => usedTokens < limitTokens;
 
@@ -183,6 +215,14 @@ class ContextUsage {
   String get detailLabel =>
       '${formatTokens(contextTokens)} context · '
       '${formatTokens(reservedOutputTokens)} reserved for the answer';
+
+  /// Local documents line, or null when none were used.
+  String? get retrievalLabel {
+    if (retrievedSources <= 0) return null;
+    return '$retrievedSources document '
+        'chunk${retrievedSources == 1 ? '' : 's'} · '
+        '${formatTokens(retrievalTokens)} tokens';
+  }
 
   /// What was left out of the prompt, or null when nothing was.
   String? get trimmingLabel {

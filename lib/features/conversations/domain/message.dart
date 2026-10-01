@@ -1,5 +1,6 @@
 import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
+import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 
 /// Who authored a message.
 enum MessageRole {
@@ -90,6 +91,12 @@ class Message {
   final List<MessageAttachment> attachments;
   final MessageGenerationStats? generationStats;
 
+  /// Local document chunks that were given to the model for this answer.
+  ///
+  /// Empty for messages that were not built from the document index, including
+  /// every message saved before documents existed.
+  final List<MessageSource> sources;
+
   /// Token count estimate when known locally.
   final int? tokenCount;
 
@@ -103,6 +110,7 @@ class Message {
     this.modelName,
     this.attachments = const [],
     this.generationStats,
+    this.sources = const [],
     this.tokenCount,
   });
 
@@ -116,6 +124,7 @@ class Message {
     String? modelName,
     List<MessageAttachment> attachments = const [],
     MessageGenerationStats? generationStats,
+    List<MessageSource> sources = const [],
     int? tokenCount,
   }) {
     return Message(
@@ -128,6 +137,7 @@ class Message {
       modelName: modelName,
       attachments: attachments,
       generationStats: generationStats,
+      sources: sources,
       tokenCount: tokenCount,
     );
   }
@@ -156,6 +166,7 @@ class Message {
     String? modelName,
     List<MessageAttachment>? attachments,
     Object? generationStats = _unset,
+    List<MessageSource>? sources,
     Object? tokenCount = _unset,
   }) {
     return Message(
@@ -170,6 +181,7 @@ class Message {
       generationStats: generationStats == _unset
           ? this.generationStats
           : generationStats as MessageGenerationStats?,
+      sources: sources ?? this.sources,
       tokenCount: tokenCount == _unset ? this.tokenCount : tokenCount as int?,
     );
   }
@@ -185,6 +197,7 @@ class Message {
       'modelName': modelName,
       'attachments': attachments.map((a) => a.toJson()).toList(),
       'generationStats': generationStats?.toJson(),
+      'sources': sources.map((source) => source.toJson()).toList(),
       'tokenCount': tokenCount,
     };
   }
@@ -246,6 +259,9 @@ class Message {
       modelName: json['modelName'] as String?,
       attachments: attachments,
       generationStats: generationStats,
+      // Absent on every message saved before citations existed, and on
+      // messages that simply used no documents.
+      sources: MessageSource.listFromJson(json['sources']),
       tokenCount: (json['tokenCount'] as num?)?.toInt(),
     );
   }

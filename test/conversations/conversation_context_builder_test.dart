@@ -3,6 +3,9 @@ import 'package:pocket_llm/features/conversations/application/conversation_conte
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
+import 'package:pocket_llm/features/documents/domain/document.dart';
+import 'package:pocket_llm/features/documents/domain/document_context.dart';
+import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
 
 void main() {
   const builder = ConversationContextBuilder();
@@ -249,5 +252,94 @@ void main() {
         expect(assembly.usage.limitTokens, 2048 - 512 - 64);
       },
     );
+  });
+
+  group('retrieved documents', () {
+    /// A section of exactly 394 characters: 99 tokens, so the composed system
+    /// message costs 6 (system) + 2 (separator) + 394 characters = 107 tokens.
+    final section = 'x' * 394;
+
+    DocumentContext contextWith({int chunks = 1}) {
+      return DocumentContext(
+        section: section,
+        hits: [
+          for (var index = 0; index < chunks; index++)
+            DocumentSearchHit(
+              documentId: 'doc-$index',
+              documentName: 'notes$index.md',
+              chunk: DocumentChunk(
+                index: 0,
+                text: 'chunk $index',
+                startOffset: 0,
+                endOffset: 7,
+              ),
+              score: 1,
+              matchedTerms: const {'docker'},
+            ),
+        ],
+        tokenCount: 99,
+      );
+    }
+
+    ContextPolicy tightPolicy() => const ContextPolicy(
+      contextTokens: 300,
+      reservedOutputTokens: 100,
+      retrievalTokens: 99,
+    );
+
+    test('appends the section to the system prompt and reports it', () {
+      final assembly = builder.build(
+        messages: [message('m1', 'Hello')],
+        systemPrompt: systemPrompt,
+        policy: tightPolicy(),
+        documentContext: contextWith(),
+      );
+
+      expect(assembly.systemPrompt, startsWith(systemPrompt));
+      expect(assembly.systemPrompt, contains(section));
+      expect(assembly.usage.retrievedSources, 1);
+      expect(assembly.usage.retrievalTokens, 99);
+      expect(assembly.usage.retrievalLabel, contains('1 document chunk'));
+    });
+
+    test('charges documents before history and drops what no longer fits', () {
+      final messages = [message('m-old', 'a' * 40), message('m-new', 'b' * 40)];
+
+      final withDocuments = builder.build(
+        messages: messages,
+        systemPrompt: systemPrompt,
+        policy: tightPolicy(),
+        documentContext: contextWith(),
+      );
+      final withoutDocuments = builder.build(
+        messages: messages,
+        systemPrompt: systemPrompt,
+        policy: tightPolicy(),
+      );
+
+      expect(withDocuments.messages.map((m) => m.id), ['m-new']);
+      expect(withDocuments.usage.droppedMessages, 1);
+      expect(withoutDocuments.messages.map((m) => m.id), ['m-old', 'm-new']);
+      expect(withDocuments.usage.retrievedSources, 1);
+    });
+
+    test('leaves the prompt untouched when nothing was retrieved', () {
+      final without = builder.build(
+        messages: [message('m1', 'Hello')],
+        systemPrompt: systemPrompt,
+        policy: tightPolicy(),
+      );
+      final empty = builder.build(
+        messages: [message('m1', 'Hello')],
+        systemPrompt: systemPrompt,
+        policy: tightPolicy(),
+        documentContext: DocumentContext.empty,
+      );
+
+      expect(empty.systemPrompt, without.systemPrompt);
+      expect(empty.usage.retrievedSources, 0);
+      expect(empty.usage.retrievalTokens, 0);
+      expect(empty.usage.retrievalLabel, isNull);
+    });
   });
 }

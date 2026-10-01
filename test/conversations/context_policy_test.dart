@@ -225,4 +225,53 @@ void main() {
       expect(formatTokens(2500000), '2.5M');
     });
   });
+
+  group('retrieval budget', () {
+    test('is off unless a caller asks for documents', () {
+      final policy = ContextPolicy.forModel(
+        runtimeContextTokens: 4096,
+        reservedOutputTokens: 512,
+      );
+
+      expect(policy.retrievalTokens, 0);
+      expect(policy.maximumRetrievalTokens, policy.usableInputTokens ~/ 3);
+    });
+
+    test('is capped so documents cannot crowd out the conversation', () {
+      final policy = ContextPolicy.forModel(
+        runtimeContextTokens: 2048,
+        reservedOutputTokens: 512,
+        retrievalTokens: ContextPolicy.defaultRetrievalTokens,
+      );
+
+      expect(policy.usableInputTokens, 2048 - 512 - 64);
+      expect(policy.retrievalTokens, policy.usableInputTokens ~/ 3);
+      expect(
+        policy.retrievalTokens,
+        lessThan(ContextPolicy.defaultRetrievalTokens),
+      );
+    });
+
+    test('keeps a smaller request smaller than the cap', () {
+      final policy = ContextPolicy.forModel(
+        runtimeContextTokens: 32768,
+        reservedOutputTokens: 512,
+        retrievalTokens: 400,
+      );
+
+      expect(policy.retrievalTokens, 400);
+    });
+
+    test('travels through copyWith', () {
+      const policy = ContextPolicy(
+        contextTokens: 2048,
+        reservedOutputTokens: 256,
+        retrievalTokens: 300,
+      );
+
+      expect(policy.copyWith().retrievalTokens, 300);
+      expect(policy.copyWith(retrievalTokens: 0).retrievalTokens, 0);
+      expect(policy.maximumRetrievalTokens, policy.usableInputTokens ~/ 3);
+    });
+  });
 }

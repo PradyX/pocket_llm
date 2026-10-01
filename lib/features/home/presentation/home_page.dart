@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
+import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
@@ -819,6 +820,26 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
               ],
             ),
+            if (usage.retrievalLabel != null) ...[
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Icon(
+                    Icons.folder_copy_outlined,
+                    size: 12,
+                    color: style?.color,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      usage.retrievalLabel!,
+                      style: style,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 4),
             ClipRRect(
               borderRadius: BorderRadius.circular(2),
@@ -1223,6 +1244,11 @@ class _ChatBubbleState extends State<_ChatBubble> {
                 ),
               ),
             ),
+          if (!isUser && widget.message.sources.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _MessageSources(sources: widget.message.sources),
+            ),
           if (widget.onRegenerate != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -1282,6 +1308,114 @@ class _ChatBubbleState extends State<_ChatBubble> {
     final promptPart = promptTokens != null ? ' · $promptTokens in' : '';
     return '${tps.toStringAsFixed(1)} tok/s · '
         '${seconds.toStringAsFixed(1)}s$tokenPart$promptPart';
+  }
+}
+
+/// Citations for one answer: the local chunks the model was actually given.
+///
+/// Only what was really sent is listed, and the chunk text is read back from
+/// the index as it is now instead of being copied into the conversation, so a
+/// re-indexed document is never quoted from a copy that no longer exists.
+class _MessageSources extends ConsumerWidget {
+  const _MessageSources({required this.sources});
+
+  final List<MessageSource> sources;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.folder_copy_outlined,
+              size: 14,
+              color: colorScheme.primary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              sources.length == 1 ? 'Local source' : 'Local sources',
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final source in sources)
+              ActionChip(
+                visualDensity: VisualDensity.compact,
+                label: Text(source.citationLabel, style: textTheme.labelSmall),
+                onPressed: () => _showSource(context, ref, source),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _showSource(BuildContext context, WidgetRef ref, MessageSource source) {
+    final chunkText = _chunkTextFromCurrentIndex(ref, source);
+    final terms = source.matchedTerms;
+    final textTheme = Theme.of(context).textTheme;
+
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(source.citationLabel),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (terms.isNotEmpty) Text('Matched: ${terms.join(', ')}'),
+            if (terms.isNotEmpty) const SizedBox(height: 12),
+            Text(
+              chunkText ??
+                  'This document is no longer in the local index, or it was '
+                      're-indexed since this answer. The citation above is '
+                      'what the model was given.',
+            ),
+            const SizedBox(height: 12),
+            Text(
+              chunkText == null
+                  ? 'Chunk ${source.chunkIndex + 1} is no longer stored.'
+                  : 'Chunk ${source.chunkIndex + 1}, shown from the current '
+                        'index — re-indexing the file can change it.',
+              style: textTheme.labelSmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Chunk text from the index as it is now, or null when it is gone.
+  static String? _chunkTextFromCurrentIndex(
+    WidgetRef ref,
+    MessageSource source,
+  ) {
+    final library = ref.read(documentsProvider.notifier).library;
+    final document = library?.documentById(source.documentId);
+    if (document == null) return null;
+    for (final chunk in document.chunks) {
+      if (chunk.index == source.chunkIndex) return chunk.text;
+    }
+    return null;
   }
 }
 

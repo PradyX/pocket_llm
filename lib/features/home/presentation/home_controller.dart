@@ -16,7 +16,12 @@ import 'package:pocket_llm/features/conversations/application/conversation_conte
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
+import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/features/documents/application/document_context_builder.dart';
+import 'package:pocket_llm/features/documents/application/documents_controller.dart';
+import 'package:pocket_llm/features/documents/domain/document_context.dart';
+import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/domain/inference_profile.dart';
 import 'package:pocket_llm/features/personas/application/personas_controller.dart';
@@ -378,6 +383,10 @@ class HomeController extends _$HomeController {
           );
       final maxTokens = resolvedConfig.maxOutputTokens;
 
+      // Local documents (roadmap Phase 6A): retrieval is best-effort, so an
+      // index that cannot be opened never breaks a chat request.
+      final documentRetriever = await _availableDocumentRetriever();
+
       _setStatus(
         text: 'Preparing response...',
         isGenerating: true,
@@ -395,7 +404,17 @@ class HomeController extends _$HomeController {
         runtimeContextTokens: resolvedConfig.contextTokens,
         declaredContextTokens: selectedModel.ggufMetadata?.contextLength,
         reservedOutputTokens: maxTokens,
+        retrievalTokens: documentRetriever == null
+            ? 0
+            : ContextPolicy.defaultRetrievalTokens,
       );
+      final documentContext = documentRetriever == null
+          ? DocumentContext.empty
+          : const DocumentContextBuilder().build(
+              retriever: documentRetriever,
+              query: _latestUserText(),
+              tokenBudget: contextPolicy.retrievalTokens,
+            );
       final assembly = const ConversationContextBuilder().build(
         messages: [
           for (final message in state)
@@ -403,7 +422,9 @@ class HomeController extends _$HomeController {
         ],
         systemPrompt: _systemPrompt,
         policy: contextPolicy,
+        documentContext: documentContext,
       );
+      final messageSources = _sourcesFrom(documentContext);
 
       _setStatus(
         text:
@@ -554,6 +575,7 @@ class HomeController extends _$HomeController {
             tokensPerSecond: averageTokensPerSecond,
             promptTokens: assembly.usage.usedTokens,
             contextTokens: assembly.usage.contextTokens,
+            sources: messageSources,
           );
         } else {
           _replaceAiMessage(
@@ -564,6 +586,7 @@ class HomeController extends _$HomeController {
             tokensPerSecond: averageTokensPerSecond,
             promptTokens: assembly.usage.usedTokens,
             contextTokens: assembly.usage.contextTokens,
+            sources: messageSources,
           );
         }
         return;
@@ -660,6 +683,48 @@ class HomeController extends _$HomeController {
     _llmService.stopGeneration();
   }
 
+  /// Retriever over the local document index, or null when nothing is indexed.
+  ///
+  /// A failure here is reported as "no documents" rather than breaking the
+  /// request: retrieval is an addition to the chat, never a requirement.
+  Future<DocumentRetriever?> _availableDocumentRetriever() async {
+    try {
+      final library = await ref.read(documentLibraryProvider.future);
+      if (library.documents.isEmpty) return null;
+      return library.retriever;
+    } catch (error) {
+      debugPrint('HomeController: could not open the document index: $error');
+      return null;
+    }
+  }
+
+  /// Text of the newest user message, used as the retrieval query.
+  String _latestUserText() {
+    for (var index = state.length - 1; index >= 0; index--) {
+      final message = state[index];
+      if (message.isUser) return message.content;
+    }
+    return '';
+  }
+
+  /// Citation records for the chunks this answer was given.
+  ///
+  /// Markers match the prompt, so `[2]` in the answer points at the same chunk
+  /// here, and nothing is recorded for chunks that were not sent.
+  static List<MessageSource> _sourcesFrom(DocumentContext context) {
+    return [
+      for (var index = 0; index < context.hits.length; index++)
+        MessageSource(
+          marker: index + 1,
+          documentId: context.hits[index].documentId,
+          documentName: context.hits[index].documentName,
+          chunkIndex: context.hits[index].chunk.index,
+          heading: context.hits[index].chunk.heading,
+          matchedTerms: context.hits[index].matchedTerms.toList()..sort(),
+        ),
+    ];
+  }
+
   void _replaceAiMessage(
     String id,
     String text, {
@@ -668,6 +733,7 @@ class HomeController extends _$HomeController {
     double? tokensPerSecond,
     int? promptTokens,
     int? contextTokens,
+    List<MessageSource>? sources,
   }) {
     final stats =
         (generatedTokens == null &&
@@ -689,6 +755,7 @@ class HomeController extends _$HomeController {
           msg.copyWith(
             content: text,
             generationStats: stats,
+            sources: sources,
             tokenCount: generatedTokens ?? msg.tokenCount,
           )
         else

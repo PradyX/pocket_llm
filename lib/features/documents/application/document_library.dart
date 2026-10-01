@@ -98,6 +98,9 @@ class DocumentLibrary {
   /// Total retrievable chunks.
   int get chunkCount => _retriever.chunkCount;
 
+  /// Retrieval backend over the current index, used for prompt assembly.
+  DocumentRetriever get retriever => _retriever;
+
   /// True when the index file belongs to a newer build; changes then live in
   /// memory only.
   bool get isReadOnly => _store.isReadOnly;

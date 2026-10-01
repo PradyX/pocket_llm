@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
+import 'package:pocket_llm/features/documents/domain/document_context.dart';
 
 /// One assembled prompt: the messages that fit, the system prompt, and what
 /// the assembly cost.
@@ -25,7 +26,10 @@ class ContextAssembly {
 ///
 /// Rules, in order of priority:
 ///
-/// 1. The system prompt is always preserved and charged first.
+/// 1. The system prompt is always preserved and charged first, together with
+///    the retrieved local document section ([documentContext]), which is sized
+///    by the caller against the same policy.
+///
 /// 2. Output tokens are reserved before any history is considered.
 /// 3. The newest message is always included; it is truncated when a single
 ///    turn cannot fit on its own, so the user's question is never dropped. A
@@ -45,8 +49,16 @@ class ConversationContextBuilder {
     required List<Message> messages,
     required String systemPrompt,
     required ContextPolicy policy,
+    DocumentContext? documentContext,
   }) {
-    final systemCost = TokenEstimator.estimateMessage(systemPrompt);
+    // Retrieved local documents belong to the question being asked now, so they
+    // are appended to the system prompt and charged before any history: an old
+    // conversation can never push them out of the window.
+    final documentSection = documentContext?.section.trim() ?? '';
+    final fullSystemPrompt = documentSection.isEmpty
+        ? systemPrompt
+        : '$systemPrompt\n\n$documentSection';
+    final systemCost = TokenEstimator.estimateMessage(fullSystemPrompt);
     final available = math.max(0, policy.usableInputTokens - systemCost);
 
     final included = <Message>[];
@@ -103,7 +115,7 @@ class ConversationContextBuilder {
 
     return ContextAssembly(
       messages: includedMessages,
-      systemPrompt: systemPrompt,
+      systemPrompt: fullSystemPrompt,
       usage: ContextUsage(
         usedTokens: used,
         limitTokens: policy.usableInputTokens,
@@ -112,6 +124,10 @@ class ConversationContextBuilder {
         includedMessages: includedMessages.length,
         droppedMessages: candidates.length - includedMessages.length,
         truncatedMessages: truncatedCount,
+        retrievalTokens: documentSection.isEmpty
+            ? 0
+            : TokenEstimator.estimateText(documentSection),
+        retrievedSources: documentContext?.hits.length ?? 0,
       ),
     );
   }
