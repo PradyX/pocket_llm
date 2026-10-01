@@ -72,6 +72,11 @@ All notable changes to this project will be documented in this file.
   - Chunk text is deliberately not copied into conversations: a citation points back at the local index, so a re-indexed document is never quoted from a stale copy. Conversations saved before citations existed load with no sources.
   - Retrieval is best-effort: an index that cannot be opened is treated as "no documents", so local documents can never break a chat request.
   - PDF files are recognized but not extractable yet: no maintained pure-Dart extractor is bundled, so attaching one explains the limitation and suggests converting to text or markdown. A PDF extractor is a drop-in addition to the extraction service.
+- **Knowledge collections (Roadmap Phase 6B)**: documents are now grouped into named collections, so work, research and personal material can be indexed and searched separately.
+  - A collection owns its chunking settings, retrieval backend and index version, and holds only what Pocket LLM derived from its files — never the files themselves. Removing a collection is therefore always safe for the originals.
+  - Retrieval searches one collection at a time and computes its ranking statistics from that collection alone, so a term that is common in one collection cannot weaken its score in another, and unrelated material cannot influence an answer.
+  - The index store moves to schema v2. Files written by the previous version are migrated on read into an always-present collection that keeps the stored chunking settings; nothing is dropped, and the file is only rewritten in the new shape when something changes.
+  - A partially written or hand-edited index is repaired rather than discarded: the always-present collection is recreated if missing, a selection that points at no collection falls back to it, and a document whose collection is gone is moved there instead of disappearing from the app.
 
 ### Fixed
 - **Image turns could exceed the context window (Roadmap Phase 4)**: the previous history trimming charged image overhead for older messages but not for the newest turn, so a large image message could be sent with a prompt longer than the window the runtime was started with. Attachment overhead is now part of the single-turn budget as well.
