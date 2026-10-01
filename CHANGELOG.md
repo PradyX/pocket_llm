@@ -77,6 +77,9 @@ All notable changes to this project will be documented in this file.
   - Retrieval searches one collection at a time and computes its ranking statistics from that collection alone, so a term that is common in one collection cannot weaken its score in another, and unrelated material cannot influence an answer.
   - The index store moves to schema v2. Files written by the previous version are migrated on read into an always-present collection that keeps the stored chunking settings; nothing is dropped, and the file is only rewritten in the new shape when something changes.
   - A partially written or hand-edited index is repaired rather than discarded: the always-present collection is recreated if missing, a selection that points at no collection falls back to it, and a document whose collection is gone is moved there instead of disappearing from the app.
+  - Collections are created, renamed and removed on the **Documents** screen, which shows one collection at a time: the picker lists each collection with its own document and changed-file counts, and the retrieval preview always describes the collection on screen.
+  - Chat retrieval searches the active collection only. A collection with nothing indexed adds no retrieval budget and no prompt section, so the selected collection is also how document grounding is turned off — there is no separate global switch to keep in sync.
+  - The active collection is stored with the index and survives restarts; removing a collection returns the selection to the always-present one.
 
 ### Fixed
 - **Image turns could exceed the context window (Roadmap Phase 4)**: the previous history trimming charged image overhead for older messages but not for the newest turn, so a large image message could be sent with a prompt longer than the window the runtime was started with. Attachment overhead is now part of the single-turn budget as well.
