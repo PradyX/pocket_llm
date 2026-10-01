@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/core/services/device_profile_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
+import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/features/model_selection/data/gguf_reader.dart';
+import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/gguf_metadata.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/domain/model_compatibility.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 
 /// GGUF metadata inspector for one model (roadmap Phase 2.3).
@@ -23,11 +27,17 @@ class _ModelDetailsPageState extends ConsumerState<ModelDetailsPage> {
   GgufMetadata? _metadata;
   bool _loading = false;
   String? _error;
+  ModelFitReport? _fit;
+  bool _fitLoading = false;
+  String? _fitError;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadMetadata());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadMetadata();
+      _loadFit();
+    });
   }
 
   LlmModel? _findModel() {
@@ -69,6 +79,32 @@ class _ModelDetailsPageState extends ConsumerState<ModelDetailsPage> {
         _error = error is GgufFormatException
             ? error.message
             : 'Could not read GGUF metadata.';
+      });
+    }
+  }
+
+  /// Estimates memory use for this model on this device (roadmap Phase 3).
+  Future<void> _loadFit() async {
+    final model = _findModel();
+    if (model == null) return;
+    setState(() {
+      _fitLoading = true;
+      _fitError = null;
+    });
+    try {
+      final fit = await ref
+          .read(modelCompatibilityServiceProvider)
+          .evaluate(model);
+      if (!mounted) return;
+      setState(() {
+        _fit = fit;
+        _fitLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _fitLoading = false;
+        _fitError = 'Could not estimate memory for this model.';
       });
     }
   }
@@ -116,6 +152,8 @@ class _ModelDetailsPageState extends ConsumerState<ModelDetailsPage> {
           _row(context, 'Description', model.description),
           if (model.downloadUrl != null)
             _row(context, 'Download URL', model.downloadUrl!),
+          const SizedBox(height: 14),
+          ..._buildHardwareSection(context),
           const SizedBox(height: 14),
           _sectionHeader(context, 'GGUF metadata'),
           if (_loading)
@@ -198,6 +236,204 @@ class _ModelDetailsPageState extends ConsumerState<ModelDetailsPage> {
         ],
       ),
     );
+  }
+
+  /// Device summary plus the memory estimate for this model.
+  List<Widget> _buildHardwareSection(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final widgets = <Widget>[_sectionHeader(context, 'On this device')];
+
+    if (_fitLoading) {
+      widgets.add(
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 10),
+          child: LinearProgressIndicator(),
+        ),
+      );
+      return widgets;
+    }
+
+    final device = _fit?.device ?? ref.read(deviceProfileProvider).valueOrNull;
+    if (device != null) {
+      widgets.add(_row(context, 'System', device.summaryLabel));
+      widgets.add(
+        _row(
+          context,
+          'Memory',
+          device.hasMemoryInfo
+              ? _memoryLabel(device)
+              : 'Not exposed on this platform',
+        ),
+      );
+      final freeDisk = device.freeDiskBytes;
+      final totalDisk = device.totalDiskBytes;
+      if (freeDisk != null && totalDisk != null) {
+        widgets.add(
+          _row(
+            context,
+            'Storage',
+            '${_formatBytes(freeDisk)} free of ${_formatBytes(totalDisk)}',
+          ),
+        );
+      }
+    }
+
+    if (_fitError != null) {
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(_fitError!, style: TextStyle(color: colorScheme.error)),
+        ),
+      );
+      return widgets;
+    }
+
+    final fit = _fit;
+    if (fit == null) {
+      widgets.add(Text('Checking this model...', style: textTheme.bodySmall));
+      return widgets;
+    }
+
+    if (!fit.hasLocalFile) {
+      widgets.add(
+        Text(
+          'This model is not installed on this device yet. Install it to see a '
+          'memory estimate.',
+          style: textTheme.bodySmall,
+        ),
+      );
+      return widgets;
+    }
+
+    final estimate = fit.estimate;
+    if (estimate == null) {
+      widgets.add(
+        Text(
+          'GGUF metadata is not available for this model yet, so memory use '
+          'cannot be estimated. Open it from the model list after installing '
+          'it to parse the file.',
+          style: textTheme.bodySmall,
+        ),
+      );
+      return widgets;
+    }
+
+    final rating = estimate.rating;
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 140,
+              child: Text('Compatibility', style: textTheme.labelMedium),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (rating != null) _buildRatingChip(context, rating),
+                  if (rating != null) const SizedBox(height: 4),
+                  Text(
+                    rating?.explanation ??
+                        'Device memory is unknown, so no rating is shown.',
+                    style: textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    widgets.add(
+      _row(
+        context,
+        'Context used',
+        '${fit.contextTokens} tokens'
+            '${fit.isContextLimited ? ' (model maximum)' : ''}',
+      ),
+    );
+    widgets.add(
+      _row(context, 'Estimated need', _formatBytes(estimate.requiredBytes)),
+    );
+    for (final line in estimate.explain()) {
+      final separator = line.indexOf(': ');
+      widgets.add(
+        _row(
+          context,
+          separator > 0 ? line.substring(0, separator) : 'Estimate',
+          separator > 0 ? line.substring(separator + 2) : line,
+        ),
+      );
+    }
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(
+          'Estimates only. Actual memory depends on the runtime, conversation '
+          'length and how the operating system manages memory.',
+          style: textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+    return widgets;
+  }
+
+  Widget _buildRatingChip(
+    BuildContext context,
+    ModelCompatibilityRating rating,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final (background, foreground) = switch (rating) {
+      ModelCompatibilityRating.recommended => (
+        colorScheme.primaryContainer,
+        colorScheme.onPrimaryContainer,
+      ),
+      ModelCompatibilityRating.shouldRun => (
+        colorScheme.secondaryContainer,
+        colorScheme.onSecondaryContainer,
+      ),
+      ModelCompatibilityRating.mayBeSlow => (
+        const Color(0xFFFFE0B2),
+        const Color(0xFF6D4C00),
+      ),
+      ModelCompatibilityRating.memoryRisk ||
+      ModelCompatibilityRating.notRecommended => (
+        colorScheme.errorContainer,
+        colorScheme.onErrorContainer,
+      ),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        rating.label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: foreground,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  String _memoryLabel(DeviceProfile device) {
+    final total = device.totalMemoryBytes;
+    final available = device.availableMemoryBytes;
+    if (total != null && available != null) {
+      return '${_formatBytes(total)} total · ${_formatBytes(available)} free';
+    }
+    if (total != null) return '${_formatBytes(total)} total';
+    if (available != null) return '${_formatBytes(available)} free';
+    return 'Unknown';
   }
 
   String _or(String value) => value.isEmpty ? 'Unknown' : value;

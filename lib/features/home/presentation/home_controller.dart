@@ -15,6 +15,7 @@ import 'package:pocket_llm/core/utils/llm_structured_response.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -383,7 +384,8 @@ class HomeController extends _$HomeController {
       );
 
       _setStatus(text: 'Loading model...', isGenerating: true);
-      final targetNCtx = (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096;
+      // Single source of truth shared with the memory estimator.
+      final targetNCtx = ModelCompatibilityService.defaultContextTokens;
 
       String? mmprojPath;
       if (promptBundle.imagePaths.isNotEmpty) {

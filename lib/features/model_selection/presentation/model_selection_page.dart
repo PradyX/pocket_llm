@@ -1,7 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pocket_llm/core/navigation/app_router.dart';
+import 'package:pocket_llm/core/services/device_profile_service.dart';
+import 'package:pocket_llm/core/services/service_providers.dart';
+import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/domain/model_compatibility.dart';
 import 'package:pocket_llm/features/model_selection/presentation/hugging_face_repository_dialog.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_import_dialog.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
@@ -22,6 +28,10 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   final Set<String> _expandedModelIds = <String>{};
   final TextEditingController _searchController = TextEditingController();
 
+  /// Memory estimates per model id, computed when a card is expanded.
+  final Map<String, ModelFitReport?> _fitReports = <String, ModelFitReport?>{};
+  final Set<String> _fitRequests = <String>{};
+
   @override
   void initState() {
     super.initState();
@@ -37,6 +47,55 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Estimates a model's memory use once, the first time its details open.
+  Future<void> _loadFitReport(LlmModel model) async {
+    if (_fitRequests.contains(model.id) || _fitReports.containsKey(model.id)) {
+      return;
+    }
+    setState(() => _fitRequests.add(model.id));
+    try {
+      final device = await ref.read(deviceProfileProvider.future);
+      final report = await ref
+          .read(modelCompatibilityServiceProvider)
+          .evaluate(model, device: device);
+      if (!mounted) return;
+      setState(() {
+        _fitReports[model.id] = report;
+        _fitRequests.remove(model.id);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _fitReports[model.id] = null;
+        _fitRequests.remove(model.id);
+      });
+    }
+  }
+
+  /// Label describing the estimate (or why there is none yet).
+  String _fitLabel(LlmModel model) {
+    if (_fitRequests.contains(model.id)) return 'Estimating...';
+    final report = _fitReports[model.id];
+    if (report == null && !_fitReports.containsKey(model.id)) {
+      return 'Open details to estimate';
+    }
+    if (report == null) return 'Could not estimate';
+
+    final estimate = report.estimate;
+    if (estimate == null) {
+      if (!report.hasLocalFile) return 'Install to estimate';
+      return 'Metadata unavailable';
+    }
+    final rating = estimate.rating;
+    final required = ModelMemoryEstimate.formatBytes(estimate.requiredBytes);
+    final budget = estimate.budgetBytes;
+    if (rating == null || budget == null) {
+      return 'Needs about $required · device memory unknown';
+    }
+    return '${rating.label} · needs about $required of '
+        '${ModelMemoryEstimate.formatBytes(budget)}';
   }
 
   @override
@@ -362,6 +421,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                         alignment: Alignment.centerRight,
                         child: TextButton.icon(
                           onPressed: () {
+                            final willExpand = !isExpanded;
                             setState(() {
                               if (isExpanded) {
                                 _expandedModelIds.remove(model.id);
@@ -369,6 +429,9 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                                 _expandedModelIds.add(model.id);
                               }
                             });
+                            if (willExpand) {
+                              unawaited(_loadFitReport(model));
+                            }
                           },
                           icon: Icon(
                             isExpanded
@@ -426,6 +489,11 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                           context,
                           'Source',
                           model.effectiveSource.label,
+                        ),
+                        _buildDetailRow(
+                          context,
+                          'Compatibility',
+                          _fitLabel(model),
                         ),
                         if (model.isExternal)
                           _buildDetailRow(
@@ -496,6 +564,15 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     );
   }
 
+  /// `macOS · arm64 · 8 cores · 16 GB RAM` with graceful fallbacks.
+  String _deviceLabel(DeviceProfile device) {
+    final memoryBytes = device.totalMemoryBytes ?? device.availableMemoryBytes;
+    final memory = memoryBytes == null || memoryBytes <= 0
+        ? ''
+        : ' · ${_formatBytes(memoryBytes)} RAM';
+    return '${device.summaryLabel}$memory';
+  }
+
   Widget _buildStorageCard(
     BuildContext context,
     ModelSelectionState state,
@@ -506,6 +583,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
     final textTheme = Theme.of(context).textTheme;
     final free = state.freeStorageBytes;
     final total = state.totalStorageBytes;
+    final device = ref.watch(deviceProfileProvider).valueOrNull;
     final hasInfo = free != null && total != null && total > 0;
     final used = hasInfo ? (total - free).clamp(0, total) : 0;
     final usedRatio = hasInfo ? (used / total).clamp(0.0, 1.0) : 0.0;
@@ -557,6 +635,15 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
+          if (device != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _deviceLabel(device),
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           if (state.models.isNotEmpty) ...[
             const SizedBox(height: 18),
             TextField(
