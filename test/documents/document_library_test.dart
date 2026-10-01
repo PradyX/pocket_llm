@@ -8,6 +8,7 @@ import 'package:pocket_llm/features/documents/data/document_extraction_service.d
 import 'package:pocket_llm/features/documents/data/document_index_store.dart';
 import 'package:pocket_llm/features/documents/domain/document.dart';
 import 'package:pocket_llm/features/documents/domain/document_extraction.dart';
+import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
 
 void main() {
   late Directory tempDir;
@@ -170,15 +171,18 @@ void main() {
     expect(library.needsRefresh(library.documents.single), isFalse);
   });
 
-  test('re-indexes when the stored chunking settings changed', () async {
+  test('re-indexes when the collection chunking settings changed', () async {
     final file = await writeFile('notes.txt', 'Chunking settings under test.');
     await library.addDocument(path: file.path);
 
+    final stored = store.read()!;
     store.save(
-      store.read()!.copyWith(
-        chunking: const DocumentChunkingConfig(
-          targetTokens: 64,
-          overlapTokens: 8,
+      stored.upsertCollection(
+        stored.collections.single.copyWith(
+          chunking: const DocumentChunkingConfig(
+            targetTokens: 64,
+            overlapTokens: 8,
+          ),
         ),
       ),
     );
@@ -344,5 +348,186 @@ void main() {
     // Search keeps working from memory while the newer file stays untouched.
     expect(readOnlyLibrary.search('memory'), isNotEmpty);
     expect(indexFile.readAsStringSync(), '{"version": 99, "documents": []}');
+  });
+
+  group('knowledge collections', () {
+    test('starts with the always-present collection', () {
+      library.load();
+
+      expect(library.collections, hasLength(1));
+      expect(library.collections.single.id, defaultCollectionId);
+      expect(library.collections.single.isDefault, isTrue);
+      expect(library.activeCollectionId, defaultCollectionId);
+    });
+
+    test('creates collections and refuses blank names', () {
+      final collection = library.createCollection('  Research  ');
+
+      expect(collection, isNotNull);
+      expect(collection!.name, 'Research');
+      expect(collection.isDefault, isFalse);
+      expect(library.collections, hasLength(2));
+      expect(library.createCollection('   '), isNull);
+      expect(library.collections, hasLength(2));
+
+      // The name survives a reload, and a long name is trimmed to the limit.
+      final long = library.createCollection('x' * 100)!;
+      expect(long.name.length, KnowledgeCollectionLimits.maxNameLength);
+
+      final reloaded = DocumentLibrary(
+        extractor: DocumentExtractionService(),
+        store: DocumentIndexStore(indexFile),
+      )..load();
+      expect(reloaded.collections, hasLength(3));
+      expect(reloaded.collectionById(collection.id)!.name, 'Research');
+    });
+
+    test('indexes a document into the requested collection', () async {
+      final collection = library.createCollection('Research')!;
+      final file = await writeFile(
+        'paper.txt',
+        'Transformer attention is all you need.',
+      );
+
+      final result = await library.addDocument(
+        path: file.path,
+        collectionId: collection.id,
+      );
+
+      expect(result.document.collectionId, collection.id);
+      expect(library.documentsIn(collection.id), hasLength(1));
+      expect(library.documentsIn(defaultCollectionId), isEmpty);
+      expect(library.documentCountIn(collection.id), 1);
+      expect(
+        library.search('attention', collectionId: collection.id),
+        hasLength(1),
+      );
+      expect(library.search('attention'), isEmpty);
+    });
+
+    test('searches one collection at a time', () async {
+      final work = library.createCollection('Work')!;
+      final personal = library.createCollection('Personal')!;
+      final workFile = await writeFile(
+        'work.txt',
+        'Docker deployment pipeline notes.',
+      );
+      final personalFile = await writeFile(
+        'personal.txt',
+        'Docker recipes for the weekend.',
+      );
+      await library.addDocument(path: workFile.path, collectionId: work.id);
+      await library.addDocument(
+        path: personalFile.path,
+        collectionId: personal.id,
+      );
+
+      expect(library.documentCountIn(work.id), 1);
+      expect(library.documentCountIn(personal.id), 1);
+      expect(
+        library.search('docker', collectionId: work.id).single.documentName,
+        'work.txt',
+      );
+      expect(
+        library.search('docker', collectionId: personal.id).single.documentName,
+        'personal.txt',
+      );
+      expect(
+        library.search('docker', collectionId: defaultCollectionId),
+        isEmpty,
+      );
+      expect(
+        library.retriever.chunkCountIn(work.id),
+        library.documentsIn(work.id).single.chunkCount,
+      );
+    });
+
+    test(
+      'switching the active collection changes the default search',
+      () async {
+        final collection = library.createCollection('Research')!;
+        final file = await writeFile(
+          'paper.txt',
+          'Attention weights explain the model.',
+        );
+        await library.addDocument(path: file.path, collectionId: collection.id);
+
+        expect(library.search('attention'), isEmpty);
+        expect(library.setActiveCollection(collection.id), isTrue);
+        expect(library.activeCollectionId, collection.id);
+        expect(library.search('attention'), hasLength(1));
+        expect(library.setActiveCollection('missing'), isFalse);
+        expect(library.activeCollectionId, collection.id);
+
+        // The choice survives a reload.
+        final reloaded = DocumentLibrary(
+          extractor: DocumentExtractionService(),
+          store: DocumentIndexStore(indexFile),
+        )..load();
+        expect(reloaded.activeCollectionId, collection.id);
+        expect(reloaded.activeCollection.name, 'Research');
+      },
+    );
+
+    test('refreshing a document keeps it in its own collection', () async {
+      final collection = library.createCollection('Research')!;
+      final file = await writeFile('paper.txt', 'Original attention notes.');
+      final added = await library.addDocument(
+        path: file.path,
+        collectionId: collection.id,
+      );
+
+      library.setActiveCollection(defaultCollectionId);
+      await file.writeAsString('Revised attention notes with zebras.');
+      final refreshed = await library.refreshDocument(added.document.id);
+
+      expect(refreshed.reusedIndex, isFalse);
+      expect(refreshed.document.collectionId, collection.id);
+      expect(
+        library.search('zebras', collectionId: collection.id),
+        hasLength(1),
+      );
+    });
+
+    test('renames a collection without touching its documents', () async {
+      final collection = library.createCollection('Temp')!;
+      final file = await writeFile('notes.txt', 'Renamable local content.');
+      await library.addDocument(path: file.path, collectionId: collection.id);
+
+      expect(library.renameCollection(collection.id, '  Reading  '), isTrue);
+      expect(library.collectionById(collection.id)!.name, 'Reading');
+      expect(library.documentsIn(collection.id), hasLength(1));
+      expect(library.renameCollection(collection.id, '   '), isFalse);
+      expect(library.renameCollection('missing', 'Name'), isFalse);
+    });
+
+    test('removing a collection forgets its index but not its files', () async {
+      final collection = library.createCollection('Temporary')!;
+      final file = await writeFile('notes.txt', 'Disposable indexed content.');
+      await library.addDocument(path: file.path, collectionId: collection.id);
+      library.setActiveCollection(collection.id);
+
+      final forgotten = library.removeCollection(collection.id);
+
+      expect(forgotten, isNotNull);
+      expect(forgotten!.single.source.name, 'notes.txt');
+      expect(library.documentCountIn(collection.id), 0);
+      expect(library.collectionById(collection.id), isNull);
+      expect(library.activeCollectionId, defaultCollectionId);
+      expect(library.search('disposable'), isEmpty);
+      expect(file.existsSync(), isTrue);
+      expect(DocumentIndexStore(indexFile).read()!.documents, isEmpty);
+    });
+
+    test('never removes the always-present collection', () async {
+      library.load();
+      final file = await writeFile('notes.txt', 'Default collection content.');
+      await library.addDocument(path: file.path);
+
+      expect(library.removeCollection(defaultCollectionId), isNull);
+      expect(library.collections, hasLength(1));
+      expect(library.documentsIn(defaultCollectionId), hasLength(1));
+      expect(library.removeCollection('missing'), isNull);
+    });
   });
 }

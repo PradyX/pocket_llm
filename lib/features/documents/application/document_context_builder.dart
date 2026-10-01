@@ -35,16 +35,26 @@ class DocumentContextBuilder {
   /// Retrieves for [query] within [tokenBudget] tokens.
   ///
   /// Returns [DocumentContext.empty] when there is nothing to retrieve or no
-  /// budget for it.
+  /// budget for it. [collectionId] limits retrieval to one knowledge
+  /// collection; null searches every indexed document.
   DocumentContext build({
     required DocumentRetriever retriever,
     required String query,
     required int tokenBudget,
+    String? collectionId,
   }) {
     if (tokenBudget <= 0 || query.trim().isEmpty) return DocumentContext.empty;
-    if (retriever.chunkCount == 0) return DocumentContext.empty;
+    if (collectionId == null
+        ? retriever.chunkCount == 0
+        : retriever.chunkCountIn(collectionId) == 0) {
+      return DocumentContext.empty;
+    }
 
-    final candidates = retriever.search(query, limit: candidateLimit);
+    final candidates = retriever.search(
+      query,
+      limit: candidateLimit,
+      collectionId: collectionId,
+    );
     if (candidates.isEmpty) {
       final section = '$instructions\n\n$noMatchNotice';
       return DocumentContext(

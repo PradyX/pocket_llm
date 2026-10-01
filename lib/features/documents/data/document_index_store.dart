@@ -4,22 +4,27 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pocket_llm/core/data/versioned_json_document.dart';
 import 'package:pocket_llm/features/documents/domain/document.dart';
+import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
 
 /// Everything the local document index holds.
 ///
-/// The snapshot records how its chunks were built, so the index is
-/// self-describing: a chunking or pipeline change is detected by comparing
-/// stored metadata instead of guessing from the documents.
+/// The snapshot is self-describing: each collection records how its index was
+/// built, so a chunking or backend change is detected by comparing stored
+/// metadata instead of guessing from the documents.
 class DocumentIndexSnapshot {
   const DocumentIndexSnapshot({
-    this.chunking = const DocumentChunkingConfig(),
+    this.collections = const [],
+    this.activeCollectionId = KnowledgeCollection.defaultId,
     this.documents = const [],
   });
 
   static const DocumentIndexSnapshot empty = DocumentIndexSnapshot();
 
-  /// Chunking settings the stored chunks were built with.
-  final DocumentChunkingConfig chunking;
+  /// Knowledge collections, oldest first.
+  final List<KnowledgeCollection> collections;
+
+  /// Collection chat retrieval uses.
+  final String activeCollectionId;
 
   /// Indexed documents, oldest first.
   final List<IndexedDocument> documents;
@@ -28,14 +33,27 @@ class DocumentIndexSnapshot {
       documents.fold(0, (sum, document) => sum + document.chunkCount);
 
   DocumentIndexSnapshot copyWith({
-    DocumentChunkingConfig? chunking,
+    List<KnowledgeCollection>? collections,
+    String? activeCollectionId,
     List<IndexedDocument>? documents,
   }) {
     return DocumentIndexSnapshot(
-      chunking: chunking ?? this.chunking,
+      collections: collections ?? this.collections,
+      activeCollectionId: activeCollectionId ?? this.activeCollectionId,
       documents: documents ?? this.documents,
     );
   }
+
+  KnowledgeCollection? collectionById(String collectionId) {
+    for (final collection in collections) {
+      if (collection.id == collectionId) return collection;
+    }
+    return null;
+  }
+
+  List<IndexedDocument> documentsIn(String collectionId) => documents
+      .where((document) => document.collectionId == collectionId)
+      .toList(growable: false);
 
   IndexedDocument? documentById(String documentId) {
     for (final document in documents) {
@@ -43,6 +61,11 @@ class DocumentIndexSnapshot {
     }
     return null;
   }
+
+  /// Returns the collection with a document count, for the UI.
+  int documentCountIn(String collectionId) => documents
+      .where((document) => document.collectionId == collectionId)
+      .length;
 
   /// Returns the snapshot with [document] created or replaced by id.
   DocumentIndexSnapshot upsert(IndexedDocument document) {
@@ -69,10 +92,46 @@ class DocumentIndexSnapshot {
     );
   }
 
+  /// Returns the snapshot with [collection] created or replaced by id.
+  DocumentIndexSnapshot upsertCollection(KnowledgeCollection collection) {
+    final updated = <KnowledgeCollection>[];
+    var replaced = false;
+    for (final existing in collections) {
+      if (existing.id == collection.id) {
+        updated.add(collection);
+        replaced = true;
+      } else {
+        updated.add(existing);
+      }
+    }
+    if (!replaced) updated.add(collection);
+    return copyWith(collections: updated);
+  }
+
+  /// Returns the snapshot with [collectionId] and everything indexed for it
+  /// removed. The default collection cannot be removed.
+  DocumentIndexSnapshot removeCollection(String collectionId) {
+    if (collectionId == KnowledgeCollection.defaultId) return this;
+    return copyWith(
+      collections: collections
+          .where((collection) => collection.id != collectionId)
+          .toList(growable: false),
+      documents: documents
+          .where((document) => document.collectionId != collectionId)
+          .toList(growable: false),
+      activeCollectionId: activeCollectionId == collectionId
+          ? KnowledgeCollection.defaultId
+          : activeCollectionId,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'version': DocumentIndexStore.currentVersion,
-      'chunking': chunking.toJson(),
+      'activeCollectionId': activeCollectionId,
+      'collections': collections
+          .map((collection) => collection.toJson())
+          .toList(),
       'documents': documents.map((document) => document.toJson()).toList(),
     };
   }
@@ -80,15 +139,21 @@ class DocumentIndexSnapshot {
 
 /// Persistent, offline storage for derived document data.
 ///
-/// Storage format (version 1):
+/// Storage format (version 2):
 ///
 /// ```json
 /// {
-///   "version": 1,
-///   "chunking": { "targetTokens": 300, "overlapTokens": 32, "maxChunkTokens": 600 },
+///   "version": 2,
+///   "activeCollectionId": "collection-default",
+///   "collections": [ { ...KnowledgeCollection... } ],
 ///   "documents": [ { ...IndexedDocument... } ]
 /// }
 /// ```
+///
+/// Version 1 had a single chunking config for the whole index and no
+/// collections. Such a file is read by putting every document in a default
+/// collection that keeps the stored chunking settings — nothing is dropped and
+/// the file is only rewritten in the new shape when something changes.
 ///
 /// Only derived data lives here: extracted text, chunks and the file reference.
 /// Original files are never copied or modified. A payload that cannot be read is
@@ -104,7 +169,10 @@ class DocumentIndexStore {
       );
 
   /// Current on-disk schema version.
-  static const int currentVersion = 1;
+  static const int currentVersion = 2;
+
+  /// Version that stored a single chunking config for the whole index.
+  static const int _legacySingleCollectionVersion = 1;
 
   /// Opens the index file inside the app support directory.
   static Future<DocumentIndexStore> open() async {
@@ -125,6 +193,10 @@ class DocumentIndexStore {
   bool get exists => _document.exists;
 
   /// Reads the stored index, or null when nothing readable is stored.
+  ///
+  /// The result always has the default collection and assigns every document to
+  /// a collection that exists, so a partially written file can never hide
+  /// documents from the app.
   DocumentIndexSnapshot? read() {
     final decoded = _document.read();
     if (decoded == null) return null;
@@ -144,18 +216,82 @@ class DocumentIndexStore {
       }
     }
 
-    return DocumentIndexSnapshot(
-      chunking: DocumentChunkingConfig.fromJson(decoded['chunking']),
-      documents: documents,
+    final version = (decoded['version'] as num?)?.toInt() ?? 1;
+    if (version <= _legacySingleCollectionVersion) {
+      return _repaired(
+        DocumentIndexSnapshot(
+          collections: [
+            KnowledgeCollection.defaultCollection(
+              chunking: DocumentChunkingConfig.fromJson(decoded['chunking']),
+            ),
+          ],
+          documents: documents,
+        ),
+      );
+    }
+
+    final collections = <KnowledgeCollection>[];
+    final rawCollections = decoded['collections'];
+    if (rawCollections is List) {
+      for (final entry in rawCollections) {
+        if (entry is! Map) continue;
+        final collection = KnowledgeCollection.fromJson(
+          Map<String, dynamic>.from(entry),
+        );
+        if (collection == null) continue;
+        if (collections.any((existing) => existing.id == collection.id)) {
+          continue;
+        }
+        collections.add(collection.normalized());
+      }
+    }
+
+    final activeCollectionId = decoded['activeCollectionId'];
+    return _repaired(
+      DocumentIndexSnapshot(
+        collections: collections,
+        activeCollectionId:
+            activeCollectionId is String && activeCollectionId.isNotEmpty
+            ? activeCollectionId
+            : KnowledgeCollection.defaultId,
+        documents: documents,
+      ),
     );
   }
 
   /// Writes [snapshot]. Returns false when the store is read-only.
   bool save(DocumentIndexSnapshot snapshot) =>
-      _document.write(snapshot.toJson());
+      _document.write(_repaired(snapshot).toJson());
 
   /// Deletes the index file, unless it is read-only.
   bool delete() => _document.delete();
+
+  /// Guarantees the default collection exists, that the active selection points
+  /// at a collection that exists, and that no document is orphaned.
+  static DocumentIndexSnapshot _repaired(DocumentIndexSnapshot snapshot) {
+    final collections = <KnowledgeCollection>[...snapshot.collections];
+    if (!collections.any(
+      (collection) => collection.id == KnowledgeCollection.defaultId,
+    )) {
+      collections.insert(0, KnowledgeCollection.defaultCollection());
+    }
+
+    final known = {for (final collection in collections) collection.id};
+    final documents = [
+      for (final document in snapshot.documents)
+        known.contains(document.collectionId)
+            ? document
+            : document.withCollection(KnowledgeCollection.defaultId),
+    ];
+
+    return DocumentIndexSnapshot(
+      collections: collections,
+      activeCollectionId: known.contains(snapshot.activeCollectionId)
+          ? snapshot.activeCollectionId
+          : KnowledgeCollection.defaultId,
+      documents: documents,
+    );
+  }
 
   /// True when a payload carries no readable document at all.
   static bool _hasUsableDocuments(Map<String, dynamic> payload) {

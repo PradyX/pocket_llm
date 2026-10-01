@@ -12,6 +12,7 @@ import 'package:pocket_llm/features/documents/domain/document_chunking.dart';
 import 'package:pocket_llm/features/documents/domain/document_extraction.dart';
 import 'package:pocket_llm/features/documents/domain/document_index_maintenance.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
+import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
 
 /// Stage of one ingestion, reported so the UI can show progress.
 enum DocumentIngestStage { reading, extracting, chunking, saving, done }
@@ -45,7 +46,8 @@ class DocumentIngestResult {
   }
 }
 
-/// Owns the local document index: ingestion, re-indexing, removal and search.
+/// Owns the local document index: collections, ingestion, re-indexing, removal
+/// and search.
 ///
 /// This orchestrates the pipeline without owning any step of it: reading
 /// ([DocumentExtractor]), slicing ([DocumentChunker]), ranking
@@ -53,6 +55,11 @@ class DocumentIngestResult {
 /// so a format parser, an embedding backend or a different store can be swapped
 /// in without rewriting the others. Files are only ever read; nothing derived
 /// from them is written back into the original.
+///
+/// Documents live in knowledge collections. A collection carries the settings
+/// its documents are indexed with (chunking, retrieval backend, pipeline
+/// version), and retrieval searches one collection at a time, so unrelated
+/// material cannot influence an answer.
 class DocumentLibrary {
   DocumentLibrary({
     required DocumentExtractor extractor,
@@ -61,16 +68,15 @@ class DocumentLibrary {
     DocumentRetriever? retriever,
   }) : _extractor = extractor,
        _store = store,
-       _chunking = chunking.normalized(),
-       _retriever = retriever ?? LexicalDocumentRetriever();
-
-  /// Retrieval backend recorded in stored indexes, or null for lexical search.
-  ///
-  /// No embedding model is wired up yet; lexical search needs no download and
-  /// works offline. Recording the value per document makes switching backends a
-  /// detectable change, so documents are re-indexed instead of silently
-  /// returning worse results.
-  static const String? embeddingModelId = null;
+       _fallbackChunking = chunking.normalized(),
+       _retriever = retriever ?? LexicalDocumentRetriever() {
+    // The library is usable before anything is loaded: an empty index still has
+    // its always-present collection, so collection operations never see a
+    // half-built state.
+    _collections = [
+      KnowledgeCollection.defaultCollection(chunking: _fallbackChunking),
+    ];
+  }
 
   /// Opens the library backed by the on-disk index and loads it.
   static Future<DocumentLibrary> open() async {
@@ -86,14 +92,39 @@ class DocumentLibrary {
   final DocumentIndexStore _store;
   final DocumentRetriever _retriever;
 
-  DocumentChunkingConfig _chunking;
+  /// Chunking settings used for collections created in this session.
+  final DocumentChunkingConfig _fallbackChunking;
+
+  List<KnowledgeCollection> _collections = const [];
   List<IndexedDocument> _documents = const [];
+  String _activeCollectionId = KnowledgeCollection.defaultId;
 
-  /// Chunking settings stored indexes are compared against.
-  DocumentChunkingConfig get chunking => _chunking;
+  /// Knowledge collections, the always-present one first, then oldest first.
+  List<KnowledgeCollection> get collections => List.unmodifiable(_collections);
 
-  /// Indexed documents, oldest first.
+  /// Collection chat retrieval uses.
+  String get activeCollectionId => _activeCollectionId;
+
+  /// The active collection, falling back to the always-present one.
+  KnowledgeCollection get activeCollection =>
+      collectionById(_activeCollectionId) ??
+      KnowledgeCollection.defaultCollection(chunking: _fallbackChunking);
+
+  /// Indexed documents across every collection, oldest first.
   List<IndexedDocument> get documents => List.unmodifiable(_documents);
+
+  /// Documents in [collectionId], oldest first.
+  List<IndexedDocument> documentsIn(String collectionId) => _documents
+      .where((document) => document.collectionId == collectionId)
+      .toList(growable: false);
+
+  /// Number of documents in [collectionId].
+  int documentCountIn(String collectionId) => _documents
+      .where((document) => document.collectionId == collectionId)
+      .length;
+
+  /// Chunking settings of the active collection.
+  DocumentChunkingConfig get chunking => activeCollection.chunking;
 
   /// Total retrievable chunks.
   int get chunkCount => _retriever.chunkCount;
@@ -105,16 +136,28 @@ class DocumentLibrary {
   /// memory only.
   bool get isReadOnly => _store.isReadOnly;
 
-  /// Reads the stored index. A saved index is self-describing, so its chunking
-  /// settings win over the constructor default; anything stored under different
-  /// settings is refreshed per document.
+  KnowledgeCollection? collectionById(String collectionId) {
+    for (final collection in _collections) {
+      if (collection.id == collectionId) return collection;
+    }
+    return null;
+  }
+
+  /// Reads the stored index. A saved index is self-describing, so its
+  /// collections and chunking settings win over the constructor defaults, and
+  /// anything stored under different settings is refreshed per document.
   void load() {
     final snapshot = _store.read();
     if (snapshot == null) {
+      _collections = [
+        KnowledgeCollection.defaultCollection(chunking: _fallbackChunking),
+      ];
       _documents = const [];
+      _activeCollectionId = KnowledgeCollection.defaultId;
     } else {
-      _chunking = snapshot.chunking;
+      _collections = snapshot.collections;
       _documents = snapshot.documents;
+      _activeCollectionId = snapshot.activeCollectionId;
     }
     _retriever.rebuild(_documents);
   }
@@ -138,8 +181,80 @@ class DocumentLibrary {
   }
 
   /// Best matching chunks for [query], best first.
-  List<DocumentSearchHit> search(String query, {int limit = 5}) =>
-      _retriever.search(query, limit: limit);
+  ///
+  /// Searches the active collection unless [collectionId] is given: retrieval
+  /// answers from one collection rather than mixing unrelated material.
+  List<DocumentSearchHit> search(
+    String query, {
+    int limit = 5,
+    String? collectionId,
+  }) {
+    return _retriever.search(
+      query,
+      limit: limit,
+      collectionId: collectionId ?? _activeCollectionId,
+    );
+  }
+
+  /// Makes [collectionId] the collection chat uses.
+  bool setActiveCollection(String collectionId) {
+    if (collectionById(collectionId) == null) return false;
+    if (_activeCollectionId == collectionId) return true;
+    _activeCollectionId = collectionId;
+    _persist();
+    return true;
+  }
+
+  /// Creates a collection that documents can be added to, or null when [name]
+  /// is blank.
+  KnowledgeCollection? createCollection(
+    String name, {
+    DocumentChunkingConfig? chunking,
+  }) {
+    if (name.trim().isEmpty) return null;
+    final collection = KnowledgeCollection.create(
+      name: name,
+      chunking: (chunking ?? _fallbackChunking).normalized(),
+    ).normalized();
+    _collections = [..._collections, collection];
+    _persist();
+    return collection;
+  }
+
+  /// Renames a collection. Refuses empty names rather than inventing one.
+  bool renameCollection(String collectionId, String name) {
+    final collection = collectionById(collectionId);
+    if (collection == null || name.trim().isEmpty) return false;
+
+    final renamed = collection
+        .copyWith(name: name, updatedAt: DateTime.now())
+        .normalized();
+    _collections = [
+      for (final existing in _collections)
+        existing.id == collectionId ? renamed : existing,
+    ];
+    _persist();
+    return true;
+  }
+
+  /// Removes a collection and everything indexed for it.
+  ///
+  /// Returns the documents whose derived index was forgotten, or null when the
+  /// collection does not exist or is the always-present one. Original files are
+  /// never touched.
+  List<IndexedDocument>? removeCollection(String collectionId) {
+    final collection = collectionById(collectionId);
+    if (collection == null || collection.isDefault) return null;
+
+    final forgotten = documentsIn(collectionId);
+    final snapshot = _snapshot.removeCollection(collectionId);
+    _collections = snapshot.collections;
+    _documents = snapshot.documents;
+    _activeCollectionId = snapshot.activeCollectionId;
+    _retriever.rebuild(_documents);
+    _persist();
+    return forgotten;
+  }
 
   /// True when [document]'s stored index no longer matches the file on disk or
   /// the current pipeline.
@@ -147,13 +262,18 @@ class DocumentLibrary {
 
   /// Ingests [path], replacing any stored index for the same file.
   ///
+  /// A new file goes to [collectionId], or to the active collection; refreshing
+  /// an existing document keeps it in its own collection unless a collection is
+  /// given explicitly.
+  ///
   /// The file is not re-read when the stored index is still valid: unchanged
-  /// size and timestamp, unchanged chunking, pipeline and backend. Re-reading a
-  /// file whose bytes changed but whose text did not keeps the existing chunks
+  /// size and timestamp, unchanged collection settings and pipeline. Re-reading
+  /// a file whose bytes changed but whose text did not keeps the existing chunks
   /// and only refreshes the file reference.
   Future<DocumentIngestResult> addDocument({
     required String path,
     String? name,
+    String? collectionId,
     CancelToken? cancelToken,
     void Function(DocumentIngestProgress progress)? onProgress,
   }) async {
@@ -163,6 +283,12 @@ class DocumentLibrary {
     cancelToken?.throwIfCancelled();
 
     final existing = documentByPath(path);
+    final collection =
+        collectionById(
+          collectionId ?? existing?.collectionId ?? _activeCollectionId,
+        ) ??
+        activeCollection;
+
     final source = DocumentSource.fromFile(
       id: existing?.source.id ?? IdGenerator.generate('doc'),
       path: path,
@@ -179,7 +305,9 @@ class DocumentLibrary {
     );
 
     final need = existing == null ? null : _refreshNeed(existing);
-    if (existing != null && need == null) {
+    final staysInCollection =
+        existing != null && existing.collectionId == collection.id;
+    if (existing != null && need == null && staysInCollection) {
       onProgress?.call(
         const DocumentIngestProgress(DocumentIngestStage.done, 1),
       );
@@ -202,12 +330,14 @@ class DocumentLibrary {
 
     if (existing != null &&
         need == _RefreshNeed.file &&
+        staysInCollection &&
         existing.contentHash == contentHash) {
       // The file's metadata changed but its text did not: keep the stored
-      // chunks and refresh only the reference to the file. Pipeline drift is
-      // deliberately not handled here, because it needs new chunks.
+      // chunks and refresh only the reference to the file. Collection or
+      // pipeline drift is deliberately not handled here, because it needs new
+      // chunks.
       final refreshed = existing.withSource(source);
-      _replace(refreshed);
+      _replace(refreshed, collection: collection);
       onProgress?.call(
         const DocumentIngestProgress(DocumentIngestStage.done, 1),
       );
@@ -217,7 +347,9 @@ class DocumentLibrary {
     onProgress?.call(
       const DocumentIngestProgress(DocumentIngestStage.chunking, 0.6),
     );
-    final chunks = DocumentChunker(config: _chunking).chunk(normalized);
+    final chunks = DocumentChunker(
+      config: collection.chunking,
+    ).chunk(normalized);
     if (chunks.isEmpty) {
       throw DocumentExtractionException(
         '"${source.name}" contains no indexable text.',
@@ -231,20 +363,22 @@ class DocumentLibrary {
       charCount: normalized.length,
       indexedAt: DateTime.now(),
       contentHash: contentHash,
-      chunking: _chunking,
+      collectionId: collection.id,
+      chunking: collection.chunking,
       chunkerVersion: documentChunkerVersion,
-      embeddingModelId: embeddingModelId,
+      embeddingModelId: collection.embeddingModelId,
     );
 
     onProgress?.call(
       const DocumentIngestProgress(DocumentIngestStage.saving, 0.85),
     );
-    _replace(indexed);
+    _replace(indexed, collection: collection);
     onProgress?.call(const DocumentIngestProgress(DocumentIngestStage.done, 1));
 
     AppLogger.debug(
-      'DocumentLibrary: indexed "${source.name}" '
-      '(${chunks.length} chunks, ${normalized.length} characters).',
+      'DocumentLibrary: indexed "${source.name}" into '
+      '"${collection.name}" (${chunks.length} chunks, '
+      '${normalized.length} characters).',
     );
     return DocumentIngestResult(document: indexed, reusedIndex: false);
   }
@@ -264,6 +398,7 @@ class DocumentLibrary {
     return addDocument(
       path: document.source.path,
       name: document.source.name,
+      collectionId: document.collectionId,
       cancelToken: cancelToken,
       onProgress: onProgress,
     );
@@ -278,16 +413,38 @@ class DocumentLibrary {
     return true;
   }
 
-  void _replace(IndexedDocument document) {
-    _documents = _snapshot.upsert(document).documents;
+  void _replace(IndexedDocument document, {KnowledgeCollection? collection}) {
+    final snapshot = _snapshot.upsert(document);
+    _documents = snapshot.documents;
+
+    // Remember which pipeline built this collection's index, so the UI can say
+    // how old it is without inspecting every document.
+    if (collection != null &&
+        collection.indexVersion != documentChunkerVersion) {
+      _collections = snapshot
+          .upsertCollection(
+            collection.copyWith(
+              indexVersion: documentChunkerVersion,
+              updatedAt: DateTime.now(),
+            ),
+          )
+          .collections;
+    }
+
     _retriever.rebuild(_documents);
     _persist();
   }
 
-  DocumentIndexSnapshot get _snapshot =>
-      DocumentIndexSnapshot(chunking: _chunking, documents: _documents);
+  DocumentIndexSnapshot get _snapshot => DocumentIndexSnapshot(
+    collections: _collections,
+    activeCollectionId: _activeCollectionId,
+    documents: _documents,
+  );
 
   /// What makes [document] out of date, or null when its index still applies.
+  ///
+  /// Settings come from the document's own collection, so per-collection
+  /// chunking or backend changes are detected the same way as file edits.
   _RefreshNeed? _refreshNeed(IndexedDocument document) {
     final FileStat stat;
     try {
@@ -302,10 +459,12 @@ class DocumentLibrary {
         )) {
       return _RefreshNeed.file;
     }
+
+    final collection = collectionById(document.collectionId);
     return documentReindexReason(
               document,
-              chunking: _chunking,
-              embeddingModelId: embeddingModelId,
+              chunking: collection?.chunking ?? const DocumentChunkingConfig(),
+              embeddingModelId: collection?.embeddingModelId,
               embeddingDimensions: null,
             ) ==
             null

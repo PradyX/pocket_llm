@@ -31,6 +31,10 @@ List<String> retrievalTokens(String text) {
 /// report which query terms matched. The [DocumentRetriever] seam means an
 /// embedding backend can be added later without touching ingestion, storage or
 /// prompt assembly.
+///
+/// Statistics are computed per search over the chunks actually being searched,
+/// so a term that is common in one knowledge collection does not weaken its
+/// score in another.
 class LexicalDocumentRetriever implements DocumentRetriever {
   LexicalDocumentRetriever({this.k1 = 1.2, this.b = 0.75});
 
@@ -41,9 +45,7 @@ class LexicalDocumentRetriever implements DocumentRetriever {
   final double b;
 
   final List<_IndexedChunk> _chunks = [];
-  final Map<String, int> _documentFrequency = {};
   final Set<String> _documentIds = {};
-  int _totalLength = 0;
 
   @override
   int get documentCount => _documentIds.length;
@@ -52,11 +54,13 @@ class LexicalDocumentRetriever implements DocumentRetriever {
   int get chunkCount => _chunks.length;
 
   @override
+  int chunkCountIn(String collectionId) =>
+      _chunks.where((chunk) => chunk.collectionId == collectionId).length;
+
+  @override
   void rebuild(List<IndexedDocument> documents) {
     _chunks.clear();
-    _documentFrequency.clear();
     _documentIds.clear();
-    _totalLength = 0;
 
     for (final document in documents) {
       for (final chunk in document.chunks) {
@@ -70,6 +74,7 @@ class LexicalDocumentRetriever implements DocumentRetriever {
 
         _chunks.add(
           _IndexedChunk(
+            collectionId: document.collectionId,
             documentId: document.id,
             documentName: document.source.name,
             chunk: chunk,
@@ -78,24 +83,41 @@ class LexicalDocumentRetriever implements DocumentRetriever {
           ),
         );
         _documentIds.add(document.id);
-        _totalLength += terms.length;
-        for (final term in frequencies.keys) {
-          _documentFrequency[term] = (_documentFrequency[term] ?? 0) + 1;
-        }
       }
     }
   }
 
   @override
-  List<DocumentSearchHit> search(String query, {int limit = 5}) {
+  List<DocumentSearchHit> search(
+    String query, {
+    int limit = 5,
+    String? collectionId,
+  }) {
     if (limit <= 0 || _chunks.isEmpty) return const [];
     final terms = retrievalTokens(query).toSet();
     if (terms.isEmpty) return const [];
 
-    final averageLength = _totalLength / _chunks.length;
-    final scored = <DocumentSearchHit>[];
+    final candidates = collectionId == null
+        ? _chunks
+        : _chunks
+              .where((chunk) => chunk.collectionId == collectionId)
+              .toList(growable: false);
+    if (candidates.isEmpty) return const [];
 
-    for (final entry in _chunks) {
+    final documentFrequency = <String, int>{};
+    var totalLength = 0;
+    for (final entry in candidates) {
+      totalLength += entry.length;
+      for (final term in terms) {
+        if (entry.frequencies.containsKey(term)) {
+          documentFrequency[term] = (documentFrequency[term] ?? 0) + 1;
+        }
+      }
+    }
+    final averageLength = totalLength / candidates.length;
+
+    final scored = <DocumentSearchHit>[];
+    for (final entry in candidates) {
       var score = 0.0;
       final matched = <String>{};
       for (final term in terms) {
@@ -104,7 +126,10 @@ class LexicalDocumentRetriever implements DocumentRetriever {
         matched.add(term);
         final normalization =
             frequency + k1 * (1 - b + b * entry.length / averageLength);
-        score += _idf(term) * (frequency * (k1 + 1)) / normalization;
+        score +=
+            _idf(term, documentFrequency, candidates.length) *
+            (frequency * (k1 + 1)) /
+            normalization;
       }
       if (score <= 0) continue;
 
@@ -131,18 +156,19 @@ class LexicalDocumentRetriever implements DocumentRetriever {
     return scored.length <= limit ? scored : scored.sublist(0, limit);
   }
 
-  double _idf(String term) {
-    final documentFrequency = _documentFrequency[term] ?? 0;
-    return math.log(
-      1 +
-          (_chunks.length - documentFrequency + 0.5) /
-              (documentFrequency + 0.5),
-    );
+  static double _idf(
+    String term,
+    Map<String, int> documentFrequency,
+    int documentCount,
+  ) {
+    final frequency = documentFrequency[term] ?? 0;
+    return math.log(1 + (documentCount - frequency + 0.5) / (frequency + 0.5));
   }
 }
 
 class _IndexedChunk {
   const _IndexedChunk({
+    required this.collectionId,
     required this.documentId,
     required this.documentName,
     required this.chunk,
@@ -150,6 +176,7 @@ class _IndexedChunk {
     required this.length,
   });
 
+  final String collectionId;
   final String documentId;
   final String documentName;
   final DocumentChunk chunk;

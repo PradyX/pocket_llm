@@ -16,9 +16,15 @@ void main() {
     addedAt: DateTime(2026, 3, 1),
   );
 
-  IndexedDocument documentWith(String id, String name, List<String> texts) {
+  IndexedDocument documentWith(
+    String id,
+    String name,
+    List<String> texts, {
+    String collectionId = defaultCollectionId,
+  }) {
     return IndexedDocument(
       source: sourceFor(id, name),
+      collectionId: collectionId,
       chunks: [
         for (var index = 0; index < texts.length; index++)
           DocumentChunk(
@@ -144,6 +150,37 @@ void main() {
 
       expect(context.isEmpty, isTrue);
       expect(context.section, isEmpty);
+    });
+
+    test('retrieves from one collection at a time', () {
+      final retriever = retrieverWith([
+        documentWith('doc-1', 'work.md', [
+          'docker deployment notes',
+        ], collectionId: 'col-work'),
+        documentWith('doc-2', 'home.md', [
+          'docker recipes for dinner',
+        ], collectionId: 'col-home'),
+      ]);
+
+      final work = builder.build(
+        retriever: retriever,
+        query: 'docker',
+        tokenBudget: 400,
+        collectionId: 'col-work',
+      );
+      expect(work.hits.single.documentName, 'work.md');
+      expect(work.section, contains('work.md'));
+      expect(work.section, isNot(contains('home.md')));
+
+      // A collection without matching chunks contributes nothing at all.
+      final missing = builder.build(
+        retriever: retriever,
+        query: 'docker',
+        tokenBudget: 400,
+        collectionId: 'col-missing',
+      );
+      expect(missing.isEmpty, isTrue);
+      expect(missing.section, isEmpty);
     });
 
     test('never reports a chunk the retriever did not return', () {

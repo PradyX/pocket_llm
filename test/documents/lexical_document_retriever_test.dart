@@ -13,9 +13,15 @@ void main() {
     addedAt: DateTime(2026, 3, 1),
   );
 
-  IndexedDocument documentWith(String id, String name, List<String> texts) {
+  IndexedDocument documentWith(
+    String id,
+    String name,
+    List<String> texts, {
+    String collectionId = defaultCollectionId,
+  }) {
     return IndexedDocument(
       source: sourceFor(id, name),
+      collectionId: collectionId,
       chunks: [
         for (var index = 0; index < texts.length; index++)
           DocumentChunk(
@@ -158,6 +164,33 @@ void main() {
       retriever.rebuild([]);
       expect(retriever.chunkCount, 0);
       expect(retriever.search('kubernetes'), isEmpty);
+    });
+
+    test('scopes searches and statistics to one collection', () {
+      retriever.rebuild([
+        documentWith('doc-1', 'infra.md', [
+          'docker images',
+        ], collectionId: 'col-work'),
+        documentWith('doc-2', 'style.md', [
+          'docker recipes',
+        ], collectionId: 'col-home'),
+      ]);
+
+      expect(retriever.chunkCountIn('col-work'), 1);
+      expect(retriever.chunkCountIn('col-home'), 1);
+      expect(retriever.chunkCountIn('col-missing'), 0);
+      expect(retriever.chunkCountIn(defaultCollectionId), 0);
+
+      expect(retriever.search('docker'), hasLength(2));
+      expect(
+        retriever.search('docker', collectionId: 'col-work').single.documentId,
+        'doc-1',
+      );
+      expect(
+        retriever.search('docker', collectionId: 'col-home').single.documentId,
+        'doc-2',
+      );
+      expect(retriever.search('docker', collectionId: 'col-missing'), isEmpty);
     });
 
     test('matches shared terms across chunks with deterministic ordering', () {

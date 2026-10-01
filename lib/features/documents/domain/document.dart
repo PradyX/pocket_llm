@@ -301,6 +301,12 @@ class DocumentChunkingConfig {
   }
 }
 
+/// Id of the knowledge collection that always exists.
+///
+/// It holds documents indexed before collections were introduced, so a stored
+/// index without collections stays usable.
+const String defaultCollectionId = 'collection-default';
+
 /// Version of the document pipeline that produced a stored index.
 ///
 /// Bump it whenever a change makes chunks stored by an older build
@@ -316,6 +322,7 @@ class IndexedDocument {
     required this.charCount,
     required this.indexedAt,
     required this.contentHash,
+    this.collectionId = defaultCollectionId,
     this.chunking = const DocumentChunkingConfig(),
     this.chunkerVersion = documentChunkerVersion,
     this.embeddingModelId,
@@ -333,6 +340,9 @@ class IndexedDocument {
   /// Cheap fingerprint of the extracted text, so an unchanged re-ingest can be
   /// detected even when the file timestamp lies.
   final String contentHash;
+
+  /// Knowledge collection this document belongs to.
+  final String collectionId;
 
   /// Chunking settings this index was built with.
   final DocumentChunkingConfig chunking;
@@ -356,6 +366,24 @@ class IndexedDocument {
     charCount: charCount,
     indexedAt: indexedAt,
     contentHash: contentHash,
+    collectionId: collectionId,
+    chunking: chunking,
+    chunkerVersion: chunkerVersion,
+    embeddingModelId: embeddingModelId,
+    embeddingDimensions: embeddingDimensions,
+  );
+
+  /// Returns this document moved to another collection.
+  ///
+  /// Chunks keep their text and offsets; the collection decides how the
+  /// document is chunked and retrieved next time it is indexed.
+  IndexedDocument withCollection(String collectionId) => IndexedDocument(
+    source: source,
+    chunks: chunks,
+    charCount: charCount,
+    indexedAt: indexedAt,
+    contentHash: contentHash,
+    collectionId: collectionId,
     chunking: chunking,
     chunkerVersion: chunkerVersion,
     embeddingModelId: embeddingModelId,
@@ -370,6 +398,7 @@ class IndexedDocument {
     'charCount': charCount,
     'indexedAt': indexedAt.toIso8601String(),
     'contentHash': contentHash,
+    'collectionId': collectionId,
     'chunking': chunking.toJson(),
     'chunkerVersion': chunkerVersion,
     'embeddingModelId': embeddingModelId,
@@ -403,6 +432,9 @@ class IndexedDocument {
           DateTime.tryParse(json['indexedAt'] as String? ?? '') ??
           DateTime.now(),
       contentHash: json['contentHash'] as String? ?? '',
+      // Absent on documents indexed before collections existed: they belong to
+      // the collection that always exists.
+      collectionId: json['collectionId'] as String? ?? defaultCollectionId,
       chunking: DocumentChunkingConfig.fromJson(json['chunking']),
       chunkerVersion:
           (json['chunkerVersion'] as num?)?.toInt() ?? documentChunkerVersion,

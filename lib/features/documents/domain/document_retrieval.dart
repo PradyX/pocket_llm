@@ -48,9 +48,19 @@ abstract interface class DocumentRetriever {
   /// Number of retrievable chunks currently indexed.
   int get chunkCount;
 
+  /// Number of retrievable chunks indexed for one knowledge collection.
+  int chunkCountIn(String collectionId);
+
   /// Replaces the indexed corpus. Implementations must accept an empty list.
   void rebuild(List<IndexedDocument> documents);
 
   /// Returns the best matching chunks for [query], best first.
-  List<DocumentSearchHit> search(String query, {int limit = 5});
+  ///
+  /// When [collectionId] is set, only that knowledge collection is searched and
+  /// ranking statistics are computed from it.
+  List<DocumentSearchHit> search(
+    String query, {
+    int limit = 5,
+    String? collectionId,
+  });
 }
