@@ -34,9 +34,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
@@ -75,13 +72,22 @@ android {
 
     sourceSets {
         getByName("main") {
-            jniLibs.srcDir(generatedLlmfitJniLibsDir)
+            // AGP 9 rejects Provider instances in the legacy sourceSets API, so the
+            // directory is resolved to its plain path. Its task dependency is wired
+            // explicitly on preBuild below (syncLlmfitAndroidArm64JniLib).
+            jniLibs.srcDir(generatedLlmfitJniLibsDir.get().asFile)
         }
     }
 }
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
 }
 
 flutter {
