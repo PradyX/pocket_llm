@@ -99,6 +99,7 @@ void main() {
         conversationHistorySearch: (query, limit) async => const [],
         installedModels: () => const [],
         documentSearch: (query, limit) async => const [],
+        documentReading: (documentName) async => null,
       ),
       platform: ToolPlatform.macOS,
     );
@@ -107,6 +108,7 @@ void main() {
 
     expect(prompt, contains('search_chat_history(query: string'));
     expect(prompt, contains('search_local_documents(query: string'));
+    expect(prompt, contains('read_document(document: string'));
     expect(prompt, contains('list_installed_models()'));
     // Read-only tools must never look like they need approval.
     expect(prompt, isNot(contains("Needs the user's permission")));

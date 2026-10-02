@@ -9,6 +9,7 @@ import 'package:pocket_llm/features/tools/application/tool_registry.dart';
 import 'package:pocket_llm/features/tools/data/conversation_search_tool.dart';
 import 'package:pocket_llm/features/tools/data/document_search_tool.dart';
 import 'package:pocket_llm/features/tools/data/installed_models_tool.dart';
+import 'package:pocket_llm/features/tools/data/read_document_tool.dart';
 import 'package:pocket_llm/features/tools/domain/tool_definition.dart';
 
 /// The registry every tool call in the app goes through.
@@ -47,6 +48,13 @@ final toolRegistryProvider = Provider<ToolRegistry>((ref) {
         query: query,
         collectionId: collectionId,
         limit: limit,
+      );
+    },
+    documentReading: (documentName) async {
+      final library = await ref.read(documentLibraryProvider.future);
+      return readLocalDocument(
+        documents: library.documentsIn(library.activeCollectionId),
+        documentName: documentName,
       );
     },
   );

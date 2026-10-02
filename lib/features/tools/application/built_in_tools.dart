@@ -5,6 +5,7 @@ import 'package:pocket_llm/features/tools/data/conversation_search_tool.dart';
 import 'package:pocket_llm/features/tools/data/current_datetime_tool.dart';
 import 'package:pocket_llm/features/tools/data/document_search_tool.dart';
 import 'package:pocket_llm/features/tools/data/installed_models_tool.dart';
+import 'package:pocket_llm/features/tools/data/read_document_tool.dart';
 import 'package:pocket_llm/features/tools/domain/tool_definition.dart';
 
 /// Tools that ship with the app.
@@ -21,6 +22,7 @@ List<ToolEntry> builtInToolEntries({
   List<InstalledModelSummary> Function()? installedModels,
   Future<List<LocalDocumentMatch>> Function(String query, int limit)?
   documentSearch,
+  Future<LocalDocumentRead?> Function(String documentName)? documentReading,
   AndroidActionRunner? androidActions,
 }) {
   return [
@@ -31,6 +33,7 @@ List<ToolEntry> builtInToolEntries({
     if (installedModels != null)
       buildInstalledModelsTool(readModels: installedModels),
     if (documentSearch != null) buildDocumentSearchTool(search: documentSearch),
+    if (documentReading != null) buildReadDocumentTool(read: documentReading),
     if (androidActions != null)
       ...buildAndroidActionTools(runAction: androidActions),
   ];
@@ -49,6 +52,7 @@ ToolRegistry buildToolRegistry({
   List<InstalledModelSummary> Function()? installedModels,
   Future<List<LocalDocumentMatch>> Function(String query, int limit)?
   documentSearch,
+  Future<LocalDocumentRead?> Function(String documentName)? documentReading,
   AndroidActionRunner? androidActions,
 }) {
   return ToolRegistry(
@@ -57,6 +61,7 @@ ToolRegistry buildToolRegistry({
       conversationHistorySearch: conversationHistorySearch,
       installedModels: installedModels,
       documentSearch: documentSearch,
+      documentReading: documentReading,
       androidActions: androidActions,
     ),
     platform: platform,
