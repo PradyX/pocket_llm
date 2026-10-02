@@ -93,6 +93,25 @@ void main() {
     expect(result.output, contains('this device'));
   });
 
+  test('advertises the read-only tools when their sources exist', () {
+    final registry = ToolRegistry(
+      tools: builtInToolEntries(
+        conversationHistorySearch: (query, limit) async => const [],
+        installedModels: () => const [],
+        documentSearch: (query, limit) async => const [],
+      ),
+      platform: ToolPlatform.macOS,
+    );
+
+    final prompt = registry.describeForPrompt();
+
+    expect(prompt, contains('search_chat_history(query: string'));
+    expect(prompt, contains('search_local_documents(query: string'));
+    expect(prompt, contains('list_installed_models()'));
+    // Read-only tools must never look like they need approval.
+    expect(prompt, isNot(contains("Needs the user's permission")));
+  });
+
   test('describes nothing when no tool can run here', () {
     final registry = ToolRegistry(
       tools: [
