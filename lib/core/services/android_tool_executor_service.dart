@@ -30,14 +30,26 @@ class AndroidToolExecutorService {
     'pocket_llm/tool_executor',
   );
 
-  Future<AndroidToolExecutionResult> executeToolPayload(String payload) async {
+  /// Asks Android to perform one action with already validated arguments.
+  ///
+  /// The platform channel keeps the legacy payload shape, so the Kotlin tool
+  /// registry can parse it exactly as it did before; only the caller changed.
+  Future<AndroidToolExecutionResult> executeAction({
+    required String toolName,
+    required Map<String, Object?> arguments,
+  }) async {
     if (!Platform.isAndroid) {
       return const AndroidToolExecutionResult.error(
-        message: 'Tool execution is only available on Android.',
+        message: 'Android actions are only available on Android.',
       );
     }
 
     try {
+      final payload = jsonEncode({
+        'type': 'tool_call',
+        'tool': toolName,
+        'arguments': arguments,
+      });
       final response = await _channel.invokeMethod<String>(
         'execute_tool',
         payload,

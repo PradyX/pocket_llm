@@ -1,4 +1,5 @@
 import 'package:pocket_llm/features/tools/application/tool_registry.dart';
+import 'package:pocket_llm/features/tools/data/android_action_tools.dart';
 import 'package:pocket_llm/features/tools/data/calculator_tool.dart';
 import 'package:pocket_llm/features/tools/data/conversation_search_tool.dart';
 import 'package:pocket_llm/features/tools/data/current_datetime_tool.dart';
@@ -10,8 +11,9 @@ import 'package:pocket_llm/features/tools/domain/tool_definition.dart';
 ///
 /// The deterministic pair runs anywhere; each read-only tool is added only
 /// when the app supplies its source, so a tool that cannot answer on this
-/// platform is never advertised. Nothing here writes anything — anything
-/// sensitive has to go through the permission gate.
+/// platform is never advertised. The Android actions are added when the
+/// platform executor exists; they are sensitive, so the registry refuses them
+/// until the user answers the approval prompt.
 List<ToolEntry> builtInToolEntries({
   Clock? clock,
   Future<List<ConversationHistoryMatch>> Function(String query, int limit)?
@@ -19,6 +21,7 @@ List<ToolEntry> builtInToolEntries({
   List<InstalledModelSummary> Function()? installedModels,
   Future<List<LocalDocumentMatch>> Function(String query, int limit)?
   documentSearch,
+  AndroidActionRunner? androidActions,
 }) {
   return [
     buildCalculatorTool(),
@@ -28,6 +31,8 @@ List<ToolEntry> builtInToolEntries({
     if (installedModels != null)
       buildInstalledModelsTool(readModels: installedModels),
     if (documentSearch != null) buildDocumentSearchTool(search: documentSearch),
+    if (androidActions != null)
+      ...buildAndroidActionTools(runAction: androidActions),
   ];
 }
 
@@ -44,6 +49,7 @@ ToolRegistry buildToolRegistry({
   List<InstalledModelSummary> Function()? installedModels,
   Future<List<LocalDocumentMatch>> Function(String query, int limit)?
   documentSearch,
+  AndroidActionRunner? androidActions,
 }) {
   return ToolRegistry(
     tools: builtInToolEntries(
@@ -51,6 +57,7 @@ ToolRegistry buildToolRegistry({
       conversationHistorySearch: conversationHistorySearch,
       installedModels: installedModels,
       documentSearch: documentSearch,
+      androidActions: androidActions,
     ),
     platform: platform,
     permissionGate: permissionGate,

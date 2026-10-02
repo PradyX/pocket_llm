@@ -25,6 +25,9 @@ import 'package:pocket_llm/features/model_selection/presentation/model_selection
 import 'package:pocket_llm/features/personas/application/personas_controller.dart';
 import 'package:pocket_llm/features/personas/domain/persona.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_state.dart';
+import 'package:pocket_llm/features/tools/application/tool_approval_controller.dart';
+import 'package:pocket_llm/features/tools/application/tool_registry.dart';
+import 'package:pocket_llm/features/tools/presentation/tool_approval_dialog.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -523,10 +526,41 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
   }
 
+  /// Shows the registry's permission question and reports the answer back.
+  ///
+  /// Closing the dialog any other way than Allow is a refusal, so a prompt
+  /// that disappears can never be read as consent. If this screen is gone, the
+  /// question is left to its own timeout, which also refuses.
+  Future<void> _askForToolApproval(ToolApprovalRequest request) async {
+    if (!mounted) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => ToolApprovalDialog(
+        request: request,
+        onDecision: (value) => Navigator.of(dialogContext).pop(value),
+      ),
+    );
+    if (!mounted) return;
+    final controller = ref.read(toolApprovalControllerProvider.notifier);
+    if (approved == true) {
+      controller.approve();
+    } else {
+      controller.deny();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final messages = ref.watch(homeControllerProvider);
     final generationStatus = ref.watch(homeGenerationStatusProvider);
+    ref.listen<ToolApprovalRequest?>(toolApprovalControllerProvider, (
+      previous,
+      next,
+    ) {
+      if (next == null) return;
+      unawaited(_askForToolApproval(next));
+    });
     final activeConversation = ref.watch(
       conversationControllerProvider.select(
         (state) => state.activeConversation,

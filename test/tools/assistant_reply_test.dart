@@ -8,12 +8,8 @@ void main() {
   ToolRegistry registry() =>
       ToolRegistry(tools: builtInToolEntries(), platform: ToolPlatform.macOS);
 
-  AssistantReply resolve(String raw, {bool legacy = false}) =>
-      resolveAssistantReply(
-        raw,
-        registry: registry(),
-        legacyToolsEnabled: legacy,
-      );
+  AssistantReply resolve(String raw) =>
+      resolveAssistantReply(raw, registry: registry());
 
   group('resolveAssistantReply', () {
     test('keeps plain text exactly as it came', () {
@@ -66,35 +62,19 @@ void main() {
       expect((reply as RegistryToolReply).call.toolName, 'launch_rocket');
     });
 
-    test('routes an unknown tool to the legacy path only on Android', () {
-      const raw =
-          '{"type": "tool_call", "tool": "set_alarm", '
-          '"arguments": {"hour": 7, "minute": 0}}';
-
-      final legacy = resolve(raw, legacy: true);
-      expect(legacy, isA<LegacyToolReply>());
-      expect((legacy as LegacyToolReply).rawJson, contains('set_alarm'));
-
-      final modern = resolve(raw);
-      expect(modern, isA<RegistryToolReply>());
-    });
-
-    test('unwraps a legacy JSON message only when the legacy path is on', () {
+    test('unwraps the JSON message envelope the old contract asked for', () {
       const raw = '{"type": "message", "content": "  Hello there.  "}';
 
-      expect(resolve(raw), isA<AssistantTextReply>());
-      expect((resolve(raw) as AssistantTextReply).text, raw);
-
-      final legacy = resolve(raw, legacy: true);
-      expect(legacy, isA<AssistantTextReply>());
-      expect((legacy as AssistantTextReply).text, 'Hello there.');
+      final reply = resolve(raw);
+      expect(reply, isA<AssistantTextReply>());
+      expect((reply as AssistantTextReply).text, 'Hello there.');
     });
 
-    test('falls back to raw text for an empty legacy message', () {
+    test('falls back to raw text for an empty message envelope', () {
       const raw = '{"type": "message", "content": "   "}';
-      final legacy = resolve(raw, legacy: true);
+      final reply = resolve(raw);
 
-      expect((legacy as AssistantTextReply).text, raw);
+      expect((reply as AssistantTextReply).text, raw);
     });
   });
 }

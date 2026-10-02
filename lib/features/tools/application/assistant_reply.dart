@@ -25,47 +25,35 @@ class RegistryToolReply extends AssistantReply {
   final ToolCall call;
 }
 
-/// A tool call only the legacy Android action path knows.
-class LegacyToolReply extends AssistantReply {
-  const LegacyToolReply(this.rawJson);
-
-  /// The exact payload the Android executor expects.
-  final String rawJson;
-}
-
 /// Reads one raw model reply.
 ///
-/// A reply that is not structured is returned as text unchanged, so ordinary
-/// chat, code blocks and JSON the user pasted are never reinterpreted. A tool
-/// call for an unknown tool goes back through the registry on purpose: the
-/// registry then reports the unknown tool to the user and to the model, which
-/// is more useful than silently showing raw JSON.
+/// A reply that is not a structured tool call is returned as text unchanged, so
+/// ordinary chat, code blocks and JSON the user pasted are never
+/// reinterpreted. The one exception is the `{"type": "message", ...}` envelope
+/// the old Android contract asked for: an upgraded install still unwraps it, so
+/// a model that has not noticed the new contract yet does not show raw JSON.
+///
+/// A tool call for an unknown tool still goes to the registry: the registry
+/// then reports the unknown tool to the user and to the model, which is more
+/// useful than silently showing raw JSON.
 AssistantReply resolveAssistantReply(
   String raw, {
   required ToolRegistry registry,
-  required bool legacyToolsEnabled,
 }) {
   final structured = tryParseLlmStructuredResponse(raw);
   if (structured == null) return AssistantTextReply(raw);
 
   switch (structured.type) {
     case LlmStructuredResponseType.message:
-      // Only the legacy Android contract wraps answers in a JSON message; on
-      // other platforms such an object is shown as it came, so JSON the user
-      // explicitly asked for is never unwrapped.
-      if (!legacyToolsEnabled) return AssistantTextReply(raw);
       final content = structured.content?.trim() ?? '';
       return AssistantTextReply(content.isEmpty ? raw : content);
     case LlmStructuredResponseType.toolCall:
-      final call = ToolCall(
-        toolName: structured.toolName ?? '',
-        arguments: structured.arguments,
-        rawJson: structured.rawJson,
+      return RegistryToolReply(
+        ToolCall(
+          toolName: structured.toolName ?? '',
+          arguments: structured.arguments,
+          rawJson: structured.rawJson,
+        ),
       );
-      if (registry.definitionFor(call.toolName) != null) {
-        return RegistryToolReply(call);
-      }
-      if (legacyToolsEnabled) return LegacyToolReply(structured.rawJson);
-      return RegistryToolReply(call);
   }
 }

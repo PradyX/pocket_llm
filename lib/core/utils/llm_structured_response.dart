@@ -40,52 +40,6 @@ class LlmStructuredResponse {
 
 const defaultAssistantSystemPrompt = 'You are a helpful and concise assistant.';
 
-String buildAndroidToolCallingSystemPrompt() {
-  return '''
-You are an AI assistant with access to tools.
-
-Available tools:
-1. set_alarm(hour, minute)
-2. create_event(title, start_time)
-3. send_sms(phone, message)
-
-Rules:
-- If user asks to perform an action -> return ONLY JSON tool call
-- If no action needed -> return normal message JSON
-- Do NOT mix text and JSON
-- Always follow schema exactly
-- If required information is missing -> return message JSON asking a concise clarification question
-
-If user intent requires action, return ONLY:
-{
-  "type": "tool_call",
-  "tool": "<tool_name>",
-  "arguments": { ... }
-}
-
-If normal chat:
-{
-  "type": "message",
-  "content": "<text>"
-}
-
-User: Set alarm at 7 AM
-Output:
-{
-  "type": "tool_call",
-  "tool": "set_alarm",
-  "arguments": { "hour": 7, "minute": 0 }
-}
-
-User: Hello
-Output:
-{
-  "type": "message",
-  "content": "Hello! How can I help you?"
-}
-''';
-}
-
 LlmStructuredResponse? tryParseLlmStructuredResponse(String raw) {
   final normalized = _normalizeStructuredCandidate(raw);
   if (normalized == null) return null;

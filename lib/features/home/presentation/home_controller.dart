@@ -101,7 +101,6 @@ class HomeController extends _$HomeController {
   LlmService get _llmService => ref.read(llmServiceProvider);
   ModelStorageService get _storageService =>
       ref.read(modelStorageServiceProvider);
-  bool get _androidToolCallingEnabled => Platform.isAndroid;
 
   /// Persona the active conversation chats with.
   ///
@@ -125,15 +124,11 @@ class HomeController extends _$HomeController {
 
   /// System prompt for one request: the persona plus the contract of the tools
   /// that actually run on this platform.
-  ///
-  /// On Android the legacy action contract is still appended after it, inside
-  /// [composePersonaSystemPrompt], until those actions move into the registry.
   String get _systemPrompt {
     final registry = ref.read(toolRegistryProvider);
     return composePersonaSystemPrompt(
       persona: _activePersona,
       toolContract: registry.describeForPrompt(),
-      androidToolCalling: _androidToolCallingEnabled,
     );
   }
 
@@ -430,7 +425,6 @@ class HomeController extends _$HomeController {
     ];
 
     try {
-      final legacyAndroidTools = _androidToolCallingEnabled;
       final inferenceSettings = ref.read(inferenceSettingsProvider);
       final adaptiveMode = inferenceSettings.adaptiveMode;
 
@@ -600,26 +594,12 @@ class HomeController extends _$HomeController {
       final firstReply = resolveAssistantReply(
         buildFinalResponseText(firstCompletion.rawText),
         registry: registry,
-        legacyToolsEnabled: legacyAndroidTools,
       );
 
       if (firstReply is AssistantTextReply) {
         _replaceAiMessage(
           aiMessageId,
           firstReply.text,
-          generatedTokens: firstCompletion.generatedTokens,
-          elapsed: firstCompletion.elapsed,
-          tokensPerSecond: firstCompletion.tokensPerSecond,
-          promptTokens: promptTokens,
-          contextTokens: contextTokens,
-        );
-      } else if (firstReply is LegacyToolReply) {
-        final legacyResult = await ref
-            .read(androidToolExecutorServiceProvider)
-            .executeToolPayload(firstReply.rawJson);
-        _replaceAiMessage(
-          aiMessageId,
-          legacyResult.message,
           generatedTokens: firstCompletion.generatedTokens,
           elapsed: firstCompletion.elapsed,
           tokensPerSecond: firstCompletion.tokensPerSecond,
@@ -640,7 +620,6 @@ class HomeController extends _$HomeController {
           promptTokens: promptTokens,
           contextTokens: contextTokens,
           sources: messageSources,
-          legacyToolsEnabled: legacyAndroidTools,
         );
       }
     } catch (e) {
@@ -743,7 +722,8 @@ class HomeController extends _$HomeController {
   /// Exactly one tool call runs per user turn: the follow-up is final even if
   /// it asks for another tool, because a repeated loop belongs to the future
   /// agent work, not to a chat turn. The activity record keeps the call and its
-  /// result visible after a restart.
+  /// result visible after a restart. A sensitive call waits here for the
+  /// approval prompt; the message says so while it waits.
   Future<void> _answerAfterToolCall({
     required String aiMessageId,
     required RegistryToolReply reply,
@@ -757,8 +737,23 @@ class HomeController extends _$HomeController {
     required int promptTokens,
     required int contextTokens,
     required List<MessageSource> sources,
-    required bool legacyToolsEnabled,
   }) async {
+    final needsPermission =
+        registry.definitionFor(reply.call.toolName)?.risk.needsPermission ??
+        false;
+    if (needsPermission) {
+      // The approval prompt can wait, so the message says why nothing has
+      // happened yet.
+      _replaceAiMessage(
+        aiMessageId,
+        'Waiting for permission to use ${reply.call.toolName}...',
+        generatedTokens: firstCompletion.generatedTokens,
+        elapsed: firstCompletion.elapsed,
+        tokensPerSecond: firstCompletion.tokensPerSecond,
+      );
+      _setStatus(text: 'Waiting for permission...', isGenerating: true);
+    }
+
     final result = await registry.execute(reply.call);
     final activity = messageToolActivityFrom(call: reply.call, result: result);
     final toolActivity = [activity];
@@ -845,14 +840,12 @@ class HomeController extends _$HomeController {
     final secondReply = resolveAssistantReply(
       buildFinalResponseText(secondCompletion.rawText),
       registry: registry,
-      legacyToolsEnabled: legacyToolsEnabled,
     );
     // One tool per turn: if the follow-up asks for another, its raw text is
     // shown instead of running a second call.
     final finalText = switch (secondReply) {
       AssistantTextReply(:final text) => text,
       RegistryToolReply() => buildFinalResponseText(secondCompletion.rawText),
-      LegacyToolReply() => buildFinalResponseText(secondCompletion.rawText),
     };
 
     _replaceAiMessage(
