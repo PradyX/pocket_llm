@@ -161,7 +161,10 @@ class ToolDefinition {
   /// How long the handler may take before the registry stops waiting.
   final Duration timeout;
 
-  bool isSupportedOn(ToolPlatform platform) => platforms.contains(platform);
+  /// False on a platform the app does not target, so a tool can never run
+  /// where its implementation is unknown.
+  bool isSupportedOn(ToolPlatform? platform) =>
+      platform != null && platforms.contains(platform);
 
   /// `calculator(expression: string)`.
   String get signature =>

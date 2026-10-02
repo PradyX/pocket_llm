@@ -1,6 +1,7 @@
 import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
+import 'package:pocket_llm/features/conversations/domain/message_tool_activity.dart';
 
 /// Who authored a message.
 enum MessageRole {
@@ -97,6 +98,13 @@ class Message {
   /// every message saved before documents existed.
   final List<MessageSource> sources;
 
+  /// Local tool calls this answer used, in the order they ran.
+  ///
+  /// Empty for every message that did not call a tool, including messages
+  /// saved before tool calling existed. Additive and optional, so conversations
+  /// from an older build load unchanged and older builds ignore the field.
+  final List<MessageToolActivity> toolActivity;
+
   /// Token count estimate when known locally.
   final int? tokenCount;
 
@@ -111,6 +119,7 @@ class Message {
     this.attachments = const [],
     this.generationStats,
     this.sources = const [],
+    this.toolActivity = const [],
     this.tokenCount,
   });
 
@@ -125,6 +134,7 @@ class Message {
     List<MessageAttachment> attachments = const [],
     MessageGenerationStats? generationStats,
     List<MessageSource> sources = const [],
+    List<MessageToolActivity> toolActivity = const [],
     int? tokenCount,
   }) {
     return Message(
@@ -138,6 +148,7 @@ class Message {
       attachments: attachments,
       generationStats: generationStats,
       sources: sources,
+      toolActivity: toolActivity,
       tokenCount: tokenCount,
     );
   }
@@ -179,6 +190,7 @@ class Message {
     List<MessageAttachment>? attachments,
     Object? generationStats = _unset,
     List<MessageSource>? sources,
+    List<MessageToolActivity>? toolActivity,
     Object? tokenCount = _unset,
   }) {
     return Message(
@@ -194,6 +206,7 @@ class Message {
           ? this.generationStats
           : generationStats as MessageGenerationStats?,
       sources: sources ?? this.sources,
+      toolActivity: toolActivity ?? this.toolActivity,
       tokenCount: tokenCount == _unset ? this.tokenCount : tokenCount as int?,
     );
   }
@@ -210,6 +223,9 @@ class Message {
       'attachments': attachments.map((a) => a.toJson()).toList(),
       'generationStats': generationStats?.toJson(),
       'sources': sources.map((source) => source.toJson()).toList(),
+      'toolActivity': toolActivity
+          .map((activity) => activity.toJson())
+          .toList(),
       'tokenCount': tokenCount,
     };
   }
@@ -274,6 +290,9 @@ class Message {
       // Absent on every message saved before citations existed, and on
       // messages that simply used no documents.
       sources: MessageSource.listFromJson(json['sources']),
+      // Absent on every message saved before tool calling existed, and on
+      // messages that did not call a tool.
+      toolActivity: MessageToolActivity.listFromJson(json['toolActivity']),
       tokenCount: (json['tokenCount'] as num?)?.toInt(),
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_llm/features/conversations/domain/conversation.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
+import 'package:pocket_llm/features/conversations/domain/message_tool_activity.dart';
 
 void main() {
   group('Conversation', () {
@@ -212,6 +213,64 @@ void main() {
       expect(stats?.generatedTokens, 4);
       expect(stats?.promptTokens, isNull);
       expect(MessageGenerationStats.fromJson(const {}), isNull);
+    });
+
+    test('round-trips recorded tool activity', () {
+      final message = Message.create(
+        conversationId: 'c-1',
+        role: MessageRole.assistant,
+        content: 'The answer is 20.',
+        toolActivity: const [
+          MessageToolActivity(
+            name: 'calculator',
+            arguments: 'expression: (2 + 3) * 4',
+            status: MessageToolActivityStatus.success,
+            output: '(2 + 3) * 4 = 20',
+            durationMs: 3,
+          ),
+        ],
+      );
+      final restored = Message.fromJson(message.toJson());
+
+      expect(restored.toolActivity, hasLength(1));
+      expect(restored.toolActivity.single.name, 'calculator');
+      expect(restored.toolActivity.single.arguments, 'expression: (2 + 3) * 4');
+      expect(
+        restored.toolActivity.single.status,
+        MessageToolActivityStatus.success,
+      );
+      expect(restored.toolActivity.single.output, '(2 + 3) * 4 = 20');
+      expect(restored.toolActivity.single.durationMs, 3);
+    });
+
+    test('reads messages saved before tool activity existed', () {
+      final restored = Message.fromJson(const {
+        'id': 'm-1',
+        'role': 'assistant',
+        'content': 'Hi',
+      });
+
+      expect(restored.toolActivity, isEmpty);
+    });
+
+    test('copyWith keeps recorded tool activity', () {
+      final message = Message.create(
+        conversationId: 'c-1',
+        role: MessageRole.assistant,
+        content: 'The answer is 20.',
+        toolActivity: const [
+          MessageToolActivity(
+            name: 'calculator',
+            arguments: '',
+            status: MessageToolActivityStatus.success,
+          ),
+        ],
+      );
+
+      final replaced = message.copyWith(content: 'Final answer.');
+
+      expect(replaced.toolActivity, hasLength(1));
+      expect(replaced.toolActivity.single.name, 'calculator');
     });
 
     test('copyWith can replace conversationId and clear stats', () {

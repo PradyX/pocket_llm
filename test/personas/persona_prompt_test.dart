@@ -47,5 +47,43 @@ void main() {
       expect(composed, startsWith(defaultAssistantSystemPrompt));
       expect(composed, contains(buildAndroidToolCallingSystemPrompt()));
     });
+
+    test('appends the registry tool contract after the persona', () {
+      const contract =
+          'Available tools:\n- calculator(expression: string): Adds numbers.';
+
+      final composed = composePersonaSystemPrompt(
+        persona: BuiltInPersonas.coding,
+        toolContract: contract,
+      );
+
+      expect(composed, startsWith('You are a senior software engineer.'));
+      expect(composed, endsWith(contract));
+    });
+
+    test('keeps the legacy Android contract after the registry contract', () {
+      const contract = 'Available tools: calculator.';
+
+      final composed = composePersonaSystemPrompt(
+        persona: BuiltInPersonas.general,
+        toolContract: contract,
+        androidToolCalling: true,
+      );
+
+      expect(
+        composed.indexOf(contract),
+        lessThan(composed.indexOf(buildAndroidToolCallingSystemPrompt())),
+      );
+    });
+
+    test('omits a blank tool contract', () {
+      expect(
+        composePersonaSystemPrompt(
+          persona: BuiltInPersonas.general,
+          toolContract: '   ',
+        ),
+        defaultAssistantSystemPrompt,
+      );
+    });
   });
 }

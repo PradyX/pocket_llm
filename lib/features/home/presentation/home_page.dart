@@ -12,6 +12,7 @@ import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
+import 'package:pocket_llm/features/conversations/domain/message_tool_activity.dart';
 import 'package:pocket_llm/features/home/domain/attachment_history.dart';
 import 'package:pocket_llm/features/home/domain/readable_reply.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
@@ -1477,6 +1478,13 @@ class _ChatBubbleState extends State<_ChatBubble> {
                 ),
               ),
             ),
+          if (!isUser && widget.message.toolActivity.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _MessageToolActivityList(
+                activities: widget.message.toolActivity,
+              ),
+            ),
           if (!isUser && widget.message.sources.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -1566,6 +1574,87 @@ class _ChatBubbleState extends State<_ChatBubble> {
     final promptPart = promptTokens != null ? ' · $promptTokens in' : '';
     return '${tps.toStringAsFixed(1)} tok/s · '
         '${seconds.toStringAsFixed(1)}s$tokenPart$promptPart';
+  }
+}
+
+/// Tool calls an answer used: what ran on this device and what came back.
+///
+/// The record is stored with the message, so this reads the same after a
+/// restart or an import on another device. Nothing here runs a tool; it only
+/// reports what the registry already did.
+class _MessageToolActivityList extends StatelessWidget {
+  const _MessageToolActivityList({required this.activities});
+
+  final List<MessageToolActivity> activities;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.build_outlined, size: 14, color: colorScheme.primary),
+            const SizedBox(width: 6),
+            Text(
+              activities.length == 1 ? 'Local tool' : 'Local tools',
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        for (final activity in activities)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  activity.callLabel,
+                  style: textTheme.labelSmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      activity.status.label,
+                      style: textTheme.labelSmall?.copyWith(
+                        color: activity.isSuccess
+                            ? colorScheme.primary
+                            : colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (activity.output.trim().isNotEmpty)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: Text(
+                            activity.output.trim(),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
   }
 }
 

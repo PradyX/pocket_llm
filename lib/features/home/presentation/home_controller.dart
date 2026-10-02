@@ -13,12 +13,12 @@ import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
-import 'package:pocket_llm/core/utils/llm_structured_response.dart';
 import 'package:pocket_llm/features/conversations/application/conversation_context_builder.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
+import 'package:pocket_llm/features/conversations/domain/message_tool_activity.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/documents/application/document_context_builder.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
@@ -31,6 +31,11 @@ import 'package:pocket_llm/features/personas/domain/persona.dart';
 import 'package:pocket_llm/features/personas/domain/persona_prompt.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
+import 'package:pocket_llm/features/tools/application/assistant_reply.dart';
+import 'package:pocket_llm/features/tools/application/tool_activity_mapping.dart';
+import 'package:pocket_llm/features/tools/application/tool_follow_up_prompt.dart';
+import 'package:pocket_llm/features/tools/application/tool_registry.dart';
+import 'package:pocket_llm/features/tools/application/tools_providers.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'home_controller.g.dart';
@@ -118,12 +123,19 @@ class HomeController extends _$HomeController {
     return profiles.profileById(pinnedId) ?? profiles.activeProfile;
   }
 
-  /// System prompt for one request: the persona, plus the Android tool
-  /// contract that the structured-response parser depends on.
-  String get _systemPrompt => composePersonaSystemPrompt(
-    persona: _activePersona,
-    androidToolCalling: _androidToolCallingEnabled,
-  );
+  /// System prompt for one request: the persona plus the contract of the tools
+  /// that actually run on this platform.
+  ///
+  /// On Android the legacy action contract is still appended after it, inside
+  /// [composePersonaSystemPrompt], until those actions move into the registry.
+  String get _systemPrompt {
+    final registry = ref.read(toolRegistryProvider);
+    return composePersonaSystemPrompt(
+      persona: _activePersona,
+      toolContract: registry.describeForPrompt(),
+      androidToolCalling: _androidToolCallingEnabled,
+    );
+  }
 
   @override
   List<Message> build() {
@@ -418,7 +430,7 @@ class HomeController extends _$HomeController {
     ];
 
     try {
-      final useStructuredAndroidResponses = _androidToolCallingEnabled;
+      final legacyAndroidTools = _androidToolCallingEnabled;
       final inferenceSettings = ref.read(inferenceSettingsProvider);
       final adaptiveMode = inferenceSettings.adaptiveMode;
 
@@ -490,16 +502,7 @@ class HomeController extends _$HomeController {
       );
 
       final promptBundle = buildModelChatPrompt(
-        assembly.messages
-            .map(
-              (msg) => msg.isUser
-                  ? LlmPromptMessage.user(
-                      msg.content,
-                      imagePaths: msg.imagePaths,
-                    )
-                  : LlmPromptMessage.assistant(msg.content),
-            )
-            .toList(),
+        _promptMessagesFor(assembly.messages),
         systemPrompt: assembly.systemPrompt,
         promptFormatId: selectedModel.promptFormatId,
       );
@@ -547,136 +550,335 @@ class HomeController extends _$HomeController {
 
       _setStatus(text: 'Building prompt...', isGenerating: true);
 
-      final stopSequence = modelStopToken(selectedModel.promptFormatId);
-      final responseBuffer = StringBuffer();
-      var sawToken = false;
-      var generatedTokenCount = 0;
-      var lastEmitAt = DateTime.fromMillisecondsSinceEpoch(0);
-      var lastStatAt = DateTime.fromMillisecondsSinceEpoch(0);
-      const minEmitGap = Duration(milliseconds: 60);
-      const statUpdateGap = Duration(milliseconds: 250);
-      final generationTimer = Stopwatch()..start();
-
-      Future<void> emit({bool force = false}) async {
-        if (useStructuredAndroidResponses) return;
-
-        final now = DateTime.now();
-        if (!force && now.difference(lastEmitAt) < minEmitGap) return;
-        lastEmitAt = now;
-
-        final text = buildStreamingResponseText(responseBuffer.toString());
-        _replaceAiMessage(
-          aiMessageId,
-          text.trim().isEmpty ? 'Thinking...' : text,
-        );
-      }
-
-      final responseStream = promptBundle.imagePaths.isNotEmpty
-          ? _llmService.generateVisionResponse(
-              promptBundle.prompt,
-              imagePaths: promptBundle.imagePaths,
-              maxTokens: maxTokens,
-            )
-          : _llmService.generateResponse(
-              promptBundle.prompt,
-              maxTokens: maxTokens,
-            );
-
-      await for (final token in responseStream) {
-        final cleanToken = token.replaceAll(stopSequence, '');
-        if (cleanToken.isNotEmpty) {
-          sawToken = true;
-          responseBuffer.write(cleanToken);
-          generatedTokenCount++;
-        }
-
-        final now = DateTime.now();
-        if (now.difference(lastStatAt) >= statUpdateGap) {
-          lastStatAt = now;
-          _setLiveGenerationStatus(
-            adaptiveMode: adaptiveMode,
-            maxTokens: maxTokens,
-            generatedTokens: generatedTokenCount,
-            elapsed: generationTimer.elapsed,
-          );
-        }
-
-        if (token.contains(stopSequence)) {
-          await emit(force: true);
-          break;
-        }
-
-        await emit();
-      }
-
-      await emit(force: true);
-      generationTimer.stop();
-      final elapsed = generationTimer.elapsed;
-      final elapsedSeconds = elapsed.inMilliseconds / 1000.0;
-      final averageTokensPerSecond = elapsedSeconds > 0
-          ? generatedTokenCount / elapsedSeconds
-          : 0.0;
-
-      _recordAdaptivePerformance(
-        generatedTokenCount: generatedTokenCount,
-        elapsed: elapsed,
+      final registry = ref.read(toolRegistryProvider);
+      final firstCompletion = await _streamCompletion(
+        aiMessageId: aiMessageId,
+        promptBundle: promptBundle,
+        promptFormatId: selectedModel.promptFormatId,
+        maxTokens: maxTokens,
+        adaptiveMode: adaptiveMode,
       );
 
-      if (_stopRequestedByUser || _llmService.isStopRequested) {
-        final partial = responseBuffer.toString();
-        if (useStructuredAndroidResponses || partial.trim().isEmpty) {
-          _replaceAiMessage(
-            aiMessageId,
-            'Generation stopped.',
-            generatedTokens: generatedTokenCount,
-            elapsed: elapsed,
-            tokensPerSecond: averageTokensPerSecond,
-            promptTokens: assembly.usage.usedTokens,
-            contextTokens: assembly.usage.contextTokens,
-            sources: messageSources,
-          );
-        } else {
-          _replaceAiMessage(
-            aiMessageId,
-            '${buildStreamingResponseText(partial)}\n\n[Stopped]',
-            generatedTokens: generatedTokenCount,
-            elapsed: elapsed,
-            tokensPerSecond: averageTokensPerSecond,
-            promptTokens: assembly.usage.usedTokens,
-            contextTokens: assembly.usage.contextTokens,
-            sources: messageSources,
-          );
-        }
+      final promptTokens = assembly.usage.usedTokens;
+      final contextTokens = assembly.usage.contextTokens;
+
+      _recordAdaptivePerformance(
+        generatedTokenCount: firstCompletion.generatedTokens,
+        elapsed: firstCompletion.elapsed,
+      );
+
+      if (firstCompletion.stoppedByUser) {
+        final partial = firstCompletion.rawText;
+        _replaceAiMessage(
+          aiMessageId,
+          partial.trim().isEmpty || partial.trimLeft().startsWith('{')
+              ? 'Generation stopped.'
+              : '${buildStreamingResponseText(partial)}\n\n[Stopped]',
+          generatedTokens: firstCompletion.generatedTokens,
+          elapsed: firstCompletion.elapsed,
+          tokensPerSecond: firstCompletion.tokensPerSecond,
+          promptTokens: promptTokens,
+          contextTokens: contextTokens,
+          sources: messageSources,
+        );
         return;
       }
 
-      if (!sawToken) {
+      if (!firstCompletion.sawToken) {
         _replaceAiMessage(
           aiMessageId,
           'No response generated.',
-          generatedTokens: generatedTokenCount,
-          elapsed: elapsed,
-          tokensPerSecond: averageTokensPerSecond,
-          promptTokens: assembly.usage.usedTokens,
-          contextTokens: assembly.usage.contextTokens,
+          generatedTokens: firstCompletion.generatedTokens,
+          elapsed: firstCompletion.elapsed,
+          tokensPerSecond: firstCompletion.tokensPerSecond,
+          promptTokens: promptTokens,
+          contextTokens: contextTokens,
         );
-      } else {
-        final finalText = await _resolveAssistantText(
-          buildFinalResponseText(responseBuffer.toString()),
-        );
+        return;
+      }
+
+      final firstReply = resolveAssistantReply(
+        buildFinalResponseText(firstCompletion.rawText),
+        registry: registry,
+        legacyToolsEnabled: legacyAndroidTools,
+      );
+
+      if (firstReply is AssistantTextReply) {
         _replaceAiMessage(
           aiMessageId,
-          finalText,
-          generatedTokens: generatedTokenCount,
-          elapsed: elapsed,
-          tokensPerSecond: averageTokensPerSecond,
-          promptTokens: assembly.usage.usedTokens,
-          contextTokens: assembly.usage.contextTokens,
+          firstReply.text,
+          generatedTokens: firstCompletion.generatedTokens,
+          elapsed: firstCompletion.elapsed,
+          tokensPerSecond: firstCompletion.tokensPerSecond,
+          promptTokens: promptTokens,
+          contextTokens: contextTokens,
+        );
+      } else if (firstReply is LegacyToolReply) {
+        final legacyResult = await ref
+            .read(androidToolExecutorServiceProvider)
+            .executeToolPayload(firstReply.rawJson);
+        _replaceAiMessage(
+          aiMessageId,
+          legacyResult.message,
+          generatedTokens: firstCompletion.generatedTokens,
+          elapsed: firstCompletion.elapsed,
+          tokensPerSecond: firstCompletion.tokensPerSecond,
+          promptTokens: promptTokens,
+          contextTokens: contextTokens,
+        );
+      } else if (firstReply is RegistryToolReply) {
+        await _answerAfterToolCall(
+          aiMessageId: aiMessageId,
+          reply: firstReply,
+          registry: registry,
+          assembly: assembly,
+          promptBundle: promptBundle,
+          firstCompletion: firstCompletion,
+          selectedModel: selectedModel,
+          maxTokens: maxTokens,
+          adaptiveMode: adaptiveMode,
+          promptTokens: promptTokens,
+          contextTokens: contextTokens,
+          sources: messageSources,
+          legacyToolsEnabled: legacyAndroidTools,
         );
       }
     } catch (e) {
       _replaceAiMessage(aiMessageId, 'Error generating response: $e');
     }
+  }
+
+  /// Runs one completion into the assistant message and reports what it did.
+  ///
+  /// Shared by the first reply and the one follow-up after a tool ran, so both
+  /// turns stream, stop and account for tokens the same way. A reply that
+  /// begins with `{` is a structured tool call rather than prose, so its JSON
+  /// is never streamed to the user; the answer that follows replaces it.
+  Future<_StreamedCompletion> _streamCompletion({
+    required String aiMessageId,
+    required BuiltLlmPrompt promptBundle,
+    required String promptFormatId,
+    required int maxTokens,
+    required bool adaptiveMode,
+  }) async {
+    final stopSequence = modelStopToken(promptFormatId);
+    final responseBuffer = StringBuffer();
+    var sawToken = false;
+    var generatedTokenCount = 0;
+    var lastEmitAt = DateTime.fromMillisecondsSinceEpoch(0);
+    var lastStatAt = DateTime.fromMillisecondsSinceEpoch(0);
+    const minEmitGap = Duration(milliseconds: 60);
+    const statUpdateGap = Duration(milliseconds: 250);
+    final generationTimer = Stopwatch()..start();
+
+    bool looksStructured() =>
+        responseBuffer.toString().trimLeft().startsWith('{');
+
+    Future<void> emit({bool force = false}) async {
+      if (looksStructured()) return;
+
+      final now = DateTime.now();
+      if (!force && now.difference(lastEmitAt) < minEmitGap) return;
+      lastEmitAt = now;
+
+      final text = buildStreamingResponseText(responseBuffer.toString());
+      _replaceAiMessage(
+        aiMessageId,
+        text.trim().isEmpty ? 'Thinking...' : text,
+      );
+    }
+
+    final responseStream = promptBundle.imagePaths.isNotEmpty
+        ? _llmService.generateVisionResponse(
+            promptBundle.prompt,
+            imagePaths: promptBundle.imagePaths,
+            maxTokens: maxTokens,
+          )
+        : _llmService.generateResponse(
+            promptBundle.prompt,
+            maxTokens: maxTokens,
+          );
+
+    await for (final token in responseStream) {
+      final cleanToken = token.replaceAll(stopSequence, '');
+      if (cleanToken.isNotEmpty) {
+        sawToken = true;
+        responseBuffer.write(cleanToken);
+        generatedTokenCount++;
+      }
+
+      final now = DateTime.now();
+      if (now.difference(lastStatAt) >= statUpdateGap) {
+        lastStatAt = now;
+        _setLiveGenerationStatus(
+          adaptiveMode: adaptiveMode,
+          maxTokens: maxTokens,
+          generatedTokens: generatedTokenCount,
+          elapsed: generationTimer.elapsed,
+        );
+      }
+
+      if (token.contains(stopSequence)) {
+        await emit(force: true);
+        break;
+      }
+
+      await emit();
+    }
+
+    await emit(force: true);
+    generationTimer.stop();
+    return _StreamedCompletion(
+      rawText: responseBuffer.toString(),
+      sawToken: sawToken,
+      generatedTokens: generatedTokenCount,
+      elapsed: generationTimer.elapsed,
+      stoppedByUser: _stopRequestedByUser || _llmService.isStopRequested,
+    );
+  }
+
+  /// Runs one tool call, records it on the message, and asks the model once
+  /// more with the result so the visible reply is written in prose.
+  ///
+  /// Exactly one tool call runs per user turn: the follow-up is final even if
+  /// it asks for another tool, because a repeated loop belongs to the future
+  /// agent work, not to a chat turn. The activity record keeps the call and its
+  /// result visible after a restart.
+  Future<void> _answerAfterToolCall({
+    required String aiMessageId,
+    required RegistryToolReply reply,
+    required ToolRegistry registry,
+    required ContextAssembly assembly,
+    required BuiltLlmPrompt promptBundle,
+    required _StreamedCompletion firstCompletion,
+    required LlmModel selectedModel,
+    required int maxTokens,
+    required bool adaptiveMode,
+    required int promptTokens,
+    required int contextTokens,
+    required List<MessageSource> sources,
+    required bool legacyToolsEnabled,
+  }) async {
+    final result = await registry.execute(reply.call);
+    final activity = messageToolActivityFrom(call: reply.call, result: result);
+    final toolActivity = [activity];
+
+    // The call is shown before the follow-up runs, so it is not lost when
+    // generation is stopped or the app closes mid-turn.
+    _replaceAiMessage(
+      aiMessageId,
+      'Using ${result.toolName}...',
+      generatedTokens: firstCompletion.generatedTokens,
+      elapsed: firstCompletion.elapsed,
+      tokensPerSecond: firstCompletion.tokensPerSecond,
+      toolActivity: toolActivity,
+    );
+    _setStatus(text: 'Using ${result.toolName}...', isGenerating: true);
+
+    final followUpBundle = buildModelChatPrompt(
+      buildToolFollowUpMessages(
+        history: _promptMessagesFor(assembly.messages),
+        rawToolCall: firstCompletion.rawText,
+        result: result,
+      ),
+      systemPrompt: assembly.systemPrompt,
+      promptFormatId: selectedModel.promptFormatId,
+    );
+    // Some prompt formats carry images inline and some pass them separately;
+    // the first prompt already worked out which paths this request sends.
+    final followUpPrompt = followUpBundle.imagePaths.isNotEmpty
+        ? followUpBundle
+        : BuiltLlmPrompt(
+            prompt: followUpBundle.prompt,
+            imagePaths: promptBundle.imagePaths,
+          );
+
+    final secondCompletion = await _streamCompletion(
+      aiMessageId: aiMessageId,
+      promptBundle: followUpPrompt,
+      promptFormatId: selectedModel.promptFormatId,
+      maxTokens: maxTokens,
+      adaptiveMode: adaptiveMode,
+    );
+
+    final generatedTokens =
+        firstCompletion.generatedTokens + secondCompletion.generatedTokens;
+    final elapsed = firstCompletion.elapsed + secondCompletion.elapsed;
+    final elapsedSeconds = elapsed.inMilliseconds / 1000.0;
+    final tokensPerSecond = elapsedSeconds > 0
+        ? generatedTokens / elapsedSeconds
+        : 0.0;
+
+    if (secondCompletion.stoppedByUser) {
+      final partial = secondCompletion.rawText;
+      _replaceAiMessage(
+        aiMessageId,
+        partial.trim().isEmpty || partial.trimLeft().startsWith('{')
+            ? 'Generation stopped.'
+            : '${buildStreamingResponseText(partial)}\n\n[Stopped]',
+        generatedTokens: generatedTokens,
+        elapsed: elapsed,
+        tokensPerSecond: tokensPerSecond,
+        promptTokens: promptTokens,
+        contextTokens: contextTokens,
+        sources: sources,
+        toolActivity: toolActivity,
+      );
+      return;
+    }
+
+    if (!secondCompletion.sawToken) {
+      _replaceAiMessage(
+        aiMessageId,
+        'No response generated.',
+        generatedTokens: generatedTokens,
+        elapsed: elapsed,
+        tokensPerSecond: tokensPerSecond,
+        promptTokens: promptTokens,
+        contextTokens: contextTokens,
+        sources: sources,
+        toolActivity: toolActivity,
+      );
+      return;
+    }
+
+    final secondReply = resolveAssistantReply(
+      buildFinalResponseText(secondCompletion.rawText),
+      registry: registry,
+      legacyToolsEnabled: legacyToolsEnabled,
+    );
+    // One tool per turn: if the follow-up asks for another, its raw text is
+    // shown instead of running a second call.
+    final finalText = switch (secondReply) {
+      AssistantTextReply(:final text) => text,
+      RegistryToolReply() => buildFinalResponseText(secondCompletion.rawText),
+      LegacyToolReply() => buildFinalResponseText(secondCompletion.rawText),
+    };
+
+    _replaceAiMessage(
+      aiMessageId,
+      finalText,
+      generatedTokens: generatedTokens,
+      elapsed: elapsed,
+      tokensPerSecond: tokensPerSecond,
+      promptTokens: promptTokens,
+      contextTokens: contextTokens,
+      sources: sources,
+      toolActivity: toolActivity,
+    );
+  }
+
+  /// The message list the model was given, ready to extend for a follow-up.
+  List<LlmPromptMessage> _promptMessagesFor(List<Message> messages) {
+    return [
+      for (final message in messages)
+        message.isUser
+            ? LlmPromptMessage.user(
+                message.content,
+                imagePaths: message.imagePaths,
+              )
+            : LlmPromptMessage.assistant(message.content),
+    ];
   }
 
   Future<void> _addPlaceholderResponse() async {
@@ -823,6 +1025,7 @@ class HomeController extends _$HomeController {
     int? promptTokens,
     int? contextTokens,
     List<MessageSource>? sources,
+    List<MessageToolActivity>? toolActivity,
   }) {
     final stats =
         (generatedTokens == null &&
@@ -845,6 +1048,7 @@ class HomeController extends _$HomeController {
             content: text,
             generationStats: stats,
             sources: sources,
+            toolActivity: toolActivity,
             tokenCount: generatedTokens ?? msg.tokenCount,
           )
         else
@@ -990,27 +1194,27 @@ class HomeController extends _$HomeController {
       await _storageService.deleteFiles(attachmentPaths);
     }
   }
+}
 
-  Future<String> _resolveAssistantText(String rawResponse) async {
-    if (!_androidToolCallingEnabled) {
-      return rawResponse;
-    }
+/// What one streamed completion produced.
+class _StreamedCompletion {
+  const _StreamedCompletion({
+    required this.rawText,
+    required this.sawToken,
+    required this.generatedTokens,
+    required this.elapsed,
+    required this.stoppedByUser,
+  });
 
-    final structuredResponse = tryParseLlmStructuredResponse(rawResponse);
-    if (structuredResponse == null) {
-      return rawResponse;
-    }
+  final String rawText;
+  final bool sawToken;
+  final int generatedTokens;
+  final Duration elapsed;
+  final bool stoppedByUser;
 
-    switch (structuredResponse.type) {
-      case LlmStructuredResponseType.message:
-        final content = structuredResponse.content?.trim() ?? '';
-        return content.isEmpty ? rawResponse : content;
-      case LlmStructuredResponseType.toolCall:
-        final executionResult = await ref
-            .read(androidToolExecutorServiceProvider)
-            .executeToolPayload(structuredResponse.rawJson);
-        return executionResult.message;
-    }
+  double get tokensPerSecond {
+    final seconds = elapsed.inMilliseconds / 1000.0;
+    return seconds > 0 ? generatedTokens / seconds : 0.0;
   }
 }
 

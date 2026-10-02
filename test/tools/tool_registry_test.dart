@@ -79,6 +79,20 @@ void main() {
     expect(prompt, contains('do not wrap normal answers in JSON'));
   });
 
+  test('supports nothing when the platform is unknown', () async {
+    final registry = ToolRegistry(tools: builtInToolEntries(), platform: null);
+
+    expect(registry.describeForPrompt(), isEmpty);
+    expect(registry.supportedDefinitions, isEmpty);
+
+    final result = await registry.execute(
+      const ToolCall(toolName: 'calculator', arguments: {'expression': '1+1'}),
+    );
+
+    expect(result.status, ToolExecutionStatus.unsupported);
+    expect(result.output, contains('this device'));
+  });
+
   test('describes nothing when no tool can run here', () {
     final registry = ToolRegistry(
       tools: [

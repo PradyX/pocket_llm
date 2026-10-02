@@ -14,8 +14,11 @@ List<ToolEntry> builtInToolEntries({Clock? clock}) {
 }
 
 /// The registry the app runs tool calls through.
+///
+/// [platform] is null on a platform the app does not target; every tool is
+/// then unsupported rather than assumed to work.
 ToolRegistry buildToolRegistry({
-  required ToolPlatform platform,
+  required ToolPlatform? platform,
   ToolPermissionGate permissionGate = const DenySensitiveTools(),
   Clock? clock,
 }) {

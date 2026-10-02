@@ -28,13 +28,13 @@ class ToolApprovalRequest {
   final Map<String, Object?> arguments;
 
   /// One line describing the call, used by permission prompts and logs.
-  String get summary {
-    final rendered = arguments.entries
-        .map((entry) => '${entry.key}: ${entry.value}')
-        .join(', ');
-    return '${tool.name}($rendered)';
-  }
+  String get summary => '${tool.name}(${renderToolArguments(arguments)})';
 }
+
+/// `expression: (2 + 3) * 4` — how a call's arguments read in a prompt, a
+/// permission message or a conversation record.
+String renderToolArguments(Map<String, Object?> arguments) =>
+    arguments.entries.map((entry) => '${entry.key}: ${entry.value}').join(', ');
 
 /// Decides whether a sensitive tool may run.
 ///
@@ -82,14 +82,17 @@ class ToolArgumentValidation {
 class ToolRegistry {
   ToolRegistry({
     required Iterable<ToolEntry> tools,
-    required ToolPlatform platform,
+    required ToolPlatform? platform,
     ToolPermissionGate permissionGate = const DenySensitiveTools(),
   }) : _platform = platform,
        _permissionGate = permissionGate,
        _entries = {for (final entry in tools) entry.definition.name: entry};
 
   final Map<String, ToolEntry> _entries;
-  final ToolPlatform _platform;
+
+  /// Null on a platform the app does not target; every tool is then treated as
+  /// unsupported instead of guessing a runtime that is not there.
+  final ToolPlatform? _platform;
   final ToolPermissionGate _permissionGate;
 
   /// Every declared tool, in declaration order.
@@ -163,7 +166,7 @@ class ToolRegistry {
     final definition = entry.definition;
     if (!definition.isSupportedOn(_platform)) {
       return ToolArgumentValidation.invalid(
-        '${definition.name} is not available on ${_platform.label}.',
+        '${definition.name} is not available on ${_platformLabel()}.',
       );
     }
 
@@ -226,7 +229,7 @@ class ToolRegistry {
         toolName: definition.name,
         status: ToolExecutionStatus.unsupported,
         output:
-            '${definition.name} is not available on ${_platform.label}. '
+            '${definition.name} is not available on ${_platformLabel()}. '
             '${_platformFallback(definition)}',
       );
     }
@@ -287,6 +290,9 @@ class ToolRegistry {
       );
     }
   }
+
+  /// `macOS`, or `this device` when the platform is unknown.
+  String _platformLabel() => _platform?.label ?? 'this device';
 
   String _availableNames() {
     final supported = supportedDefinitions;
