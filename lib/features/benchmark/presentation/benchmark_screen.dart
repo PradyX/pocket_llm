@@ -1062,10 +1062,62 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
     text: ref.read(modelComparisonControllerProvider).prompt,
   );
 
+  /// Draft for the next prompt added to the suite.
+  final TextEditingController _suitePromptController = TextEditingController();
+
   @override
   void dispose() {
     _promptController.dispose();
+    _suitePromptController.dispose();
     super.dispose();
+  }
+
+  /// Adds the typed prompt to the suite and clears the box.
+  void _addSuitePrompt() {
+    final prompt = _suitePromptController.text.trim();
+    if (prompt.isEmpty) return;
+    ref.read(modelComparisonControllerProvider.notifier).addSuitePrompt(prompt);
+    _suitePromptController.clear();
+  }
+
+  /// Edits one extra prompt of the suite.
+  Future<void> _editSuitePrompt(int index) async {
+    final state = ref.read(modelComparisonControllerProvider);
+    if (index < 0 || index >= state.suitePrompts.length) return;
+
+    final editController = TextEditingController(
+      text: state.suitePrompts[index],
+    );
+    final edited = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit suite prompt'),
+        content: TextField(
+          controller: editController,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          maxLength: ComparisonSet.maximumPromptLength,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(editController.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    editController.dispose();
+    if (edited == null || !mounted) return;
+    ref
+        .read(modelComparisonControllerProvider.notifier)
+        .updateSuitePrompt(index, edited);
   }
 
   @override
@@ -1224,6 +1276,99 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Prompt suite',
+                        style: textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${state.activePrompts.length} of '
+                      '${ComparisonSet.maximumPrompts} prompts',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Add prompts to send the same models a whole set of '
+                  'questions in one run. Each prompt keeps its own answers, '
+                  'and “Run ${state.activePrompts.length} prompts” runs them '
+                  'in order.',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (state.suitePrompts.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (
+                        var index = 0;
+                        index < state.suitePrompts.length;
+                        index++
+                      )
+                        InputChip(
+                          label: Text(
+                            state.suitePrompts[index],
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          tooltip: 'Tap to edit, ✕ to remove',
+                          onPressed: state.isBusy
+                              ? null
+                              : () => _editSuitePrompt(index),
+                          onDeleted: state.isBusy
+                              ? null
+                              : () => controller.removeSuitePrompt(index),
+                        ),
+                    ],
+                  ),
+                ],
+                if (state.activePrompts.length <
+                    ComparisonSet.maximumPrompts) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _suitePromptController,
+                          enabled: !state.isBusy,
+                          minLines: 1,
+                          maxLines: 3,
+                          onSubmitted: (_) => _addSuitePrompt(),
+                          decoration: const InputDecoration(
+                            hintText: 'Another prompt for the same models',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        onPressed: state.isBusy ? null : _addSuitePrompt,
+                        child: const Text('Add'),
+                      ),
+                    ],
+                  ),
+                ],
+                if (state.hasSuiteResults && !state.isBusy)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: controller.clearSuite,
+                      icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                      label: const Text('Clear suite answers'),
+                    ),
+                  ),
                 const SizedBox(height: 6),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1361,7 +1506,18 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
                         icon: const Icon(Icons.stop_rounded),
                         label: const Text('Stop'),
                       ),
-                    if (state.hasResults && !state.isBusy)
+                    if (state.activePrompts.length >= 2)
+                      FilledButton.tonalIcon(
+                        onPressed: state.canRunSuite && !chatBusy
+                            ? controller.runSuite
+                            : null,
+                        icon: const Icon(Icons.playlist_play_rounded),
+                        label: Text(
+                          'Run ${state.activePrompts.length} prompts',
+                        ),
+                      ),
+                    if ((state.hasResults || state.hasSuiteResults) &&
+                        !state.isBusy)
                       TextButton.icon(
                         onPressed: controller.clear,
                         icon: const Icon(Icons.clear_all_rounded),
@@ -1407,24 +1563,20 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    LinearProgressIndicator(
-                      value: state.queuedModelCount == 0
-                          ? null
-                          : state.results.length / state.queuedModelCount,
-                    ),
+                    LinearProgressIndicator(value: _progressValue(state)),
                   ],
                 ),
               ),
             ),
           ),
-        if (state.hasResults) ...[
+        if (state.hasResults || state.hasSuiteResults) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 18, 4, 10),
             child: Row(
               children: [
                 Expanded(
                   child: Text(
-                    'Answers',
+                    state.hasSuiteResults ? 'Suite answers' : 'Answers',
                     style: textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -1466,17 +1618,28 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
                 ),
                 for (final format in ComparisonExportFormat.values)
                   OutlinedButton.icon(
-                    onPressed: state.isBusy ? null : () => _copyExport(format),
+                    onPressed: state.isBusy
+                        ? null
+                        : () => state.hasSuiteResults
+                              ? _copySuiteExport(format)
+                              : _copyExport(format),
                     icon: const Icon(Icons.copy_all_outlined, size: 18),
                     label: Text(format.label),
                   ),
-                if (state.blind && state.hasResults)
+                if (state.hasSuiteResults)
+                  Text(
+                    'every prompt is exported',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                if (state.blind && (state.hasResults || state.hasSuiteResults))
                   TextButton.icon(
                     onPressed: state.isBusy ? null : controller.revealAll,
                     icon: const Icon(Icons.visibility_outlined, size: 18),
                     label: const Text('Reveal all'),
                   ),
-                if (state.preferredModelId != null)
+                if (!state.hasSuiteResults && state.preferredModelId != null)
                   TextButton.icon(
                     onPressed: state.isBusy ? null : controller.clearPreferred,
                     icon: const Icon(Icons.clear_rounded, size: 18),
@@ -1485,21 +1648,24 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
               ],
             ),
           ),
-          ...state.results.map(
-            (result) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _ComparisonResultCard(
-                result: result,
-                blind: state.isBlindFor(result.model.id),
-                blindLabel: state.blindLabelFor(result.model.id),
-                preferred: state.preferredModelId == result.model.id,
-                canChoosePreferred: state.canChoosePreferred && !state.isBusy,
-                onReveal: () => controller.revealModel(result.model.id),
-                onChoosePreferred: () =>
-                    controller.choosePreferred(result.model.id),
+          if (state.hasSuiteResults)
+            ..._suiteResultSections(state, controller)
+          else
+            ...state.results.map(
+              (result) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _ComparisonResultCard(
+                  result: result,
+                  blind: state.isBlindFor(result.model.id),
+                  blindLabel: state.blindLabelFor(result.model.id),
+                  preferred: state.preferredModelId == result.model.id,
+                  canChoosePreferred: state.canChoosePreferred && !state.isBusy,
+                  onReveal: () => controller.revealModel(result.model.id),
+                  onChoosePreferred: () =>
+                      controller.choosePreferred(result.model.id),
+                ),
               ),
             ),
-          ),
         ],
       ],
     );
@@ -1530,9 +1696,103 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
 
   String _progressLabel(ModelComparisonState state) {
     final running = state.runningModelName;
+    final suitePrompt = state.suiteRunningPrompt;
+    if (suitePrompt != null) {
+      final total = state.activePrompts.length;
+      final position = (state.suiteRuns.length + 1).clamp(1, total);
+      return 'Suite prompt $position of $total'
+          '${running == null ? '' : ' · $running'}...';
+    }
     if (running == null) return 'Finishing comparison...';
     final position = state.results.length + 1;
     return 'Running $position of ${state.queuedModelCount}: $running...';
+  }
+
+  /// Progress of the running work: prompts for a suite, models for one run.
+  double? _progressValue(ModelComparisonState state) {
+    if (state.suiteRunningPrompt != null) {
+      final total = state.activePrompts.length;
+      if (total == 0) return null;
+      return (state.suiteRuns.length / total).clamp(0.0, 1.0);
+    }
+    if (state.queuedModelCount == 0) return null;
+    return state.results.length / state.queuedModelCount;
+  }
+
+  /// One section per suite prompt: the prompt, then each model's answer.
+  ///
+  /// A preference is not offered here — a suite judges models across several
+  /// prompts, and a single favourite would not describe that.
+  List<Widget> _suiteResultSections(
+    ModelComparisonState state,
+    ModelComparisonController controller,
+  ) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+    final widgets = <Widget>[];
+
+    for (var index = 0; index < state.suiteRuns.length; index++) {
+      final run = state.suiteRuns[index];
+      final successful = run.successCount;
+      widgets
+        ..add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+            child: Text(
+              'Prompt ${index + 1} of ${state.suiteRuns.length}'
+              '${run.results.isEmpty ? '' : ' · $successful of '
+                        '${run.results.length} answered'}',
+              style: textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        )
+        ..add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            child: Text(
+              run.prompt,
+              style: textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        );
+
+      if (run.wasSkipped) {
+        widgets.add(
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: _NoticeCard(
+              icon: Icons.stop_circle_outlined,
+              text: 'Not run: the suite was stopped before this prompt.',
+            ),
+          ),
+        );
+        continue;
+      }
+
+      for (final result in run.results) {
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _ComparisonResultCard(
+              result: result,
+              blind: state.isBlindFor(result.model.id),
+              blindLabel: state.blindLabelIn(run.results, result.model.id),
+              preferred: false,
+              canChoosePreferred: false,
+              onReveal: () => controller.revealModel(result.model.id),
+              onChoosePreferred: () {},
+            ),
+          ),
+        );
+      }
+      widgets.add(const SizedBox(height: 4));
+    }
+
+    return widgets;
   }
 
   /// Model name of a result by id, for labels outside the cards.
@@ -1613,6 +1873,59 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
         ],
       ),
     );
+  }
+
+  /// Copies the whole suite (every prompt with its answers) to the clipboard.
+  Future<void> _copySuiteExport(ComparisonExportFormat format) async {
+    final controller = ref.read(modelComparisonControllerProvider.notifier);
+    final state = ref.read(modelComparisonControllerProvider);
+
+    if (state.wasStopped) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Export a stopped suite?'),
+          content: const Text(
+            'The suite was stopped early: the last answer may be partial and '
+            'some prompts were not run. The export says so.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Export anyway'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
+    try {
+      final copied = await controller.copySuiteExportToClipboard(format);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            copied
+                ? 'Suite copied as ${format.label}.'
+                : 'There is nothing to export yet.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: $error'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _copyExport(ComparisonExportFormat format) async {

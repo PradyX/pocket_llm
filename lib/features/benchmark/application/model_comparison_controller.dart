@@ -8,6 +8,7 @@ import 'package:pocket_llm/features/benchmark/data/comparison_set_store.dart';
 import 'package:pocket_llm/features/benchmark/domain/comparison_set.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/model_comparison_export.dart';
+import 'package:pocket_llm/features/benchmark/domain/prompt_suite.dart';
 import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
@@ -60,6 +61,9 @@ class ModelComparisonState {
     this.blind = false,
     this.revealedModelIds = const <String>{},
     this.preferredModelId,
+    this.suitePrompts = const <String>[],
+    this.suiteRuns = const <PromptSuiteRun>[],
+    this.suiteRunningPrompt,
     this.savedSets = const <ComparisonSet>[],
     this.savedSetsReady = false,
     this.savedSetsReadOnly = false,
@@ -99,6 +103,16 @@ class ModelComparisonState {
   /// Model whose answer the user preferred; null until one is chosen.
   final String? preferredModelId;
 
+  /// Extra prompts of the suite, after the prompt in the box. Empty for a
+  /// plain single-prompt comparison.
+  final List<String> suitePrompts;
+
+  /// Answers of the last suite run, one entry per prompt.
+  final List<PromptSuiteRun> suiteRuns;
+
+  /// Prompt currently being sent by the running suite, for the progress line.
+  final String? suiteRunningPrompt;
+
   /// Saved comparison sets, oldest first.
   final List<ComparisonSet> savedSets;
 
@@ -126,7 +140,8 @@ class ModelComparisonState {
   bool isBlindFor(String modelId) =>
       blind && !revealedModelIds.contains(modelId);
 
-  /// Position of a result in the run, which is also its blind letter.
+  /// Position of a result in the last single run, which is also its blind
+  /// letter.
   int indexOfModel(String modelId) {
     for (var index = 0; index < results.length; index++) {
       if (results[index].model.id == modelId) return index;
@@ -140,6 +155,36 @@ class ModelComparisonState {
     if (index < 0) return 'Answer';
     return 'Answer ${String.fromCharCode(65 + index)}';
   }
+
+  /// `Answer A`, `Answer B`… inside one run's answers.
+  ///
+  /// A suite repeats the same models for every prompt, so a label belongs to
+  /// the position within that prompt's answers rather than to the model.
+  String blindLabelIn(List<LocalBenchmarkResult> results, String modelId) {
+    for (var index = 0; index < results.length; index++) {
+      if (results[index].model.id == modelId) {
+        return 'Answer ${String.fromCharCode(65 + index)}';
+      }
+    }
+    return 'Answer';
+  }
+
+  /// Every prompt a suite would send, in order: the prompt in the box first,
+  /// then the extra prompts.
+  List<String> get activePrompts => [
+    if (prompt.trim().isNotEmpty) prompt.trim(),
+    for (final extra in suitePrompts)
+      if (extra.trim().isNotEmpty) extra.trim(),
+  ];
+
+  /// True once a suite has produced any answer.
+  bool get hasSuiteResults => suiteRuns.isNotEmpty;
+
+  /// True when a suite can run: at least two models and two prompts.
+  bool get canRunSuite =>
+      !isBusy &&
+      selectedModelIds.length >= ModelComparisonService.minimumModels &&
+      activePrompts.length >= 2;
 
   int get selectedCount => selectedModelIds.length;
 
@@ -163,6 +208,10 @@ class ModelComparisonState {
     Set<String>? revealedModelIds,
     String? preferredModelId,
     bool clearPreferredModelId = false,
+    List<String>? suitePrompts,
+    List<PromptSuiteRun>? suiteRuns,
+    String? suiteRunningPrompt,
+    bool clearSuiteRunningPrompt = false,
     List<ComparisonSet>? savedSets,
     bool? savedSetsReady,
     bool? savedSetsReadOnly,
@@ -187,6 +236,11 @@ class ModelComparisonState {
       preferredModelId: clearPreferredModelId
           ? null
           : preferredModelId ?? this.preferredModelId,
+      suitePrompts: suitePrompts ?? this.suitePrompts,
+      suiteRuns: suiteRuns ?? this.suiteRuns,
+      suiteRunningPrompt: clearSuiteRunningPrompt
+          ? null
+          : suiteRunningPrompt ?? this.suiteRunningPrompt,
       savedSets: savedSets ?? this.savedSets,
       savedSetsReady: savedSetsReady ?? this.savedSetsReady,
       savedSetsReadOnly: savedSetsReadOnly ?? this.savedSetsReadOnly,
@@ -268,18 +322,194 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
     );
   }
 
-  /// Runs the selected models sequentially, one answer at a time.
-  Future<void> run() async {
+  /// Adds an extra prompt to the suite, up to [ComparisonSet.maximumPrompts].
+  void addSuitePrompt(String prompt) {
     if (state.isBusy) return;
+    final trimmed = prompt.trim();
+    if (trimmed.isEmpty) return;
+    if (state.suitePrompts.length + 1 >= ComparisonSet.maximumPrompts) {
+      state = state.copyWith(
+        errorMessage:
+            'A suite keeps at most ${ComparisonSet.maximumPrompts} prompts, '
+            'including the one in the box.',
+      );
+      return;
+    }
+    state = state.copyWith(
+      suitePrompts: [...state.suitePrompts, trimmed],
+      clearError: true,
+    );
+  }
 
+  /// Replaces one extra prompt; an emptied box removes it.
+  void updateSuitePrompt(int index, String prompt) {
+    if (state.isBusy) return;
+    if (index < 0 || index >= state.suitePrompts.length) return;
+
+    final trimmed = prompt.trim();
+    final prompts = [...state.suitePrompts];
+    if (trimmed.isEmpty) {
+      prompts.removeAt(index);
+    } else {
+      prompts[index] = trimmed;
+    }
+    state = state.copyWith(suitePrompts: prompts);
+  }
+
+  void removeSuitePrompt(int index) {
+    if (state.isBusy) return;
+    if (index < 0 || index >= state.suitePrompts.length) return;
+    final prompts = [...state.suitePrompts]..removeAt(index);
+    state = state.copyWith(suitePrompts: prompts);
+  }
+
+  /// Clears the suite's answers and keeps its prompts, so the same suite can
+  /// be run again. A prompt is removed from its own chip.
+  void clearSuite() {
+    if (state.isBusy) return;
+    if (state.suiteRuns.isEmpty) return;
+    state = state.copyWith(
+      suiteRuns: const [],
+      clearSuiteRunningPrompt: true,
+      clearError: true,
+    );
+  }
+
+  /// The selected models that are actually installed, in selection order.
+  List<LlmModel> _selectedInstalledModels() {
     final installedById = {
       for (final model in _ref.read(installedComparisonModelsProvider))
         model.id: model,
     };
-    final models = [
+    return [
       for (final id in state.selectedModelIds)
         if (installedById[id] != null) installedById[id]!,
     ];
+  }
+
+  /// Runs every prompt of the suite through the selected models.
+  ///
+  /// Prompts run in order and models within a prompt run sequentially, so the
+  /// suite never keeps two models resident. Answers are recorded per prompt as
+  /// they arrive, which is what lets the screen show progress instead of a
+  /// spinner: a stopped suite keeps the answers it already has and marks the
+  /// prompts it never sent.
+  Future<void> runSuite() async {
+    if (state.isBusy) return;
+
+    final models = _selectedInstalledModels();
+    if (models.length < ModelComparisonService.minimumModels) {
+      state = state.copyWith(
+        errorMessage:
+            'Choose at least ${ModelComparisonService.minimumModels} installed '
+            'models to compare.',
+      );
+      return;
+    }
+    final prompts = state.activePrompts;
+    if (prompts.length < 2) {
+      state = state.copyWith(
+        errorMessage:
+            'Add at least one more prompt: a suite compares several prompts '
+            'across the same models.',
+      );
+      return;
+    }
+
+    final service = _ref.read(modelComparisonServiceProvider);
+    _stopped = false;
+    state = state.copyWith(
+      stage: ComparisonStage.running,
+      results: const [],
+      suiteRuns: const [],
+      suiteRunningPrompt: prompts.first,
+      queuedModelCount: models.length,
+      runningModelName: models.first.name,
+      wasStopped: false,
+      revealedModelIds: const <String>{},
+      clearPreferredModelId: true,
+      clearError: true,
+    );
+
+    final completed = <PromptSuiteRun>[];
+    try {
+      for (var index = 0; index < prompts.length; index++) {
+        final prompt = prompts[index];
+        final results = <LocalBenchmarkResult>[];
+        state = state.copyWith(
+          suiteRunningPrompt: prompt,
+          runningModelName: models.first.name,
+        );
+
+        await for (final result in service.compare(
+          models: models,
+          prompt: prompt,
+        )) {
+          results.add(result);
+          state = state.copyWith(
+            suiteRuns: [
+              ...completed,
+              PromptSuiteRun(prompt: prompt, results: [...results]),
+            ],
+            runningModelName: results.length < models.length
+                ? models[results.length].name
+                : null,
+            clearRunningModelName: results.length >= models.length,
+          );
+        }
+
+        completed.add(
+          PromptSuiteRun(
+            prompt: prompt,
+            results: results,
+            wasStopped: _stopped,
+          ),
+        );
+
+        if (_stopped) {
+          final skipped = [
+            for (var rest = index + 1; rest < prompts.length; rest++)
+              PromptSuiteRun(
+                prompt: prompts[rest],
+                results: const [],
+                wasSkipped: true,
+              ),
+          ];
+          state = state.copyWith(
+            suiteRuns: [...completed, ...skipped],
+            stage: ComparisonStage.finished,
+            clearSuiteRunningPrompt: true,
+            clearRunningModelName: true,
+            wasStopped: true,
+          );
+          return;
+        }
+      }
+
+      state = state.copyWith(
+        suiteRuns: completed,
+        stage: ComparisonStage.finished,
+        clearSuiteRunningPrompt: true,
+        clearRunningModelName: true,
+        wasStopped: false,
+      );
+    } catch (error) {
+      state = state.copyWith(
+        suiteRuns: completed,
+        stage: ComparisonStage.failed,
+        clearSuiteRunningPrompt: true,
+        clearRunningModelName: true,
+        wasStopped: _stopped,
+        errorMessage: _messageOf(error),
+      );
+    }
+  }
+
+  /// Runs the selected models sequentially, one answer at a time.
+  Future<void> run() async {
+    if (state.isBusy) return;
+
+    final models = _selectedInstalledModels();
     if (models.length < ModelComparisonService.minimumModels) {
       state = state.copyWith(
         errorMessage:
@@ -300,6 +530,7 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
     state = state.copyWith(
       stage: ComparisonStage.running,
       results: const [],
+      suiteRuns: const [],
       queuedModelCount: models.length,
       runningModelName: models.first.name,
       wasStopped: false,
@@ -356,6 +587,7 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
       prompt: state.prompt,
       selectedModelIds: state.selectedModelIds,
       blind: state.blind,
+      suitePrompts: state.suitePrompts,
       savedSets: state.savedSets,
       savedSetsReady: state.savedSetsReady,
       savedSetsReadOnly: state.savedSetsReadOnly,
@@ -383,7 +615,11 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
   void revealAll() {
     if (state.isBusy) return;
     state = state.copyWith(
-      revealedModelIds: {for (final result in state.results) result.model.id},
+      revealedModelIds: {
+        for (final result in state.results) result.model.id,
+        for (final run in state.suiteRuns)
+          for (final result in run.results) result.model.id,
+      },
     );
   }
 
@@ -446,12 +682,13 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
       );
       return false;
     }
-
     final saved = ComparisonSet(
       id: existing?.id ?? 'set-${DateTime.now().millisecondsSinceEpoch}',
       name: trimmed,
       modelIds: state.selectedModelIds,
-      prompts: [state.prompt.trim()],
+      // The suite is part of the setup: a saved set restores the extra prompts
+      // as well, so a prompt suite can be re-run in one tap.
+      prompts: state.activePrompts,
       blind: state.blind,
       createdAt: existing?.createdAt ?? DateTime.now(),
     ).normalized();
@@ -496,6 +733,9 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
     state = state.copyWith(
       stage: ComparisonStage.idle,
       prompt: set.firstPrompt,
+      suitePrompts: set.prompts.skip(1).toList(growable: false),
+      suiteRuns: const [],
+      clearSuiteRunningPrompt: true,
       selectedModelIds: available,
       results: const [],
       queuedModelCount: 0,
@@ -564,6 +804,48 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
     }
   }
 
+  /// The last suite run as a portable record, or null when there is nothing to
+  /// export.
+  ///
+  /// A suite is exported as one payload with a run per prompt, because the
+  /// prompts only mean something together: the same models answered all of
+  /// them under the same settings.
+  PromptSuiteExport? buildSuiteExport() {
+    if (!state.hasSuiteResults) return null;
+
+    return PromptSuiteExport(
+      runs: state.suiteRuns,
+      blind: state.blind,
+      configuration: _exportConfiguration(),
+    );
+  }
+
+  /// Copies the last suite run to the clipboard in [format].
+  Future<bool> copySuiteExportToClipboard(ComparisonExportFormat format) async {
+    final export = buildSuiteExport();
+    if (export == null) return false;
+
+    await Clipboard.setData(
+      ClipboardData(text: encodePromptSuiteExport(export, format)),
+    );
+    return true;
+  }
+
+  /// Settings every run of this session uses, as recorded in an export.
+  ComparisonExportConfiguration _exportConfiguration() {
+    return ComparisonExportConfiguration(
+      systemPrompt: ModelComparisonService.systemPrompt,
+      contextTokens: ModelCompatibilityService.defaultContextTokens,
+      maxTokens: ModelComparisonService.outputTokensFor(
+        requested: ModelComparisonService.defaultMaxTokens,
+        contextTokens: ModelCompatibilityService.defaultContextTokens,
+      ),
+      temperature: ModelComparisonService.temperature,
+      topP: ModelComparisonService.topP,
+      topK: ModelComparisonService.topK,
+    );
+  }
+
   /// The current results as a portable run, or null when there is nothing to
   /// export.
   ///
@@ -578,17 +860,7 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
       wasStopped: state.wasStopped,
       blind: state.blind,
       preferredModelId: state.preferredModelId,
-      configuration: ComparisonExportConfiguration(
-        systemPrompt: ModelComparisonService.systemPrompt,
-        contextTokens: ModelCompatibilityService.defaultContextTokens,
-        maxTokens: ModelComparisonService.outputTokensFor(
-          requested: ModelComparisonService.defaultMaxTokens,
-          contextTokens: ModelCompatibilityService.defaultContextTokens,
-        ),
-        temperature: ModelComparisonService.temperature,
-        topP: ModelComparisonService.topP,
-        topK: ModelComparisonService.topK,
-      ),
+      configuration: _exportConfiguration(),
       results: state.results,
     );
   }

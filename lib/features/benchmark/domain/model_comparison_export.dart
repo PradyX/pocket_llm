@@ -289,55 +289,69 @@ String encodeComparisonMarkdown(ModelComparisonExport export) {
   }
 
   for (final result in export.results) {
-    buffer
-      ..writeln()
-      ..writeln('## ${result.model.name}')
-      ..writeln();
-    if (!result.isSuccess) {
-      buffer
-        ..writeln('**Error:** ${result.errorMessage ?? 'unknown error'}')
-        ..writeln();
-      continue;
-    }
-
-    final totalTokens =
-        result.generatedTokens + (result.promptTokensEstimated ?? 0);
-    buffer
-      ..writeln('| Metric | Value |')
-      ..writeln('| --- | --- |')
-      ..writeln(
-        '| Parameter size | ${markdownCell(result.model.parameterSize)} |',
-      )
-      ..writeln(
-        '| Quantization | ${markdownCell(result.model.ggufMetadata?.quantization ?? 'unknown')} |',
-      )
-      ..writeln('| Latency | ${result.latencyMs} ms |')
-      ..writeln('| Tokens/sec | ${result.tokensPerSecond.toStringAsFixed(1)} |')
-      ..writeln('| Total tokens (est.) | $totalTokens |');
-    if (result.ttftMs != null) {
-      buffer.writeln('| First token | ${result.ttftMs} ms |');
-    }
-    if (result.promptTokensPerSecond != null) {
-      buffer.writeln(
-        '| Prompt tok/s (est.) | '
-        '${result.promptTokensPerSecond!.toStringAsFixed(1)} |',
-      );
-    }
-    if (result.peakMemoryBytes != null) {
-      buffer.writeln(
-        '| Peak memory | ${formatExportBytes(result.peakMemoryBytes!)} |',
-      );
-    }
-    buffer.writeln('| Runtime | ${markdownCell(_runtimeLabel(result))} |');
-
-    final answer = result.outputText.trim();
-    buffer
-      ..writeln()
-      ..writeln(answer.isEmpty ? '_No text was produced._' : answer)
-      ..writeln();
+    appendResultMarkdown(buffer, result);
   }
 
   return buffer.toString().trimRight();
+}
+
+/// Writes one model's Markdown section: heading, metrics table and answer.
+///
+/// Shared with the prompt-suite export, which nests the same section one
+/// heading level deeper under each prompt, so a single run and a suite always
+/// describe a model the same way.
+void appendResultMarkdown(
+  StringBuffer buffer,
+  LocalBenchmarkResult result, {
+  int headingLevel = 2,
+}) {
+  final heading = '#' * headingLevel;
+  buffer
+    ..writeln()
+    ..writeln('$heading ${result.model.name}')
+    ..writeln();
+  if (!result.isSuccess) {
+    buffer
+      ..writeln('**Error:** ${result.errorMessage ?? 'unknown error'}')
+      ..writeln();
+    return;
+  }
+
+  final totalTokens =
+      result.generatedTokens + (result.promptTokensEstimated ?? 0);
+  buffer
+    ..writeln('| Metric | Value |')
+    ..writeln('| --- | --- |')
+    ..writeln(
+      '| Parameter size | ${markdownCell(result.model.parameterSize)} |',
+    )
+    ..writeln(
+      '| Quantization | ${markdownCell(result.model.ggufMetadata?.quantization ?? 'unknown')} |',
+    )
+    ..writeln('| Latency | ${result.latencyMs} ms |')
+    ..writeln('| Tokens/sec | ${result.tokensPerSecond.toStringAsFixed(1)} |')
+    ..writeln('| Total tokens (est.) | $totalTokens |');
+  if (result.ttftMs != null) {
+    buffer.writeln('| First token | ${result.ttftMs} ms |');
+  }
+  if (result.promptTokensPerSecond != null) {
+    buffer.writeln(
+      '| Prompt tok/s (est.) | '
+      '${result.promptTokensPerSecond!.toStringAsFixed(1)} |',
+    );
+  }
+  if (result.peakMemoryBytes != null) {
+    buffer.writeln(
+      '| Peak memory | ${formatExportBytes(result.peakMemoryBytes!)} |',
+    );
+  }
+  buffer.writeln('| Runtime | ${markdownCell(_runtimeLabel(result))} |');
+
+  final answer = result.outputText.trim();
+  buffer
+    ..writeln()
+    ..writeln(answer.isEmpty ? '_No text was produced._' : answer)
+    ..writeln();
 }
 
 /// Escapes the one character that would break a Markdown table cell.
