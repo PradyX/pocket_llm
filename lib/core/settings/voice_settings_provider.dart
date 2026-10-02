@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/features/voice/domain/speech_voice.dart';
 import 'package:pocket_llm/storage/secure_storage.dart';
 
 /// Which GGUF models and voices the user chose for voice work.
@@ -74,6 +75,7 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettingsState> {
       final sttModelId = data['sttModelId'];
       final ttsVoiceId = data['ttsVoiceId'];
       final ttsRate = data['ttsRate'];
+      final ttsRateVersion = data['ttsRateVersion'];
       final readRepliesAloud = data['readRepliesAloud'];
       state = state.copyWith(
         sttModelId: sttModelId is String && sttModelId.trim().isNotEmpty
@@ -84,7 +86,13 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettingsState> {
         ttsVoiceId: ttsVoiceId is String && ttsVoiceId.trim().isNotEmpty
             ? ttsVoiceId
             : null,
-        ttsRate: ttsRate is num ? ttsRate.toDouble() : null,
+        // A rate written before it became a plain multiplier (0.5 was normal
+        // speed) is converted on read. The conversion is idempotent, so a
+        // document nobody changes keeps resolving to the same speed, and the
+        // version is stored with the next change.
+        ttsRate: ttsRate is num
+            ? resolveStoredSpeechRate(ttsRate, version: ttsRateVersion)
+            : null,
         readRepliesAloud: readRepliesAloud is bool
             ? readRepliesAloud
             : state.readRepliesAloud,
@@ -131,6 +139,7 @@ class VoiceSettingsNotifier extends StateNotifier<VoiceSettingsState> {
         'sttModelId': state.sttModelId,
         'ttsVoiceId': state.ttsVoiceId,
         'ttsRate': state.ttsRate,
+        'ttsRateVersion': currentSpeechRateVersion,
         'readRepliesAloud': state.readRepliesAloud,
       },
     );

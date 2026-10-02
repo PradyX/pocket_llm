@@ -33,11 +33,20 @@ dependencies:
   flutter_markdown: ^0.7.3
   url_launcher: ^6.3.0
   file_selector: ^1.1.0
-  flutter_tts: ^4.2.5
+  # Text to speech, through the operating system's own synthesizer. `stts`
+  # ships the Swift package Flutter needs on macOS and iOS, so no plugin here
+  # falls back to CocoaPods, and its speech rate is a plain multiplier where
+  # 1.0 is normal speed on every platform. See
+  # lib/features/voice/data/platform_tts_service.dart.
+  stts: ^1.3.4
   record: ^7.1.1
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  # Device smoke tests that talk to real platform plugins. Run them with
+  # `flutter test integration_test -d macos` (or another device).
+  integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   build_runner: ^2.4.8

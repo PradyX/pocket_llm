@@ -49,15 +49,24 @@ class SpeechVoice {
   String toString() => label;
 }
 
-/// Normal speaking rate. Platform synthesizers treat 0.5 as normal speed and
-/// 1.0 as their fastest, which is why this is not a multiplier.
-const double defaultSpeechRate = 0.5;
+/// Normal speaking rate.
+///
+/// The device synthesizers take a multiplier where 1.0 is normal speed: 0.5 is
+/// half speed and 2.0 is double. Android and Apple agree on this, which is why
+/// the rate is stored as a plain multiplier and needs no per-platform mapping.
+const double defaultSpeechRate = 1.0;
 
 /// Slowest rate the settings accept.
-const double minimumSpeechRate = 0.25;
+const double minimumSpeechRate = 0.5;
 
 /// Fastest rate the settings accept.
-const double maximumSpeechRate = 1.0;
+const double maximumSpeechRate = 2.0;
+
+/// Version of the rate semantics written to storage.
+///
+/// Version 1 stored `flutter_tts` rates, where 0.5 was normal speed on Apple
+/// while Android treated 1.0 as normal; version 2 is the multiplier above.
+const int currentSpeechRateVersion = 2;
 
 /// Clamps a stored or requested rate into the range platforms accept.
 ///
@@ -66,4 +75,21 @@ const double maximumSpeechRate = 1.0;
 double clampSpeechRate(num? rate) {
   if (rate == null || rate.isNaN) return defaultSpeechRate;
   return rate.toDouble().clamp(minimumSpeechRate, maximumSpeechRate);
+}
+
+/// Turns a rate as it was stored into one this build can speak with.
+///
+/// A document written before rates became a multiplier has no version key and
+/// stored 0.5 as normal speed, so those values are doubled (0.25 → 0.5,
+/// 0.5 → 1.0, 1.0 → 2.0) and clamped. Anything at [currentSpeechRateVersion]
+/// or newer is only clamped, so a rate the user chose is never thrown away. A
+/// version that cannot be read is treated as current: clamping a value is a
+/// smaller surprise than doubling it.
+double resolveStoredSpeechRate(num? stored, {Object? version}) {
+  if (stored == null || stored.isNaN) return defaultSpeechRate;
+
+  final value = stored.toDouble();
+  final isLegacy =
+      version == null || (version is int && version < currentSpeechRateVersion);
+  return clampSpeechRate(isLegacy ? value * 2 : value);
 }

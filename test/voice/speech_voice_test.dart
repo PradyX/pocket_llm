@@ -53,4 +53,48 @@ void main() {
     expect(clampSpeechRate(0.0), minimumSpeechRate);
     expect(clampSpeechRate(4), maximumSpeechRate);
   });
+
+  test('speaks at the normal rate when no rate was ever stored', () {
+    expect(defaultSpeechRate, 1.0);
+    expect(resolveStoredSpeechRate(null), defaultSpeechRate);
+    expect(resolveStoredSpeechRate(double.nan), defaultSpeechRate);
+  });
+
+  test('doubles a rate stored before it became a multiplier', () {
+    // 0.5 used to mean normal speed, which is 1.0 now.
+    expect(resolveStoredSpeechRate(0.5), defaultSpeechRate);
+    expect(resolveStoredSpeechRate(0.25), minimumSpeechRate);
+    expect(resolveStoredSpeechRate(1.0), maximumSpeechRate);
+    // A version below the current one is legacy too, not only a missing key.
+    expect(resolveStoredSpeechRate(0.5, version: 1), defaultSpeechRate);
+  });
+
+  test('keeps a rate written with the current semantics', () {
+    expect(
+      resolveStoredSpeechRate(0.75, version: currentSpeechRateVersion),
+      0.75,
+    );
+    expect(
+      resolveStoredSpeechRate(1.5, version: currentSpeechRateVersion),
+      1.5,
+    );
+  });
+
+  test('clamps a stored rate instead of dropping it', () {
+    expect(
+      resolveStoredSpeechRate(9.0, version: currentSpeechRateVersion),
+      maximumSpeechRate,
+    );
+    expect(
+      resolveStoredSpeechRate(0.01, version: currentSpeechRateVersion),
+      minimumSpeechRate,
+    );
+  });
+
+  test('treats an unreadable version as current, not as legacy', () {
+    // Doubling a value that may already be a multiplier would be the bigger
+    // surprise, so a corrupt version only clamps.
+    expect(resolveStoredSpeechRate(1.0, version: 'two'), 1.0);
+    expect(resolveStoredSpeechRate(0.5, version: 'two'), minimumSpeechRate);
+  });
 }

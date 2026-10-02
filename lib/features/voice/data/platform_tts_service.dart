@@ -1,7 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:pocket_llm/features/voice/domain/speech_voice.dart';
+import 'package:stts/stts.dart';
 
 /// Whether this build has a local speech engine at all.
 ///
@@ -19,7 +20,7 @@ bool get isSpeechSynthesisSupported =>
 ///
 /// Behind an interface so the controller and the voice screen can be tested
 /// without platform channels: tests supply a fake, the app supplies
-/// [FlutterTtsEngine].
+/// [SttsSpeechEngine].
 abstract class SpeechSynthesisEngine {
   /// Prepares the engine for sentence-length utterances.
   Future<void> prepare();
@@ -44,42 +45,108 @@ abstract class SpeechSynthesisEngine {
 
 /// Speaks with the operating system's synthesizer, on this device.
 ///
-/// Nothing leaves the device: the platform engine runs locally and keeps
-/// working offline once the language's voice data is installed, which is why
-/// this path needs no model download and no network. A device without voice
-/// data says so through the engine's own failure instead of pretending.
-class FlutterTtsEngine implements SpeechSynthesisEngine {
-  FlutterTtsEngine({FlutterTts? tts}) : _tts = tts ?? FlutterTts();
+/// `stts` wraps the platform engines (AVSpeechSynthesizer on Apple,
+/// TextToSpeech on Android), so speech runs locally, keeps working offline once
+/// the language's voice data is installed, and needs no model download:
+/// nothing is synthesized elsewhere and nothing is uploaded. Only its
+/// text-to-speech side is used — transcription in this app is done by a local
+/// GGUF model, not by the platform.
+class SttsSpeechEngine implements SpeechSynthesisEngine {
+  SttsSpeechEngine({
+    Tts? tts,
+    int supportChecks = 10,
+    Duration supportCheckDelay = const Duration(milliseconds: 200),
+  }) : _tts = tts ?? Tts(),
+       _supportChecks = supportChecks,
+       _supportCheckDelay = supportCheckDelay;
 
-  final FlutterTts _tts;
-  bool _prepared = false;
+  final Tts _tts;
+
+  /// How often an engine that reports "not supported" is asked again, and how
+  /// long between the attempts. Both are injectable so tests do not wait.
+  final int _supportChecks;
+  final Duration _supportCheckDelay;
+
+  /// State changes of the engine, subscribed once, before the first utterance.
+  StreamSubscription<TtsState>? _states;
+
+  /// The utterance being spoken, completed when the engine reports it stopped.
+  Completer<void>? _speaking;
 
   @override
   Future<void> prepare() async {
-    if (_prepared) return;
-    // Without this, speak() returns as soon as the utterance is queued and the
-    // UI cannot tell when the device stopped talking.
-    await _tts.awaitSpeakCompletion(true);
-    _prepared = true;
+    // The engine reports an utterance ending as a state change rather than
+    // through the call that started it, so this stream is what makes speak()
+    // complete. Subscribing here (and not per utterance) also means the first
+    // utterance is never missed.
+    _states ??= _tts.onStateChanged.listen(
+      _onStateChanged,
+      onError: _onStateError,
+    );
+  }
+
+  void _onStateChanged(TtsState state) {
+    // `stop` is the only state that ends an utterance: `start` means it began
+    // and `pause` is still holding it.
+    if (state != TtsState.stop) return;
+    _finishUtterance();
+  }
+
+  /// A platform that fails to start its engine reports that here (Android does
+  /// when its TextToSpeech will not initialise). Left unhandled it would take
+  /// down the stream and leave the screen speaking forever, so it is answered
+  /// as the failure of the utterance in progress.
+  void _onStateError(Object error) => _finishUtterance(error);
+
+  /// Whether this device can speak at all.
+  ///
+  /// Android starts its engine asynchronously after launch, and until that
+  /// finishes the platform answers "not supported" — which is also what a
+  /// device with no engine at all answers, forever. Asking again for a moment
+  /// tells the two apart without making a working device look broken.
+  Future<bool> _supported() async {
+    if (await _tts.isSupported()) return true;
+
+    for (var attempt = 0; attempt < _supportChecks; attempt++) {
+      await Future<void>.delayed(_supportCheckDelay);
+      if (await _tts.isSupported()) return true;
+    }
+    return false;
+  }
+
+  /// Releases [speak], with an error when the utterance failed.
+  void _finishUtterance([Object? error]) {
+    final speaking = _speaking;
+    _speaking = null;
+    if (speaking == null || speaking.isCompleted) return;
+
+    if (error == null) {
+      speaking.complete();
+    } else {
+      speaking.completeError(error);
+    }
   }
 
   @override
   Future<List<SpeechVoice>> voices() async {
-    final raw = await _tts.getVoices;
-    if (raw is! List) return const [];
+    await prepare();
+    if (!await _supported()) return const [];
+
+    final raw = await _tts.getVoices();
 
     final voices = <SpeechVoice>[];
     final seen = <String>{};
-    for (final entry in raw) {
-      if (entry is! Map) continue;
-      final name = entry['name']?.toString().trim() ?? '';
+    for (final voice in raw) {
+      // A voice that needs the network is left out. Reading text aloud is a
+      // local feature here, and a longer list is not worth sending text
+      // anywhere for.
+      if (voice.networkRequired) continue;
+
+      final name = voice.name.trim();
       if (name.isEmpty) continue;
 
-      final voice = SpeechVoice(
-        name: name,
-        locale: entry['locale']?.toString().trim() ?? '',
-      );
-      if (seen.add(voice.id)) voices.add(voice);
+      final entry = SpeechVoice(name: name, locale: voice.language.trim());
+      if (seen.add(entry.id)) voices.add(entry);
     }
 
     voices.sort((a, b) {
@@ -97,18 +164,67 @@ class FlutterTtsEngine implements SpeechSynthesisEngine {
     SpeechVoice? voice,
   }) async {
     await prepare();
-    if (voice != null) {
-      if (voice.locale.isNotEmpty) {
-        await _tts.setLanguage(voice.locale);
-      }
-      await _tts.setVoice({'name': voice.name, 'locale': voice.locale});
+
+    // Without this the platform would swallow the request instead of failing
+    // it (Android returns early when its engine is missing) and this method
+    // would wait for a stop that never arrives.
+    if (!await _supported()) {
+      throw Exception('no speech engine is installed on this device.');
     }
-    await _tts.setSpeechRate(rate);
-    await _tts.speak(text);
+
+    // A chosen voice that the device no longer reports is not an error: the
+    // utterance is spoken with the device default, which is what the voice
+    // screen already warns about.
+    if (voice != null) {
+      final voiceId = await _voiceIdFor(voice);
+      if (voiceId != null) await _tts.setVoice(voiceId);
+    }
+
+    // 1.0 is normal speed on Android and on Apple, so the rate is passed
+    // through unchanged.
+    await _tts.setRate(clampSpeechRate(rate));
+
+    final speaking = Completer<void>();
+    _speaking = speaking;
+    try {
+      // Flush, not queue: only one reply is ever read at a time, so a newer
+      // utterance replaces an older one instead of waiting behind it.
+      await _tts.start(
+        text,
+        options: const TtsOptions(mode: TtsQueueMode.flush),
+      );
+    } catch (error) {
+      // An utterance the engine refused would otherwise wait for a stop that
+      // is never coming.
+      _finishUtterance(error);
+    }
+    await speaking.future;
+  }
+
+  /// Platform id of [voice], or null when this device does not report it.
+  Future<String?> _voiceIdFor(SpeechVoice voice) async {
+    final wantedName = voice.name.trim().toLowerCase();
+    final wantedLocale = voice.locale.trim().toLowerCase();
+
+    for (final candidate in await _tts.getVoices()) {
+      if (candidate.name.trim().toLowerCase() != wantedName) continue;
+      if (wantedLocale.isNotEmpty &&
+          candidate.language.trim().toLowerCase() != wantedLocale) {
+        continue;
+      }
+      return candidate.id;
+    }
+    return null;
   }
 
   @override
   Future<void> stop() async {
-    await _tts.stop();
+    try {
+      await _tts.stop();
+    } finally {
+      // stop() is reported as a state change as well, but releasing the
+      // utterance here keeps the screen from depending on that event arriving.
+      _finishUtterance();
+    }
   }
 }

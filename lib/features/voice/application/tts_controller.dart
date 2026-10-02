@@ -11,7 +11,7 @@ final speechSynthesisSupportedProvider = Provider<bool>(
 
 /// The engine that reads text aloud.
 final speechSynthesisEngineProvider = Provider<SpeechSynthesisEngine>(
-  (ref) => FlutterTtsEngine(),
+  (ref) => SttsSpeechEngine(),
 );
 
 /// What the voice screen shows about reading text aloud.
@@ -112,6 +112,8 @@ class TtsController extends StateNotifier<TtsState> {
     final settings = _ref.read(voiceSettingsProvider);
     state = state.copyWith(
       isSupported: _ref.read(speechSynthesisSupportedProvider),
+      // Already migrated out of the older rate semantics by the settings
+      // provider; clamping here keeps a stored value in range as well.
       rate: clampSpeechRate(settings.ttsRate),
       selectedVoice: SpeechVoice.fromId(settings.ttsVoiceId),
     );
