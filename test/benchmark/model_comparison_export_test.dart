@@ -77,6 +77,8 @@ void main() {
     List<LocalBenchmarkResult> results, {
     String prompt = 'Explain processes and threads.',
     bool wasStopped = false,
+    bool blind = false,
+    String? preferredModelId,
     DateTime? generatedAt,
   }) {
     return ModelComparisonExport(
@@ -84,6 +86,8 @@ void main() {
       configuration: configuration,
       results: results,
       wasStopped: wasStopped,
+      blind: blind,
+      preferredModelId: preferredModelId,
       generatedAt: generatedAt,
     );
   }
@@ -203,6 +207,49 @@ void main() {
     expect(markdown, contains('Run stopped early'));
     expect(markdown, contains('_No text was produced._'));
     expect(markdownCell('a | b'), r'a \| b');
+  });
+
+  test('a blind run records the preference and says it was blind', () {
+    final export = exportWith(
+      [resultFor(model('a')), resultFor(model('b'))],
+      blind: true,
+      preferredModelId: 'b',
+    );
+
+    final payload =
+        jsonDecode(encodeComparisonExport(export, ComparisonExportFormat.json))
+            as Map<String, dynamic>;
+    expect(payload['blind'], isTrue);
+    expect(payload['preferredModelId'], 'b');
+
+    final markdown = encodeComparisonExport(
+      export,
+      ComparisonExportFormat.markdown,
+    );
+    expect(markdown, contains('- **Preferred answer (blind run):** Model b'));
+  });
+
+  test('a preference for a model outside the run falls back to its id', () {
+    final export = exportWith([
+      resultFor(model('a')),
+      resultFor(model('b')),
+    ], preferredModelId: 'gone');
+
+    expect(export.preferredAnswerLabel, 'gone');
+    expect(
+      encodeComparisonExport(export, ComparisonExportFormat.markdown),
+      contains('- **Preferred answer:** gone'),
+    );
+  });
+
+  test('a run without a preference has no preferred line', () {
+    final export = exportWith([resultFor(model('a'))]);
+
+    expect(export.preferredAnswerLabel, isNull);
+    expect(
+      encodeComparisonExport(export, ComparisonExportFormat.markdown),
+      isNot(contains('**Preferred answer')),
+    );
   });
 
   test('a run without successes has no fastest line', () {

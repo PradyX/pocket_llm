@@ -72,6 +72,8 @@ class ModelComparisonExport {
     required this.configuration,
     required this.results,
     required this.wasStopped,
+    this.blind = false,
+    this.preferredModelId,
     this.generatedAt,
   });
 
@@ -86,6 +88,13 @@ class ModelComparisonExport {
   /// True when the user stopped the run; the last answer may be partial.
   final bool wasStopped;
 
+  /// True when the run was judged blind; recorded so a reader knows the
+  /// preference was made without seeing the model names.
+  final bool blind;
+
+  /// Model whose answer the user preferred, when one was chosen.
+  final String? preferredModelId;
+
   /// When the export was produced; defaults to now.
   final DateTime? generatedAt;
 
@@ -94,6 +103,17 @@ class ModelComparisonExport {
   int get successCount => results.where((result) => result.isSuccess).length;
 
   int get failureCount => results.length - successCount;
+
+  /// Name of the preferred answer's model, when one was chosen and its result
+  /// is part of this run.
+  String? get preferredAnswerLabel {
+    final id = preferredModelId;
+    if (id == null) return null;
+    for (final result in results) {
+      if (result.model.id == id) return result.model.name;
+    }
+    return id;
+  }
 
   /// Highest measured rate among successful answers, or null when none.
   double? get fastestTokensPerSecond {
@@ -115,6 +135,8 @@ Map<String, dynamic> buildComparisonExportJson(ModelComparisonExport export) {
     'schemaVersion': modelComparisonExportSchemaVersion,
     'generatedAt': (export.generatedAt ?? DateTime.now()).toIso8601String(),
     'wasStopped': export.wasStopped,
+    'blind': export.blind,
+    'preferredModelId': export.preferredModelId,
     'prompt': export.prompt,
     'configuration': export.configuration.toJson(),
     'results': [for (final result in export.results) resultRow(result)],
@@ -257,6 +279,14 @@ String encodeComparisonMarkdown(ModelComparisonExport export) {
         ? '- **Run stopped early:** the last answer may be partial'
         : '- **Run:** complete',
   );
+  final preferred = export.preferredAnswerLabel;
+  if (preferred != null) {
+    buffer.writeln(
+      export.blind
+          ? '- **Preferred answer (blind run):** $preferred'
+          : '- **Preferred answer:** $preferred',
+    );
+  }
 
   for (final result in export.results) {
     buffer

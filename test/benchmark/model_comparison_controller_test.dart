@@ -275,6 +275,189 @@ void main() {
     },
   );
 
+  test('blind mode hides names until a model is revealed or picked', () async {
+    final runtime = ScriptedComparisonRuntime(
+      script: [
+        ['first answer'],
+        ['second answer'],
+      ],
+    );
+    final container = containerFor(
+      runtime: runtime,
+      installedModels: [model('a'), model('b')],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(
+      modelComparisonControllerProvider.notifier,
+    );
+
+    controller
+      ..toggleModel('a')
+      ..toggleModel('b')
+      ..setBlind(true);
+    await controller.run();
+
+    var state = container.read(modelComparisonControllerProvider);
+    expect(state.blind, isTrue);
+    expect(state.isBlindFor('a'), isTrue);
+    expect(state.isBlindFor('b'), isTrue);
+    expect(state.blindLabelFor('a'), 'Answer A');
+    expect(state.blindLabelFor('b'), 'Answer B');
+    expect(state.canChoosePreferred, isTrue);
+
+    controller.revealModel('a');
+    state = container.read(modelComparisonControllerProvider);
+    expect(state.isBlindFor('a'), isFalse);
+    expect(state.isBlindFor('b'), isTrue);
+
+    // Picking an answer also names the model it came from.
+    controller.choosePreferred('b');
+    state = container.read(modelComparisonControllerProvider);
+    expect(state.preferredModelId, 'b');
+    expect(state.isBlindFor('b'), isFalse);
+
+    controller.revealAll();
+    state = container.read(modelComparisonControllerProvider);
+    expect(state.revealedModelIds, {'a', 'b'});
+  });
+
+  test('a new run clears the revealed models and the preference', () async {
+    final runtime = ScriptedComparisonRuntime(
+      script: [
+        ['first answer'],
+        ['second answer'],
+        ['again'],
+        ['again'],
+      ],
+    );
+    final container = containerFor(
+      runtime: runtime,
+      installedModels: [model('a'), model('b')],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(
+      modelComparisonControllerProvider.notifier,
+    );
+
+    controller
+      ..toggleModel('a')
+      ..toggleModel('b')
+      ..setBlind(true);
+    await controller.run();
+    controller
+      ..revealAll()
+      ..choosePreferred('a');
+
+    await controller.run();
+
+    final state = container.read(modelComparisonControllerProvider);
+    expect(state.revealedModelIds, isEmpty);
+    expect(state.preferredModelId, isNull);
+    expect(state.isBlindFor('a'), isTrue);
+  });
+
+  test('turning blind off reveals the answers again', () async {
+    final runtime = ScriptedComparisonRuntime(
+      script: [
+        ['first answer'],
+        ['second answer'],
+      ],
+    );
+    final container = containerFor(
+      runtime: runtime,
+      installedModels: [model('a'), model('b')],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(
+      modelComparisonControllerProvider.notifier,
+    );
+
+    controller
+      ..toggleModel('a')
+      ..toggleModel('b')
+      ..setBlind(true);
+    await controller.run();
+    controller.choosePreferred('a');
+
+    controller.setBlind(false);
+
+    final state = container.read(modelComparisonControllerProvider);
+    expect(state.blind, isFalse);
+    expect(state.isBlindFor('a'), isFalse);
+    // A preference survives the switch, so revealing names never loses it.
+    expect(state.preferredModelId, 'a');
+
+    controller.clearPreferred();
+    expect(
+      container.read(modelComparisonControllerProvider).preferredModelId,
+      isNull,
+    );
+  });
+
+  test('preference needs at least two answers', () async {
+    final runtime = ScriptedComparisonRuntime(
+      script: [
+        ['partial'],
+        ['never'],
+      ],
+    )..holdAtEnd = true;
+    final container = containerFor(
+      runtime: runtime,
+      installedModels: [model('a'), model('b')],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(
+      modelComparisonControllerProvider.notifier,
+    );
+
+    controller
+      ..toggleModel('a')
+      ..toggleModel('b');
+    final run = controller.run();
+    await pumpUntil(() => runtime.isWaiting);
+    controller.cancel();
+    await run;
+
+    final state = container.read(modelComparisonControllerProvider);
+    expect(state.results, hasLength(1));
+    expect(state.canChoosePreferred, isFalse);
+
+    controller.choosePreferred('a');
+    expect(
+      container.read(modelComparisonControllerProvider).preferredModelId,
+      isNull,
+    );
+  });
+
+  test('the export records the blind flag and the preferred model', () async {
+    final runtime = ScriptedComparisonRuntime(
+      script: [
+        ['first answer'],
+        ['second answer'],
+      ],
+    );
+    final container = containerFor(
+      runtime: runtime,
+      installedModels: [model('a'), model('b')],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(
+      modelComparisonControllerProvider.notifier,
+    );
+
+    controller
+      ..toggleModel('a')
+      ..toggleModel('b')
+      ..setBlind(true);
+    await controller.run();
+    controller.choosePreferred('b');
+
+    final export = controller.buildExport()!;
+    expect(export.blind, isTrue);
+    expect(export.preferredModelId, 'b');
+    expect(export.preferredAnswerLabel, 'Model b');
+  });
+
   test('refuses an empty prompt', () async {
     final runtime = ScriptedComparisonRuntime();
     final container = containerFor(

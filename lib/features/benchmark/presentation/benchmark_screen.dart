@@ -1223,6 +1223,25 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ),
+                const SizedBox(height: 6),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: state.blind,
+                  onChanged: state.isBusy
+                      ? null
+                      : (value) => controller.setBlind(value),
+                  title: const Text('Blind comparison'),
+                  subtitle: Text(
+                    state.blind
+                        ? 'Answers are labelled A, B, C… without model names '
+                              'until you reveal or pick one.'
+                        : 'Model names stay visible next to each answer.',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 14),
                 Wrap(
                   spacing: 10,
@@ -1328,6 +1347,17 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
               ],
             ),
           ),
+          if (state.preferredModelId != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: _NoticeCard(
+                icon: Icons.favorite_rounded,
+                text: state.isBlindFor(state.preferredModelId!)
+                    ? 'Preferred: ${state.blindLabelFor(state.preferredModelId!)}'
+                    : 'Preferred answer: '
+                          '${_modelNameFor(state, state.preferredModelId!)}',
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
             child: Wrap(
@@ -1347,13 +1377,34 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
                     icon: const Icon(Icons.copy_all_outlined, size: 18),
                     label: Text(format.label),
                   ),
+                if (state.blind && state.hasResults)
+                  TextButton.icon(
+                    onPressed: state.isBusy ? null : controller.revealAll,
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('Reveal all'),
+                  ),
+                if (state.preferredModelId != null)
+                  TextButton.icon(
+                    onPressed: state.isBusy ? null : controller.clearPreferred,
+                    icon: const Icon(Icons.clear_rounded, size: 18),
+                    label: const Text('Clear preferred'),
+                  ),
               ],
             ),
           ),
           ...state.results.map(
             (result) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _ComparisonResultCard(result: result),
+              child: _ComparisonResultCard(
+                result: result,
+                blind: state.isBlindFor(result.model.id),
+                blindLabel: state.blindLabelFor(result.model.id),
+                preferred: state.preferredModelId == result.model.id,
+                canChoosePreferred: state.canChoosePreferred && !state.isBusy,
+                onReveal: () => controller.revealModel(result.model.id),
+                onChoosePreferred: () =>
+                    controller.choosePreferred(result.model.id),
+              ),
             ),
           ),
         ],
@@ -1389,6 +1440,14 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
     if (running == null) return 'Finishing comparison...';
     final position = state.results.length + 1;
     return 'Running $position of ${state.queuedModelCount}: $running...';
+  }
+
+  /// Model name of a result by id, for labels outside the cards.
+  String _modelNameFor(ModelComparisonState state, String modelId) {
+    for (final result in state.results) {
+      if (result.model.id == modelId) return result.model.name;
+    }
+    return modelId;
   }
 
   /// Copies the finished run to the clipboard and says so.
@@ -1446,10 +1505,28 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
 }
 
 /// One model's answer plus the metrics captured for it.
+///
+/// In a blind run the card shows `Answer A` instead of the model name until
+/// the user reveals it or picks it as preferred; every metric stays visible,
+/// because judging speed and size is part of the comparison.
 class _ComparisonResultCard extends StatelessWidget {
-  const _ComparisonResultCard({required this.result});
+  const _ComparisonResultCard({
+    required this.result,
+    required this.blind,
+    required this.blindLabel,
+    required this.preferred,
+    required this.canChoosePreferred,
+    required this.onReveal,
+    required this.onChoosePreferred,
+  });
 
   final LocalBenchmarkResult result;
+  final bool blind;
+  final String blindLabel;
+  final bool preferred;
+  final bool canChoosePreferred;
+  final VoidCallback onReveal;
+  final VoidCallback onChoosePreferred;
 
   @override
   Widget build(BuildContext context) {
@@ -1462,6 +1539,13 @@ class _ComparisonResultCard extends StatelessWidget {
 
     return Card(
       clipBehavior: Clip.antiAlias,
+      // A preferred answer is easy to find again after scrolling.
+      shape: preferred
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: colorScheme.primary, width: 2),
+            )
+          : null,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1470,11 +1554,26 @@ class _ComparisonResultCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    result.model.name,
-                    style: textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          blind ? blindLabel : result.model.name,
+                          style: textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (blind) ...[
+                        const SizedBox(width: 6),
+                        IconButton(
+                          tooltip: 'Reveal this model',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: onReveal,
+                          icon: const Icon(Icons.visibility_outlined, size: 18),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 Container(
@@ -1568,6 +1667,28 @@ class _ComparisonResultCard extends StatelessWidget {
                     ? 'No text was produced before the run ended.'
                     : answer,
                 style: textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: preferred
+                    ? FilledButton.tonalIcon(
+                        onPressed: canChoosePreferred
+                            ? onChoosePreferred
+                            : null,
+                        icon: const Icon(Icons.favorite_rounded, size: 18),
+                        label: const Text('Preferred'),
+                      )
+                    : OutlinedButton.icon(
+                        onPressed: canChoosePreferred
+                            ? onChoosePreferred
+                            : null,
+                        icon: const Icon(
+                          Icons.favorite_border_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('Prefer this answer'),
+                      ),
               ),
             ],
           ],

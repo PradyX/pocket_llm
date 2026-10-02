@@ -48,6 +48,9 @@ class ModelComparisonState {
     this.runningModelName,
     this.queuedModelCount = 0,
     this.wasStopped = false,
+    this.blind = false,
+    this.revealedModelIds = const <String>{},
+    this.preferredModelId,
     this.errorMessage,
   });
 
@@ -72,11 +75,45 @@ class ModelComparisonState {
   /// True when the user stopped the run; finished answers may be partial.
   final bool wasStopped;
 
+  /// True when the run is judged without model names: cards are labelled
+  /// `Answer A`, `Answer B`… and a model is only named when the user reveals
+  /// it or picks its answer.
+  final bool blind;
+
+  /// Models whose names the user revealed in a blind run.
+  final Set<String> revealedModelIds;
+
+  /// Model whose answer the user preferred; null until one is chosen.
+  final String? preferredModelId;
+
   final String? errorMessage;
 
   bool get isBusy => stage == ComparisonStage.running;
 
   bool get hasResults => results.isNotEmpty;
+
+  /// True when at least two answers were produced, which is when judging them
+  /// makes sense.
+  bool get canChoosePreferred => results.length >= 2;
+
+  /// Whether a result's model name is hidden right now.
+  bool isBlindFor(String modelId) =>
+      blind && !revealedModelIds.contains(modelId);
+
+  /// Position of a result in the run, which is also its blind letter.
+  int indexOfModel(String modelId) {
+    for (var index = 0; index < results.length; index++) {
+      if (results[index].model.id == modelId) return index;
+    }
+    return -1;
+  }
+
+  /// `Answer A`, `Answer B`… for a result, by its position in the run.
+  String blindLabelFor(String modelId) {
+    final index = indexOfModel(modelId);
+    if (index < 0) return 'Answer';
+    return 'Answer ${String.fromCharCode(65 + index)}';
+  }
 
   int get selectedCount => selectedModelIds.length;
 
@@ -96,6 +133,10 @@ class ModelComparisonState {
     String? runningModelName,
     int? queuedModelCount,
     bool? wasStopped,
+    bool? blind,
+    Set<String>? revealedModelIds,
+    String? preferredModelId,
+    bool clearPreferredModelId = false,
     String? errorMessage,
     bool clearError = false,
     bool clearRunningModelName = false,
@@ -110,6 +151,11 @@ class ModelComparisonState {
           : runningModelName ?? this.runningModelName,
       queuedModelCount: queuedModelCount ?? this.queuedModelCount,
       wasStopped: wasStopped ?? this.wasStopped,
+      blind: blind ?? this.blind,
+      revealedModelIds: revealedModelIds ?? this.revealedModelIds,
+      preferredModelId: clearPreferredModelId
+          ? null
+          : preferredModelId ?? this.preferredModelId,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
     );
   }
@@ -188,6 +234,8 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
       queuedModelCount: models.length,
       runningModelName: models.first.name,
       wasStopped: false,
+      revealedModelIds: const <String>{},
+      clearPreferredModelId: true,
       clearError: true,
     );
 
@@ -228,13 +276,58 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
     _ref.read(modelComparisonServiceProvider).cancel();
   }
 
-  /// Clears results and errors, keeping the chosen models and the prompt.
+  /// Clears results and errors, keeping the chosen models, the prompt and the
+  /// blind switch.
   void clear() {
     if (state.isBusy) return;
     state = ModelComparisonState(
       prompt: state.prompt,
       selectedModelIds: state.selectedModelIds,
+      blind: state.blind,
     );
+  }
+
+  /// Turns blind judging on or off.
+  ///
+  /// Turning it on hides every name again until the user reveals or picks one;
+  /// turning it off reveals them, because the answers are already on screen.
+  /// An existing preference is kept either way — the user can clear it.
+  void setBlind(bool blind) {
+    if (state.isBusy || state.blind == blind) return;
+    state = state.copyWith(blind: blind, revealedModelIds: const <String>{});
+  }
+
+  /// Reveals one model in a blind run, or every one of them.
+  void revealModel(String modelId) {
+    if (state.isBusy || state.revealedModelIds.contains(modelId)) return;
+    state = state.copyWith(
+      revealedModelIds: {...state.revealedModelIds, modelId},
+    );
+  }
+
+  void revealAll() {
+    if (state.isBusy) return;
+    state = state.copyWith(
+      revealedModelIds: {for (final result in state.results) result.model.id},
+    );
+  }
+
+  /// Records which answer the user preferred.
+  ///
+  /// Choosing in a blind run also reveals that model, because the preference
+  /// names it; the other answers stay blind, so a second pick stays honest.
+  void choosePreferred(String modelId) {
+    if (state.isBusy || !state.canChoosePreferred) return;
+    state = state.copyWith(
+      preferredModelId: modelId,
+      revealedModelIds: {...state.revealedModelIds, modelId},
+      clearError: true,
+    );
+  }
+
+  void clearPreferred() {
+    if (state.isBusy || state.preferredModelId == null) return;
+    state = state.copyWith(clearPreferredModelId: true);
   }
 
   /// The current results as a portable run, or null when there is nothing to
@@ -249,6 +342,8 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
     return ModelComparisonExport(
       prompt: state.prompt.trim(),
       wasStopped: state.wasStopped,
+      blind: state.blind,
+      preferredModelId: state.preferredModelId,
       configuration: ComparisonExportConfiguration(
         systemPrompt: ModelComparisonService.systemPrompt,
         contextTokens: ModelCompatibilityService.defaultContextTokens,
