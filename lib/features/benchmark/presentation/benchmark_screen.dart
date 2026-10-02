@@ -8,6 +8,7 @@ import 'package:pocket_llm/features/benchmark/application/benchmark_providers.da
 import 'package:pocket_llm/features/benchmark/application/benchmark_service.dart';
 import 'package:pocket_llm/features/benchmark/application/model_comparison_controller.dart';
 import 'package:pocket_llm/features/benchmark/application/model_comparison_service.dart';
+import 'package:pocket_llm/features/benchmark/domain/comparison_set.dart';
 import 'package:pocket_llm/features/benchmark/domain/llmfit_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/model_comparison_export.dart';
@@ -1243,6 +1244,98 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
                   ),
                 ),
                 const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Saved sets',
+                        style: textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: state.isBusy ? null : _saveCurrentAsSet,
+                      icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                      label: const Text('Save current'),
+                    ),
+                  ],
+                ),
+                if (!state.savedSetsReady)
+                  Text(
+                    'Loading saved sets…',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  )
+                else if (state.savedSets.isEmpty)
+                  Text(
+                    'Save the models and prompt you use often, then load them '
+                    'again in one tap. Nothing leaves the device.',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  )
+                else ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final set in state.savedSets)
+                        InputChip(
+                          label: Text(set.name),
+                          avatar: const Icon(
+                            Icons.bookmark_outline_rounded,
+                            size: 16,
+                          ),
+                          tooltip:
+                              '${set.modelIds.length} models · '
+                              '${set.prompts.length == 1 ? '1 prompt' : '${set.prompts.length} prompts'}'
+                              '${set.blind ? ' · blind' : ''}',
+                          onPressed: state.isBusy
+                              ? null
+                              : () => controller.applySet(set.id),
+                          onDeleted: state.isBusy || state.savedSetsReadOnly
+                              ? null
+                              : () => _deleteSet(set.id, set.name),
+                        ),
+                    ],
+                  ),
+                  if (state.savedSetsReadOnly)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Saved sets were written by a newer version of Pocket '
+                        'LLM, so they can be loaded but not changed here.',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                ],
+                if (state.notice != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            state.notice!,
+                            style: textTheme.bodySmall?.copyWith(
+                              color: colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: controller.dismissNotice,
+                          iconSize: 16,
+                          tooltip: 'Dismiss',
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 14),
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
@@ -1454,6 +1547,74 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
   ///
   /// A stopped run exports too, but the dialog warns first: an exported answer
   /// may be partial, and the file it ends up in will not say so by itself.
+  /// Asks for a name and stores the current setup as a saved set.
+  Future<void> _saveCurrentAsSet() async {
+    final name = await _askForSetName();
+    if (name == null || !mounted) return;
+    await ref
+        .read(modelComparisonControllerProvider.notifier)
+        .saveCurrentAsSet(name);
+  }
+
+  /// Confirms, then removes a saved set.
+  Future<void> _deleteSet(String id, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete this saved set?'),
+        content: Text(
+          '“$name” will be forgotten. Models, the prompt in the box and '
+          'finished results are not affected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await ref.read(modelComparisonControllerProvider.notifier).deleteSet(id);
+  }
+
+  /// Name prompt for a saved set; null when the dialog is dismissed.
+  Future<String?> _askForSetName() {
+    final nameController = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Save comparison set'),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          maxLength: ComparisonSet.maximumNameLength,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            hintText: 'e.g. Small models, short answers',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(nameController.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _copyExport(ComparisonExportFormat format) async {
     final controller = ref.read(modelComparisonControllerProvider.notifier);
     final export = controller.buildExport();

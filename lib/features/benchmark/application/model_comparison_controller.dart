@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:pocket_llm/features/benchmark/application/model_comparison_service.dart';
+import 'package:pocket_llm/features/benchmark/data/comparison_set_store.dart';
+import 'package:pocket_llm/features/benchmark/domain/comparison_set.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/model_comparison_export.dart';
 import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
@@ -22,6 +26,11 @@ final installedComparisonModelsProvider = Provider<List<LlmModel>>((ref) {
       if (model.isDownloaded) model,
   ];
 });
+
+/// Saved comparison sets file, opened once per session.
+final comparisonSetStoreProvider = FutureProvider<ComparisonSetStore>(
+  (ref) => ComparisonSetStore.open(),
+);
 
 /// Where one comparison run is.
 enum ComparisonStage {
@@ -51,6 +60,10 @@ class ModelComparisonState {
     this.blind = false,
     this.revealedModelIds = const <String>{},
     this.preferredModelId,
+    this.savedSets = const <ComparisonSet>[],
+    this.savedSetsReady = false,
+    this.savedSetsReadOnly = false,
+    this.notice,
     this.errorMessage,
   });
 
@@ -85,6 +98,19 @@ class ModelComparisonState {
 
   /// Model whose answer the user preferred; null until one is chosen.
   final String? preferredModelId;
+
+  /// Saved comparison sets, oldest first.
+  final List<ComparisonSet> savedSets;
+
+  /// False until the stored sets have been read, so the UI can stay quiet
+  /// instead of showing "no saved sets" before the file was opened.
+  final bool savedSetsReady;
+
+  /// True when the set file belongs to a newer build and is left untouched.
+  final bool savedSetsReadOnly;
+
+  /// Non-error message about a set action (saved, loaded), or null.
+  final String? notice;
 
   final String? errorMessage;
 
@@ -137,6 +163,11 @@ class ModelComparisonState {
     Set<String>? revealedModelIds,
     String? preferredModelId,
     bool clearPreferredModelId = false,
+    List<ComparisonSet>? savedSets,
+    bool? savedSetsReady,
+    bool? savedSetsReadOnly,
+    String? notice,
+    bool clearNotice = false,
     String? errorMessage,
     bool clearError = false,
     bool clearRunningModelName = false,
@@ -156,6 +187,10 @@ class ModelComparisonState {
       preferredModelId: clearPreferredModelId
           ? null
           : preferredModelId ?? this.preferredModelId,
+      savedSets: savedSets ?? this.savedSets,
+      savedSetsReady: savedSetsReady ?? this.savedSetsReady,
+      savedSetsReadOnly: savedSetsReadOnly ?? this.savedSetsReadOnly,
+      notice: clearNotice ? null : notice ?? this.notice,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
     );
   }
@@ -172,10 +207,44 @@ final modelComparisonControllerProvider =
 /// them; nothing here writes to a conversation. Answers stay in this section
 /// until the user copies them or exports a run.
 class ModelComparisonController extends StateNotifier<ModelComparisonState> {
-  ModelComparisonController(this._ref) : super(const ModelComparisonState());
+  ModelComparisonController(this._ref) : super(const ModelComparisonState()) {
+    unawaited(_loadSets());
+  }
 
   final Ref _ref;
   bool _stopped = false;
+
+  /// Reads the stored sets once per session.
+  ///
+  /// A file that cannot be opened leaves the list empty and says so instead of
+  /// silently looking like "no saved sets": comparing and exporting still work
+  /// without storage, and nothing is written over the file.
+  Future<void> _loadSets() async {
+    try {
+      final store = await _ref.read(comparisonSetStoreProvider.future);
+      if (!mounted) return;
+      state = state.copyWith(
+        savedSets: store.load(),
+        savedSetsReadOnly: store.isReadOnly,
+        savedSetsReady: true,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      state = state.copyWith(
+        savedSetsReady: true,
+        errorMessage:
+            'Saved comparison sets could not be read on this device. '
+            'Comparing models still works.',
+      );
+    }
+  }
+
+  ComparisonSet? _setById(String id) {
+    for (final set in state.savedSets) {
+      if (set.id == id) return set;
+    }
+    return null;
+  }
 
   void setPrompt(String prompt) {
     if (state.prompt == prompt) return;
@@ -276,14 +345,20 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
     _ref.read(modelComparisonServiceProvider).cancel();
   }
 
-  /// Clears results and errors, keeping the chosen models, the prompt and the
-  /// blind switch.
+  /// Clears results and errors, keeping the chosen models, the prompt, the
+  /// blind switch and the saved sets.
+  ///
+  /// Saved sets are stored setups rather than run state, so clearing a run
+  /// never drops them.
   void clear() {
     if (state.isBusy) return;
     state = ModelComparisonState(
       prompt: state.prompt,
       selectedModelIds: state.selectedModelIds,
       blind: state.blind,
+      savedSets: state.savedSets,
+      savedSetsReady: state.savedSetsReady,
+      savedSetsReadOnly: state.savedSetsReadOnly,
     );
   }
 
@@ -328,6 +403,165 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
   void clearPreferred() {
     if (state.isBusy || state.preferredModelId == null) return;
     state = state.copyWith(clearPreferredModelId: true);
+  }
+
+  /// Saves the current models, prompt and blind switch as a named set.
+  ///
+  /// Saving under a name that already exists replaces that set's contents
+  /// instead of adding a duplicate, so the list stays a list of setups rather
+  /// than of attempts. Returns true when the set was stored.
+  Future<bool> saveCurrentAsSet(String name) async {
+    if (state.isBusy) return false;
+
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      state = state.copyWith(errorMessage: 'Give the saved set a name.');
+      return false;
+    }
+    if (state.selectedModelIds.length < ModelComparisonService.minimumModels) {
+      state = state.copyWith(
+        errorMessage:
+            'Choose at least ${ModelComparisonService.minimumModels} models '
+            'before saving a set.',
+      );
+      return false;
+    }
+    if (state.prompt.trim().isEmpty) {
+      state = state.copyWith(
+        errorMessage: 'Enter a prompt before saving a set.',
+      );
+      return false;
+    }
+
+    final existingIndex = state.savedSets.indexWhere(
+      (set) => set.name.toLowerCase() == trimmed.toLowerCase(),
+    );
+    final existing = existingIndex >= 0 ? state.savedSets[existingIndex] : null;
+    if (existing == null &&
+        state.savedSets.length >= ComparisonSetStore.maximumSets) {
+      state = state.copyWith(
+        errorMessage:
+            'Keep at most ${ComparisonSetStore.maximumSets} saved sets. '
+            'Delete one first.',
+      );
+      return false;
+    }
+
+    final saved = ComparisonSet(
+      id: existing?.id ?? 'set-${DateTime.now().millisecondsSinceEpoch}',
+      name: trimmed,
+      modelIds: state.selectedModelIds,
+      prompts: [state.prompt.trim()],
+      blind: state.blind,
+      createdAt: existing?.createdAt ?? DateTime.now(),
+    ).normalized();
+
+    final sets = [...state.savedSets];
+    if (existingIndex >= 0) {
+      sets[existingIndex] = saved;
+    } else {
+      sets.add(saved);
+    }
+
+    if (!await _persistSets(sets)) return false;
+    state = state.copyWith(
+      savedSets: sets,
+      notice: existing == null
+          ? 'Saved “${saved.name}”.'
+          : 'Updated “${saved.name}”.',
+      clearError: true,
+    );
+    return true;
+  }
+
+  /// Loads a saved set into the Compare tab.
+  ///
+  /// Models in the set that are no longer installed are dropped and counted in
+  /// the notice, so loading never selects a model the device cannot run.
+  void applySet(String id) {
+    if (state.isBusy) return;
+    final set = _setById(id);
+    if (set == null) return;
+
+    final installed = {
+      for (final model in _ref.read(installedComparisonModelsProvider))
+        model.id,
+    };
+    final available = [
+      for (final modelId in set.modelIds)
+        if (installed.contains(modelId)) modelId,
+    ];
+    final missing = set.modelIds.length - available.length;
+
+    state = state.copyWith(
+      stage: ComparisonStage.idle,
+      prompt: set.firstPrompt,
+      selectedModelIds: available,
+      results: const [],
+      queuedModelCount: 0,
+      wasStopped: false,
+      blind: set.blind,
+      revealedModelIds: const <String>{},
+      clearPreferredModelId: true,
+      clearRunningModelName: true,
+      notice: missing == 0
+          ? 'Loaded “${set.name}”.'
+          : 'Loaded “${set.name}”. $missing of ${set.modelIds.length} '
+                'models in it are no longer installed.',
+      clearError: true,
+    );
+  }
+
+  /// Removes a saved set. The comparison itself is untouched.
+  Future<bool> deleteSet(String id) async {
+    if (state.isBusy) return false;
+    final set = _setById(id);
+    if (set == null) return false;
+
+    final sets = [
+      for (final existing in state.savedSets)
+        if (existing.id != id) existing,
+    ];
+    if (!await _persistSets(sets)) return false;
+    state = state.copyWith(
+      savedSets: sets,
+      notice: 'Deleted “${set.name}”.',
+      clearError: true,
+    );
+    return true;
+  }
+
+  /// Dismisses the last set notice.
+  void dismissNotice() {
+    if (state.notice == null) return;
+    state = state.copyWith(clearNotice: true);
+  }
+
+  /// Writes the full set list, reporting why it could not be stored.
+  Future<bool> _persistSets(List<ComparisonSet> sets) async {
+    try {
+      final store = await _ref.read(comparisonSetStoreProvider.future);
+      if (store.isReadOnly) {
+        state = state.copyWith(
+          errorMessage:
+              'Saved sets were written by a newer version of Pocket LLM, so '
+              'this build will not change them.',
+        );
+        return false;
+      }
+      if (!store.save(sets)) {
+        state = state.copyWith(
+          errorMessage: 'Saved sets could not be written on this device.',
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      state = state.copyWith(
+        errorMessage: 'Saved sets could not be written: ${_messageOf(error)}',
+      );
+      return false;
+    }
   }
 
   /// The current results as a portable run, or null when there is nothing to
