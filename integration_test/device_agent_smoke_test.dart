@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:pocket_llm/features/agents/application/agent_controller.dart';
-import 'package:pocket_llm/features/agents/application/agent_loop_service.dart';
 import 'package:pocket_llm/features/agents/domain/agent_run.dart';
 import 'package:pocket_llm/features/tools/application/tools_providers.dart';
 
