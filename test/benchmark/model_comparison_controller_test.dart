@@ -1,12 +1,17 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_llm/features/benchmark/application/model_comparison_controller.dart';
 import 'package:pocket_llm/features/benchmark/application/model_comparison_service.dart';
+import 'package:pocket_llm/features/benchmark/domain/model_comparison_export.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 
 import 'scripted_comparison_runtime.dart';
 
 void main() {
+  // The export path writes to the platform clipboard channel.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   LlmModel model(String id) => LlmModel(
     id: id,
     name: 'Model $id',
@@ -205,6 +210,70 @@ void main() {
     expect(state.selectedModelIds, ['a', 'b']);
     expect(state.prompt, 'Keep me');
   });
+
+  test(
+    'builds an export from the finished run and copies each format',
+    () async {
+      final runtime = ScriptedComparisonRuntime(
+        script: [
+          ['first answer'],
+          ['second answer'],
+        ],
+      );
+      final container = containerFor(
+        runtime: runtime,
+        installedModels: [model('a'), model('b')],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(
+        modelComparisonControllerProvider.notifier,
+      );
+
+      // Nothing to export before a run.
+      expect(controller.buildExport(), isNull);
+      expect(
+        await controller.copyExportToClipboard(ComparisonExportFormat.json),
+        isFalse,
+      );
+
+      controller
+        ..toggleModel('a')
+        ..toggleModel('b')
+        ..setPrompt('Say hi');
+      await controller.run();
+
+      final export = controller.buildExport()!;
+      expect(export.prompt, 'Say hi');
+      expect(export.results, hasLength(2));
+      expect(export.wasStopped, isFalse);
+      expect(export.configuration.contextTokens, greaterThan(0));
+      expect(
+        export.configuration.temperature,
+        ModelComparisonService.temperature,
+      );
+
+      // The clipboard is a platform channel; capture what would be written.
+      String? copied;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            if (call.method == 'Clipboard.setData') {
+              copied = (call.arguments as Map)['text'] as String?;
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+
+      expect(
+        await controller.copyExportToClipboard(ComparisonExportFormat.csv),
+        isTrue,
+      );
+      expect(copied, contains('first answer'));
+      expect(copied, startsWith(comparisonCsvColumns.join(',')));
+    },
+  );
 
   test('refuses an empty prompt', () async {
     final runtime = ScriptedComparisonRuntime();

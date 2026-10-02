@@ -1,7 +1,10 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:pocket_llm/features/benchmark/application/model_comparison_service.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
+import 'package:pocket_llm/features/benchmark/domain/model_comparison_export.dart';
+import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 
@@ -232,6 +235,48 @@ class ModelComparisonController extends StateNotifier<ModelComparisonState> {
       prompt: state.prompt,
       selectedModelIds: state.selectedModelIds,
     );
+  }
+
+  /// The current results as a portable run, or null when there is nothing to
+  /// export.
+  ///
+  /// The settings recorded are the ones the run actually used, not whatever
+  /// the controls say now: a comparison is only meaningful with its prompt,
+  /// window, output budget and sampler attached.
+  ModelComparisonExport? buildExport() {
+    if (!state.hasResults) return null;
+
+    return ModelComparisonExport(
+      prompt: state.prompt.trim(),
+      wasStopped: state.wasStopped,
+      configuration: ComparisonExportConfiguration(
+        systemPrompt: ModelComparisonService.systemPrompt,
+        contextTokens: ModelCompatibilityService.defaultContextTokens,
+        maxTokens: ModelComparisonService.outputTokensFor(
+          requested: ModelComparisonService.defaultMaxTokens,
+          contextTokens: ModelCompatibilityService.defaultContextTokens,
+        ),
+        temperature: ModelComparisonService.temperature,
+        topP: ModelComparisonService.topP,
+        topK: ModelComparisonService.topK,
+      ),
+      results: state.results,
+    );
+  }
+
+  /// Copies the current results to the clipboard in [format].
+  ///
+  /// Nothing is written to a file and nothing leaves the device: the same
+  /// clipboard flow the conversation and persona exports use. Returns false
+  /// when there is nothing to export.
+  Future<bool> copyExportToClipboard(ComparisonExportFormat format) async {
+    final export = buildExport();
+    if (export == null) return false;
+
+    await Clipboard.setData(
+      ClipboardData(text: encodeComparisonExport(export, format)),
+    );
+    return true;
   }
 
   /// `Exception: something` reads badly in the UI, so the prefix is dropped.

@@ -10,6 +10,7 @@ import 'package:pocket_llm/features/benchmark/application/model_comparison_contr
 import 'package:pocket_llm/features/benchmark/application/model_comparison_service.dart';
 import 'package:pocket_llm/features/benchmark/domain/llmfit_benchmark_result.dart';
 import 'package:pocket_llm/features/benchmark/domain/local_benchmark_result.dart';
+import 'package:pocket_llm/features/benchmark/domain/model_comparison_export.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
@@ -1327,6 +1328,28 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  'Export',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                for (final format in ComparisonExportFormat.values)
+                  OutlinedButton.icon(
+                    onPressed: state.isBusy ? null : () => _copyExport(format),
+                    icon: const Icon(Icons.copy_all_outlined, size: 18),
+                    label: Text(format.label),
+                  ),
+              ],
+            ),
+          ),
           ...state.results.map(
             (result) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -1366,6 +1389,59 @@ class _ModelComparisonTabState extends ConsumerState<_ModelComparisonTab> {
     if (running == null) return 'Finishing comparison...';
     final position = state.results.length + 1;
     return 'Running $position of ${state.queuedModelCount}: $running...';
+  }
+
+  /// Copies the finished run to the clipboard and says so.
+  ///
+  /// A stopped run exports too, but the dialog warns first: an exported answer
+  /// may be partial, and the file it ends up in will not say so by itself.
+  Future<void> _copyExport(ComparisonExportFormat format) async {
+    final controller = ref.read(modelComparisonControllerProvider.notifier);
+    final export = controller.buildExport();
+    if (export == null) return;
+
+    if (export.wasStopped) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Export a stopped run?'),
+          content: const Text(
+            'The last answer may be partial. The export says the run was '
+            'stopped, so the numbers are still labelled.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Export anyway'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
+
+    try {
+      await controller.copyExportToClipboard(format);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Comparison copied as ${format.label}.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: $error'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 }
 
