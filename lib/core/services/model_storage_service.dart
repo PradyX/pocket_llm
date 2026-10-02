@@ -234,27 +234,36 @@ class ModelStorageService {
 
   /// Checks that a model file exists at [path], is not a partial download
   /// (no chunked-download metadata) and carries GGUF magic bytes.
+  ///
+  /// An unreadable file is reported as not downloaded rather than throwing.
+  /// A referenced model can live in a protected location (macOS documents, a
+  /// sandboxed folder, a removed drive), and a permission problem must not
+  /// abort the catalog load that asks this question for every model.
   Future<bool> isModelPathDownloaded(String? path) async {
     if (path == null || path.trim().isEmpty) return false;
-    final file = File(path);
-    if (!await file.exists()) return false;
-
-    // Presence of metadata means a chunked download is incomplete/resumable.
-    final metadataFile = File('$path.json');
-    if (await metadataFile.exists()) return false;
-
-    // Validate GGUF magic bytes to avoid marking HTML/error files as models.
-    if (await file.length() < 4) return false;
-    final raf = await file.open(mode: FileMode.read);
     try {
-      final magic = await raf.read(4);
-      if (magic.length != 4) return false;
-      return magic[0] == 0x47 &&
-          magic[1] == 0x47 &&
-          magic[2] == 0x55 &&
-          magic[3] == 0x46;
-    } finally {
-      await raf.close();
+      final file = File(path);
+      if (!await file.exists()) return false;
+
+      // Presence of metadata means a chunked download is incomplete/resumable.
+      final metadataFile = File('$path.json');
+      if (await metadataFile.exists()) return false;
+
+      // Validate GGUF magic bytes to avoid marking HTML/error files as models.
+      if (await file.length() < 4) return false;
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        final magic = await raf.read(4);
+        if (magic.length != 4) return false;
+        return magic[0] == 0x47 &&
+            magic[1] == 0x47 &&
+            magic[2] == 0x55 &&
+            magic[3] == 0x46;
+      } finally {
+        await raf.close();
+      }
+    } on FileSystemException {
+      return false;
     }
   }
 

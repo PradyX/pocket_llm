@@ -1,8 +1,65 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 
 void main() {
   final service = ModelStorageService();
+
+  group('isModelPathDownloaded', () {
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('pocket-llm-test');
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) await tempDir.delete(recursive: true);
+    });
+
+    test('accepts a file with GGUF magic bytes', () async {
+      final file = File('${tempDir.path}/model.gguf');
+      await file.writeAsBytes([0x47, 0x47, 0x55, 0x46, 0, 0, 0, 0]);
+
+      expect(await service.isModelPathDownloaded(file.path), isTrue);
+    });
+
+    test(
+      'rejects a partial download, a foreign file and a missing path',
+      () async {
+        final partial = File('${tempDir.path}/partial.gguf');
+        await partial.writeAsBytes([0x47, 0x47, 0x55, 0x46, 0, 0, 0, 0]);
+        await File('${partial.path}.json').writeAsString('{"received": 4}');
+        expect(await service.isModelPathDownloaded(partial.path), isFalse);
+
+        final html = File('${tempDir.path}/error.gguf');
+        await html.writeAsString('<html>not a model</html>');
+        expect(await service.isModelPathDownloaded(html.path), isFalse);
+
+        expect(await service.isModelPathDownloaded(null), isFalse);
+        expect(await service.isModelPathDownloaded(''), isFalse);
+        expect(
+          await service.isModelPathDownloaded('${tempDir.path}/gone.gguf'),
+          isFalse,
+        );
+      },
+    );
+
+    test(
+      'reports an unreadable file as not downloaded instead of throwing',
+      () async {
+        // A referenced model can sit in a protected location (macOS documents,
+        // a sandboxed folder). The catalog asks this for every model, so a
+        // permission error must not abort the load.
+        final file = File('${tempDir.path}/locked.gguf');
+        await file.writeAsBytes([0x47, 0x47, 0x55, 0x46, 0, 0, 0, 0]);
+        await Process.run('chmod', ['000', file.path]);
+        addTearDown(() => Process.run('chmod', ['644', file.path]));
+
+        expect(await service.isModelPathDownloaded(file.path), isFalse);
+      },
+    );
+  });
 
   group('attachmentFileName', () {
     test('uses the message id and a sanitized file name', () {
