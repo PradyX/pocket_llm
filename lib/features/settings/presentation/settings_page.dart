@@ -1,10 +1,12 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/core/settings/attachment_settings_provider.dart';
-import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
 import 'package:pocket_llm/core/services/attachment_image_service.dart';
 import 'package:pocket_llm/core/theme/theme_provider.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
+import 'package:pocket_llm/features/personas/application/personas_controller.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -12,9 +14,12 @@ class SettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeNotifierProvider);
-    final inferenceSettings = ref.watch(inferenceSettingsProvider);
     final attachmentSettings = ref.watch(attachmentSettingsProvider);
-    final sampling = inferenceSettings.resolvedSampling;
+    final defaultPersonaName = ref.watch(personasProvider).defaultPersona.name;
+    final activeProfileName = ref
+        .watch(inferenceProfilesProvider)
+        .activeProfile
+        .name;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -69,7 +74,7 @@ class SettingsPage extends ConsumerWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            'LLM Inference',
+            'Chat',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
               color: Theme.of(context).colorScheme.primary,
@@ -78,167 +83,28 @@ class SettingsPage extends ConsumerWidget {
           const SizedBox(height: 8),
           Card(
             clipBehavior: Clip.antiAlias,
-            child: SwitchListTile(
-              title: const Text('Adaptive Mode'),
-              subtitle: Text(
-                inferenceSettings.adaptiveMode
-                    ? 'ON: adjusts output length for smoother performance on this device.'
-                    : 'OFF: uses fixed default generation settings.',
-              ),
-              value: inferenceSettings.adaptiveMode,
-              onChanged: (value) {
-                ref
-                    .read(inferenceSettingsProvider.notifier)
-                    .setAdaptiveMode(value);
-              },
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text('Sampling Preset'),
-                  const SizedBox(height: 12),
-                  SegmentedButton<SamplingPreset>(
-                    segments: const [
-                      ButtonSegment(
-                        value: SamplingPreset.precise,
-                        label: Text('Precise', style: TextStyle(fontSize: 13)),
-                      ),
-                      ButtonSegment(
-                        value: SamplingPreset.balanced,
-                        label: Text(
-                          'Balanced',
-                          style: TextStyle(fontSize: 11.5),
-                        ),
-                      ),
-                      ButtonSegment(
-                        value: SamplingPreset.creative,
-                        label: Text('Creative', style: TextStyle(fontSize: 13)),
-                      ),
-                    ],
-                    selected: {inferenceSettings.samplingPreset},
-                    onSelectionChanged: (selection) {
-                      ref
-                          .read(inferenceSettingsProvider.notifier)
-                          .setSamplingPreset(selection.first);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Resolved: temp ${sampling.temperature.toStringAsFixed(2)} · top-p ${sampling.topP.toStringAsFixed(2)}',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            clipBehavior: Clip.antiAlias,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Max Output Tokens'),
-                      Text(
-                        '${inferenceSettings.maxTokens.round()}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Slider(
-                    value: inferenceSettings.maxTokens.toDouble(),
-                    min: 64,
-                    max: (Platform.isAndroid || Platform.isIOS) ? 2048 : 4096,
-                    divisions: (Platform.isAndroid || Platform.isIOS) ? 31 : 63,
-                    onChanged: (value) {
-                      ref
-                          .read(inferenceSettingsProvider.notifier)
-                          .setMaxTokens(value.round());
-                    },
-                  ),
-                  Text(
-                    'Higher values allow longer responses but may be slower or use more memory.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            clipBehavior: Clip.antiAlias,
             child: Column(
               children: [
-                SwitchListTile(
-                  title: const Text('Advanced Sampling Override'),
-                  subtitle: const Text(
-                    'Use custom temperature and top-p instead of preset values.',
-                  ),
-                  value: inferenceSettings.advancedSamplingOverride,
-                  onChanged: (enabled) {
-                    ref
-                        .read(inferenceSettingsProvider.notifier)
-                        .setAdvancedSamplingOverride(enabled);
-                  },
+                ListTile(
+                  leading: const Icon(Icons.face_retouching_natural),
+                  title: const Text('Personas'),
+                  subtitle: Text('Default: $defaultPersonaName'),
+                  onTap: () => context.push(AppRoutes.personas),
                 ),
-                if (inferenceSettings.advancedSamplingOverride)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'Temperature (${inferenceSettings.customTemperature.toStringAsFixed(2)})',
-                        ),
-                        Slider(
-                          value: inferenceSettings.customTemperature,
-                          min: 0.0,
-                          max: 2.0,
-                          divisions: 40,
-                          onChanged: (value) {
-                            ref
-                                .read(inferenceSettingsProvider.notifier)
-                                .setCustomTemperature(value);
-                          },
-                        ),
-                        Text(
-                          'Top-p (${inferenceSettings.customTopP.toStringAsFixed(2)})',
-                        ),
-                        Slider(
-                          value: inferenceSettings.customTopP,
-                          min: 0.1,
-                          max: 1.0,
-                          divisions: 45,
-                          onChanged: (value) {
-                            ref
-                                .read(inferenceSettingsProvider.notifier)
-                                .setCustomTopP(value);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.tune_rounded),
+                  title: const Text('Inference Profiles'),
+                  subtitle: Text('Active: $activeProfileName'),
+                  onTap: () => context.push(AppRoutes.inferenceProfiles),
+                ),
               ],
             ),
           ),
+          // The prebuilt global "LLM Inference" controls (adaptive mode, sampling
+          // preset, max output tokens, advanced sampling override) are hidden for
+          // now while Inference Profiles own per-chat sampling. Their providers are
+          // untouched and still drive the chat runtime.
           const SizedBox(height: 24),
           Text(
             'Images',
