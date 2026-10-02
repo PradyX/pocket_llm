@@ -1295,6 +1295,15 @@ class _HomePageState extends ConsumerState<HomePage> {
             },
           ),
           ListTile(
+            leading: const Icon(Icons.auto_awesome_outlined),
+            title: const Text('Agent'),
+            subtitle: const Text('Work towards a goal with the local tools'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push(AppRoutes.agent);
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.info_outline_rounded),
             title: const Text('About'),
             onTap: () {
