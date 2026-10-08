@@ -4,10 +4,18 @@ import 'dart:math' as math;
 
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:path/path.dart' as p;
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
 import 'package:pocket_llm/core/utils/logger.dart';
 
-class LlmService {
+/// The bundled llama.cpp engine, seen by the rest of the app through
+/// [InferenceEngine].
+///
+/// This is the only place that owns `llama_cpp_dart` types: native parameters,
+/// the engine, its session and its media handles all stop here. Features depend
+/// on [InferenceEngine] instead, which is what keeps a runtime swap from
+/// reaching into chat, voice, documents or benchmarks.
+class LlmService implements InferenceEngine {
   static const _defaultTemperature = 0.8;
   static const _defaultTopP = 0.95;
   static const _defaultTopK = 40;
@@ -34,31 +42,73 @@ class LlmService {
   String? _configuredMmprojPath;
   bool _libraryConfigured = false;
 
+  /// Whether the bundled multimodal runtime was found on this build.
+  ///
+  /// Sticky: it describes the build, not the model currently loaded, so it
+  /// survives an unload.
+  bool? _multimodalRuntimeAvailable;
+
   LlmService({PlatformRuntimePathsService? platformRuntimePathsService})
     : _platformRuntimePathsService = platformRuntimePathsService;
 
+  @override
   bool get isLoaded => _llama != null;
+
+  @override
   bool get isGenerating => _isGenerating;
+
+  @override
   bool get isStopRequested => _stopRequested;
+
+  @override
   String? get loadedModelPath => _loadedModelPath;
+
+  /// What this runtime can do on this device.
+  ///
+  /// Image and audio input are reported from whether the bundled multimodal
+  /// runtime was found, which is resolved when the runtime is first
+  /// configured: they read false until the first load on a build that does
+  /// bundle it. Use them to explain an unavailable feature, not to hide one.
+  @override
+  InferenceCapabilities get capabilities {
+    final multimodal = _multimodalRuntimeAvailable ?? false;
+    return InferenceCapabilities(
+      streaming: true,
+      cancellation: true,
+      gpuOffload: supportsGpuOffload,
+      vision: multimodal,
+      audio: multimodal,
+      // The bundled isolate API exposes no embedding entry point.
+      embeddings: false,
+    );
+  }
 
   /// Effective runtime configuration of the loaded model.
   ///
   /// These reflect what the engine was actually started with (including the
   /// defaults this service applies), so diagnostics and benchmark records can
   /// describe a run instead of guessing.
-  int get configuredContextSize => _configuredNCtx;
-  int get configuredBatchSize => _configuredNBatch;
-  int get configuredThreads => _configuredThreads;
-  int get configuredThreadsBatch => _configuredThreadsBatch;
-  int get configuredGpuLayers => _configuredGpuLayers;
-  bool get configuredOffloadKqv => _configuredOffloadKqv;
+  @override
+  InferenceRuntimeInfo get runtimeInfo {
+    return InferenceRuntimeInfo(
+      isLoaded: isLoaded,
+      modelPath: _loadedModelPath,
+      projectorPath: _configuredMmprojPath,
+      backend: _runtimeBackend,
+      contextTokens: _configuredNCtx,
+      batchTokens: _configuredNBatch,
+      threads: _configuredThreads,
+      threadsBatch: _configuredThreadsBatch,
+      gpuLayers: _configuredGpuLayers,
+      offloadKqv: _configuredOffloadKqv,
+    );
+  }
 
   /// Best-effort label for the compute backend of the loaded model.
   ///
   /// Metal is the only GPU path the bundled runtime uses; everything else is
   /// reported as CPU when no layers are offloaded.
-  String get runtimeBackend {
+  String get _runtimeBackend {
     if (!isLoaded) return 'unknown';
     if (Platform.isMacOS || Platform.isIOS) return 'Metal';
     return _configuredGpuLayers > 0 ? 'GPU offload' : 'CPU';
@@ -85,24 +135,12 @@ class LlmService {
   /// True when this platform can offload layers to the GPU at all.
   static bool get supportsGpuOffload => !Platform.isAndroid;
 
-  Future<void> loadModel(
-    String modelPath, {
-    int? nGpuLayers,
-    int? nCtx,
-    int? nBatch,
-    int? nThreads,
-    int? nThreadsBatch,
-    bool? offloadKqv,
-    int? nPredict,
-    double? temperature,
-    double? topP,
-    int? topK,
-    String? mmprojPath,
-  }) async {
-    final normalizedMmprojPath =
-        mmprojPath != null && mmprojPath.trim().isNotEmpty
-        ? mmprojPath.trim()
-        : null;
+  @override
+  Future<void> loadModel(InferenceLoadRequest request) async {
+    final modelPath = request.modelPath;
+    final normalizedMmprojPath = _normalizedProjectorPath(
+      request.projectorPath,
+    );
     AppLogger.debug('[LlmService] Loading model: $modelPath');
     AppLogger.debug('[LlmService] Vision projector: $normalizedMmprojPath');
 
@@ -112,7 +150,7 @@ class LlmService {
 
     final isMobile = Platform.isAndroid || Platform.isIOS;
     final defaultThreads = defaultComputeThreads(isMobile: isMobile);
-    final resolvedNCtx = nCtx ?? (isMobile ? 1024 : 2048);
+    final resolvedNCtx = request.contextTokens ?? (isMobile ? 1024 : 2048);
 
     _validateGgufFile(modelPath, label: 'Model');
     if (normalizedMmprojPath != null) {
@@ -129,26 +167,27 @@ class LlmService {
     final isVisionLoad = normalizedMmprojPath != null;
     final modelParams = ModelParams(
       path: modelPath,
-      gpuLayers: nGpuLayers ?? defaultGpuLayers(isVisionLoad: isVisionLoad),
+      gpuLayers:
+          request.gpuLayers ?? defaultGpuLayers(isVisionLoad: isVisionLoad),
     );
-    final resolvedNBatch = math.min(nBatch ?? 512, resolvedNCtx);
+    final resolvedNBatch = math.min(request.batchTokens ?? 512, resolvedNCtx);
     final contextParams = ContextParams(
       nCtx: resolvedNCtx,
       nBatch: resolvedNBatch,
       nUbatch: resolvedNBatch,
-      nThreads: nThreads ?? defaultThreads,
-      nThreadsBatch: nThreadsBatch ?? defaultThreads,
-      offloadKqv: offloadKqv ?? defaultOffloadKqv(isMobile: isMobile),
+      nThreads: request.threads ?? defaultThreads,
+      nThreadsBatch: request.threadsBatch ?? defaultThreads,
+      offloadKqv: request.offloadKqv ?? defaultOffloadKqv(isMobile: isMobile),
     );
-    _nPredict = nPredict ?? -1;
+    _nPredict = request.maxTokens ?? -1;
     _configuredThreads = contextParams.nThreads;
     _configuredThreadsBatch = contextParams.nThreadsBatch;
     _configuredGpuLayers = modelParams.gpuLayers;
     _configuredOffloadKqv = contextParams.offloadKqv;
     final samplerParams = SamplerParams(
-      temperature: temperature ?? _defaultTemperature,
-      topP: topP ?? _defaultTopP,
-      topK: topK ?? _defaultTopK,
+      temperature: request.temperature ?? _defaultTemperature,
+      topP: request.topP ?? _defaultTopP,
+      topK: request.topK ?? _defaultTopK,
     );
 
     try {
@@ -191,6 +230,7 @@ class LlmService {
     _configuredMmprojPath = normalizedMmprojPath;
   }
 
+  @override
   Future<void> unloadModel() async {
     await _generation?.cancel();
     _generation = null;
@@ -213,65 +253,48 @@ class LlmService {
     _configuredMmprojPath = null;
   }
 
-  Future<void> ensureModelLoaded(
-    String modelPath, {
-    int? nGpuLayers,
-    int? nCtx,
-    int? nBatch,
-    int? nThreads,
-    int? nThreadsBatch,
-    bool? offloadKqv,
-    int? nPredict,
-    double? temperature,
-    double? topP,
-    int? topK,
-    String? mmprojPath,
-  }) async {
-    final resolvedTemperature = temperature ?? _defaultTemperature;
-    final resolvedTopP = topP ?? _defaultTopP;
-    final resolvedTopK = topK ?? _defaultTopK;
-    final normalizedMmprojPath =
-        mmprojPath != null && mmprojPath.trim().isNotEmpty
-        ? mmprojPath.trim()
-        : null;
+  @override
+  Future<void> ensureModelLoaded(InferenceLoadRequest request) async {
+    final resolvedTemperature = request.temperature ?? _defaultTemperature;
+    final resolvedTopP = request.topP ?? _defaultTopP;
+    final resolvedTopK = request.topK ?? _defaultTopK;
+    final normalizedMmprojPath = _normalizedProjectorPath(
+      request.projectorPath,
+    );
 
     // Every setting a profile can control forces a reload, otherwise switching
     // profiles would silently keep the previous configuration.
     final requiresReloadForConfig =
-        (nCtx != null && nCtx != _configuredNCtx) ||
-        (nBatch != null && nBatch != _configuredNBatch) ||
-        (nThreads != null && nThreads != _configuredThreads) ||
-        (nThreadsBatch != null && nThreadsBatch != _configuredThreadsBatch) ||
-        (nGpuLayers != null && nGpuLayers != _configuredGpuLayers) ||
-        (offloadKqv != null && offloadKqv != _configuredOffloadKqv) ||
+        (request.contextTokens != null &&
+            request.contextTokens != _configuredNCtx) ||
+        (request.batchTokens != null &&
+            request.batchTokens != _configuredNBatch) ||
+        (request.threads != null && request.threads != _configuredThreads) ||
+        (request.threadsBatch != null &&
+            request.threadsBatch != _configuredThreadsBatch) ||
+        (request.gpuLayers != null &&
+            request.gpuLayers != _configuredGpuLayers) ||
+        (request.offloadKqv != null &&
+            request.offloadKqv != _configuredOffloadKqv) ||
         (resolvedTopK != _configuredTopK) ||
         (resolvedTemperature - _configuredTemperature).abs() > 0.001 ||
         (resolvedTopP - _configuredTopP).abs() > 0.001 ||
         normalizedMmprojPath != _configuredMmprojPath;
-    if (isLoaded && _loadedModelPath == modelPath && !requiresReloadForConfig) {
-      _nPredict = nPredict ?? _nPredict;
+    if (isLoaded &&
+        _loadedModelPath == request.modelPath &&
+        !requiresReloadForConfig) {
+      _nPredict = request.maxTokens ?? _nPredict;
       return;
     }
 
-    await loadModel(
-      modelPath,
-      nGpuLayers: nGpuLayers,
-      nCtx: nCtx,
-      nBatch: nBatch,
-      nThreads: nThreads,
-      nThreadsBatch: nThreadsBatch,
-      offloadKqv: offloadKqv,
-      nPredict: nPredict,
-      temperature: temperature,
-      topP: topP,
-      topK: topK,
-      mmprojPath: normalizedMmprojPath,
-    );
+    await loadModel(request);
   }
 
+  @override
   Stream<String> generateResponse(String prompt, {int? maxTokens}) =>
       _generate(prompt, maxTokens: maxTokens);
 
+  @override
   Stream<String> generateVisionResponse(
     String prompt, {
     required List<String> imagePaths,
@@ -297,6 +320,7 @@ class LlmService {
   /// mp3 and flac through miniaudio, so the bytes never leave the device and
   /// no Dart-side decoder is involved. The prompt must contain the media
   /// marker the engine was started with, exactly as the image path does.
+  @override
   Stream<String> generateAudioResponse(
     String prompt, {
     required String audioPath,
@@ -354,10 +378,17 @@ class LlmService {
     }
   }
 
-  void stopGeneration() {
+  @override
+  void cancel() {
     if (!_isGenerating) return;
     _stopRequested = true;
     unawaited(_generation?.cancel());
+  }
+
+  /// Trims a projector path, treating blank text as "no projector".
+  static String? _normalizedProjectorPath(String? projectorPath) {
+    if (projectorPath == null || projectorPath.trim().isEmpty) return null;
+    return projectorPath.trim();
   }
 
   Future<void> _ensureLibraryConfigured({
@@ -369,6 +400,10 @@ class LlmService {
 
     final preferredPath = await _resolveMultimodalLibraryPath();
     AppLogger.debug('[LlmService] Preferred library path: $preferredPath');
+    // Recorded here because this is where the build is inspected; the result
+    // answers [InferenceCapabilities.vision] and `.audio` for the session.
+    _multimodalRuntimeAvailable =
+        preferredPath != null && preferredPath.trim().isNotEmpty;
     if (preferredPath != null && preferredPath.trim().isNotEmpty) {
       AppLogger.debug(
         '[LlmService] Setting native library path to: $preferredPath',

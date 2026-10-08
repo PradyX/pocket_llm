@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
 
 void main() {
@@ -8,14 +9,16 @@ void main() {
   test(
     'native service generates, stops, reuses the model, and unloads',
     () async {
-      final service = LlmService();
+      final InferenceEngine service = LlmService();
       addTearDown(service.unloadModel);
       await service.loadModel(
-        modelPath!,
-        nGpuLayers: 0,
-        offloadKqv: false,
-        nCtx: 512,
-        nBatch: 128,
+        InferenceLoadRequest(
+          modelPath: modelPath!,
+          gpuLayers: 0,
+          offloadKqv: false,
+          contextTokens: 512,
+          batchTokens: 128,
+        ),
       );
       expect(service.isLoaded, isTrue);
       var chunks = 0;
@@ -24,13 +27,15 @@ void main() {
         maxTokens: 16,
       )) {
         chunks++;
-        service.stopGeneration();
+        service.cancel();
       }
       expect(chunks, 1);
       expect(service.isGenerating, isFalse);
       expect(service.isStopRequested, isTrue);
 
-      await service.ensureModelLoaded(modelPath, nPredict: 2);
+      await service.ensureModelLoaded(
+        InferenceLoadRequest(modelPath: modelPath, maxTokens: 2),
+      );
       final output = await service
           .generateResponse('The capital of France is')
           .toList();

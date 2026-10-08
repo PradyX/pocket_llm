@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/device_profile_service.dart';
-import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/features/agents/domain/agent_run.dart';
@@ -36,34 +36,36 @@ abstract class AgentRuntime {
 /// The app keeps one model resident at a time; using the same engine is what
 /// makes that hold for chat, voice, comparison and agent runs alike.
 class LlmAgentRuntime implements AgentRuntime {
-  LlmAgentRuntime(this._llmService);
+  LlmAgentRuntime(this._engine);
 
-  final LlmService _llmService;
+  final InferenceEngine _engine;
 
   @override
-  bool get isGenerating => _llmService.isGenerating;
+  bool get isGenerating => _engine.isGenerating;
 
   @override
   Future<void> load({required String modelPath, required int contextTokens}) {
-    return _llmService.ensureModelLoaded(
-      modelPath,
-      nCtx: contextTokens,
-      nBatch: contextTokens,
-      // Low, fixed sampling: an agent decides what to do next, so the same goal
-      // on the same model should take the same route.
-      temperature: AgentLoopService.temperature,
-      topP: AgentLoopService.topP,
-      topK: AgentLoopService.topK,
+    return _engine.ensureModelLoaded(
+      InferenceLoadRequest(
+        modelPath: modelPath,
+        contextTokens: contextTokens,
+        batchTokens: contextTokens,
+        // Low, fixed sampling: an agent decides what to do next, so the same
+        // goal on the same model should take the same route.
+        temperature: AgentLoopService.temperature,
+        topP: AgentLoopService.topP,
+        topK: AgentLoopService.topK,
+      ),
     );
   }
 
   @override
   Stream<String> generate(String prompt, {required int maxTokens}) {
-    return _llmService.generateResponse(prompt, maxTokens: maxTokens);
+    return _engine.generateResponse(prompt, maxTokens: maxTokens);
   }
 
   @override
-  void cancel() => _llmService.stopGeneration();
+  void cancel() => _engine.cancel();
 }
 
 /// Agent loop over the app's shared local engine.
@@ -72,7 +74,7 @@ final agentLoopServiceProvider = Provider<AgentLoopService>((ref) {
   final deviceProfileService = ref.watch(deviceProfileServiceProvider);
 
   return AgentLoopService(
-    runtime: LlmAgentRuntime(ref.watch(llmServiceProvider)),
+    runtime: LlmAgentRuntime(ref.watch(inferenceEngineProvider)),
     resolveModelPath: storage.resolveModelPath,
     isFileReady: storage.isModelPathDownloaded,
     readDeviceProfile: deviceProfileService.collect,

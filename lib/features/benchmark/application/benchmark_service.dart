@@ -7,8 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/device_profile_service.dart';
-import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
 import 'package:pocket_llm/core/services/process_memory_probe.dart';
@@ -21,7 +21,7 @@ import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 
 final benchmarkServiceProvider = Provider<BenchmarkService>((ref) {
   return BenchmarkService(
-    llmService: ref.read(llmServiceProvider),
+    engine: ref.read(inferenceEngineProvider),
     modelStorageService: ref.read(modelStorageServiceProvider),
     platformRuntimePathsService: ref.read(platformRuntimePathsServiceProvider),
     deviceProfileService: ref.read(deviceProfileServiceProvider),
@@ -38,14 +38,14 @@ class BenchmarkService {
   static const _benchmarkTopP = 0.8;
   static const _benchmarkTopK = 40;
 
-  final LlmService llmService;
+  final InferenceEngine engine;
   final ModelStorageService modelStorageService;
   final PlatformRuntimePathsService platformRuntimePathsService;
   final DeviceProfileService deviceProfileService;
   final ProcessMemoryProbe memoryProbe;
 
   const BenchmarkService({
-    required this.llmService,
+    required this.engine,
     required this.modelStorageService,
     required this.platformRuntimePathsService,
     required this.deviceProfileService,
@@ -180,13 +180,15 @@ class BenchmarkService {
     try {
       final targetNCtx = ModelCompatibilityService.defaultContextTokens;
 
-      await llmService.ensureModelLoaded(
-        modelPath,
-        nCtx: targetNCtx,
-        nBatch: targetNCtx,
-        temperature: _benchmarkTemperature,
-        topP: _benchmarkTopP,
-        topK: _benchmarkTopK,
+      await engine.ensureModelLoaded(
+        InferenceLoadRequest(
+          modelPath: modelPath,
+          contextTokens: targetNCtx,
+          batchTokens: targetNCtx,
+          temperature: _benchmarkTemperature,
+          topP: _benchmarkTopP,
+          topK: _benchmarkTopK,
+        ),
       );
 
       final promptBundle = buildModelChatPrompt(
@@ -200,7 +202,7 @@ class BenchmarkService {
       int? ttftMs;
       final stopwatch = Stopwatch()..start();
 
-      await for (final token in llmService.generateResponse(
+      await for (final token in engine.generateResponse(
         promptBundle.prompt,
         maxTokens: benchmarkMaxTokens,
       )) {
@@ -230,6 +232,9 @@ class BenchmarkService {
           : null;
       final device = await deviceProfileService.collect();
       final peakMemoryBytes = await memoryProbe.readResidentMemoryBytes();
+      // The engine's own view of how it was started, so a record describes the
+      // run rather than what the settings screen asked for.
+      final runtime = engine.runtimeInfo;
 
       return LocalBenchmarkResult(
         model: model,
@@ -240,11 +245,11 @@ class BenchmarkService {
         ttftMs: ttftMs,
         promptTokensEstimated: promptTokens > 0 ? promptTokens : null,
         promptTokensPerSecond: promptTokensPerSecond,
-        contextTokens: llmService.configuredContextSize,
-        threads: llmService.configuredThreads,
-        gpuLayers: llmService.configuredGpuLayers,
-        offloadKqv: llmService.configuredOffloadKqv,
-        backend: llmService.runtimeBackend,
+        contextTokens: runtime.contextTokens,
+        threads: runtime.threads,
+        gpuLayers: runtime.gpuLayers,
+        offloadKqv: runtime.offloadKqv,
+        backend: runtime.backend,
         peakMemoryBytes: peakMemoryBytes,
         deviceSummary: device.summaryLabel,
         deviceCpuCores: device.cpuCores,

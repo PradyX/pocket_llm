@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pocket_llm/core/services/llm_service.dart';
+import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/features/inference_profiles/data/inference_profile_store.dart';
 import 'package:pocket_llm/features/inference_profiles/domain/inference_profile.dart';
 import 'package:pocket_llm/features/inference_profiles/domain/inference_profile_resolver.dart';
@@ -19,7 +19,10 @@ final inferenceProfileResolverProvider = Provider<InferenceProfileResolver>((
 ) {
   return InferenceProfileResolver(
     platformContextTokens: ModelCompatibilityService.defaultContextTokens,
-    supportsGpuOffload: LlmService.supportsGpuOffload,
+    supportsGpuOffload: ref
+        .watch(inferenceEngineProvider)
+        .capabilities
+        .gpuOffload,
   );
 });
 

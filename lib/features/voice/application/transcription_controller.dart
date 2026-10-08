@@ -41,7 +41,7 @@ final voiceAudioPickerProvider = Provider<Future<String?> Function()>((ref) {
 final speechToTextServiceProvider = Provider<SpeechToTextService>((ref) {
   final storage = ref.watch(modelStorageServiceProvider);
   return SpeechToTextService(
-    runtime: LlmSpeechRuntime(ref.watch(llmServiceProvider)),
+    runtime: LlmSpeechRuntime(ref.watch(inferenceEngineProvider)),
     resolveModelPath: storage.resolveModelPath,
     resolveProjectorPath: storage.resolveMmprojPath,
     isFileReady: storage.isModelPathDownloaded,

@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:path/path.dart' as p;
-import 'package:pocket_llm/core/services/llm_service.dart';
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 
 /// Audio containers the bundled multimodal runtime can decode.
@@ -56,12 +56,12 @@ abstract class SpeechRuntime {
 /// Keeping transcription on the shared engine is what makes that guarantee
 /// hold: a second engine would leave both models resident.
 class LlmSpeechRuntime implements SpeechRuntime {
-  LlmSpeechRuntime(this._llmService);
+  LlmSpeechRuntime(this._engine);
 
-  final LlmService _llmService;
+  final InferenceEngine _engine;
 
   @override
-  bool get isGenerating => _llmService.isGenerating;
+  bool get isGenerating => _engine.isGenerating;
 
   @override
   Future<void> load({
@@ -69,16 +69,18 @@ class LlmSpeechRuntime implements SpeechRuntime {
     required String projectorPath,
     required int contextTokens,
   }) {
-    return _llmService.ensureModelLoaded(
-      modelPath,
-      nCtx: contextTokens,
-      mmprojPath: projectorPath,
-      // Transcription is a factual pass, so the sampler is made
-      // deterministic: the same clip should not come back as different words
-      // from one run to the next.
-      temperature: 0,
-      topP: 1,
-      topK: 1,
+    return _engine.ensureModelLoaded(
+      InferenceLoadRequest(
+        modelPath: modelPath,
+        projectorPath: projectorPath,
+        contextTokens: contextTokens,
+        // Transcription is a factual pass, so the sampler is made
+        // deterministic: the same clip should not come back as different words
+        // from one run to the next.
+        temperature: 0,
+        topP: 1,
+        topK: 1,
+      ),
     );
   }
 
@@ -88,7 +90,7 @@ class LlmSpeechRuntime implements SpeechRuntime {
     required String audioPath,
     required int maxTokens,
   }) {
-    return _llmService.generateAudioResponse(
+    return _engine.generateAudioResponse(
       prompt,
       audioPath: audioPath,
       maxTokens: maxTokens,
@@ -96,7 +98,7 @@ class LlmSpeechRuntime implements SpeechRuntime {
   }
 
   @override
-  void cancel() => _llmService.stopGeneration();
+  void cancel() => _engine.cancel();
 }
 
 /// Turns one local audio file into text with a local speech model.

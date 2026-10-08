@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/settings/attachment_settings_provider.dart';
 import 'package:pocket_llm/core/settings/inference_settings_provider.dart';
 import 'package:pocket_llm/core/services/attachment_image_service.dart';
-import 'package:pocket_llm/core/services/llm_service.dart';
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/model_storage_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/id_generator.dart';
@@ -198,7 +198,7 @@ class HomeController extends _$HomeController {
   bool _stopRequestedByUser = false;
   double? _adaptiveTokensPerSecondEma;
 
-  LlmService get _llmService => ref.read(llmServiceProvider);
+  InferenceEngine get _engine => ref.read(inferenceEngineProvider);
   ModelStorageService get _storageService =>
       ref.read(modelStorageServiceProvider);
 
@@ -635,18 +635,20 @@ class HomeController extends _$HomeController {
         mmprojPath = resolvedMmproj;
       }
 
-      await _llmService.ensureModelLoaded(
-        modelPath,
-        nCtx: resolvedConfig.contextTokens,
-        nBatch: resolvedConfig.batchTokens,
-        nThreads: resolvedConfig.threads,
-        nThreadsBatch: resolvedConfig.threadsBatch,
-        nGpuLayers: resolvedConfig.gpuLayers,
-        offloadKqv: resolvedConfig.offloadKqv,
-        temperature: resolvedConfig.temperature,
-        topP: resolvedConfig.topP,
-        topK: resolvedConfig.topK,
-        mmprojPath: mmprojPath,
+      await _engine.ensureModelLoaded(
+        InferenceLoadRequest(
+          modelPath: modelPath,
+          contextTokens: resolvedConfig.contextTokens,
+          batchTokens: resolvedConfig.batchTokens,
+          threads: resolvedConfig.threads,
+          threadsBatch: resolvedConfig.threadsBatch,
+          gpuLayers: resolvedConfig.gpuLayers,
+          offloadKqv: resolvedConfig.offloadKqv,
+          temperature: resolvedConfig.temperature,
+          topP: resolvedConfig.topP,
+          topK: resolvedConfig.topK,
+          projectorPath: mmprojPath,
+        ),
       );
 
       _setStatus(text: 'Building prompt...', isGenerating: true);
@@ -775,15 +777,12 @@ class HomeController extends _$HomeController {
     }
 
     final responseStream = promptBundle.imagePaths.isNotEmpty
-        ? _llmService.generateVisionResponse(
+        ? _engine.generateVisionResponse(
             promptBundle.prompt,
             imagePaths: promptBundle.imagePaths,
             maxTokens: maxTokens,
           )
-        : _llmService.generateResponse(
-            promptBundle.prompt,
-            maxTokens: maxTokens,
-          );
+        : _engine.generateResponse(promptBundle.prompt, maxTokens: maxTokens);
 
     await for (final token in responseStream) {
       final cleanToken = token.replaceAll(stopSequence, '');
@@ -819,7 +818,7 @@ class HomeController extends _$HomeController {
       sawToken: sawToken,
       generatedTokens: generatedTokenCount,
       elapsed: generationTimer.elapsed,
-      stoppedByUser: _stopRequestedByUser || _llmService.isStopRequested,
+      stoppedByUser: _stopRequestedByUser || _engine.isStopRequested,
     );
   }
 
@@ -1040,7 +1039,7 @@ class HomeController extends _$HomeController {
 
     _stopRequestedByUser = true;
     _setStatus(text: 'Stopping generation...', isGenerating: true);
-    _llmService.stopGeneration();
+    _engine.cancel();
   }
 
   /// Prepares one attached image, or null when it should be stored untouched.

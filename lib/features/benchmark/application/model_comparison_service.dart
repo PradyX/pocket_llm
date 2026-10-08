@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/device_profile_service.dart';
-import 'package:pocket_llm/core/services/llm_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/features/benchmark/application/benchmark_service.dart';
@@ -52,49 +52,51 @@ abstract class ComparisonRuntime {
 /// is what makes that guarantee hold across chat, voice and benchmarking: a
 /// separate engine would leave two models resident.
 class LlmComparisonRuntime implements ComparisonRuntime {
-  LlmComparisonRuntime(this._llmService);
+  LlmComparisonRuntime(this._engine);
 
-  final LlmService _llmService;
+  final InferenceEngine _engine;
 
   @override
-  bool get isGenerating => _llmService.isGenerating;
+  bool get isGenerating => _engine.isGenerating;
 
   @override
   Future<void> load({required String modelPath, required int contextTokens}) {
-    return _llmService.ensureModelLoaded(
-      modelPath,
-      nCtx: contextTokens,
-      nBatch: contextTokens,
-      // Low, fixed sampling: answers should differ because the models differ,
-      // not because one run sampled more creatively than another.
-      temperature: ModelComparisonService.temperature,
-      topP: ModelComparisonService.topP,
-      topK: ModelComparisonService.topK,
+    return _engine.ensureModelLoaded(
+      InferenceLoadRequest(
+        modelPath: modelPath,
+        contextTokens: contextTokens,
+        batchTokens: contextTokens,
+        // Low, fixed sampling: answers should differ because the models differ,
+        // not because one run sampled more creatively than another.
+        temperature: ModelComparisonService.temperature,
+        topP: ModelComparisonService.topP,
+        topK: ModelComparisonService.topK,
+      ),
     );
   }
 
   @override
   Stream<String> generate(String prompt, {required int maxTokens}) {
-    return _llmService.generateResponse(prompt, maxTokens: maxTokens);
+    return _engine.generateResponse(prompt, maxTokens: maxTokens);
   }
 
   @override
-  void cancel() => _llmService.stopGeneration();
+  void cancel() => _engine.cancel();
 
   @override
-  int? get configuredContextSize => _llmService.configuredContextSize;
+  int? get configuredContextSize => _engine.runtimeInfo.contextTokens;
 
   @override
-  int? get configuredThreads => _llmService.configuredThreads;
+  int? get configuredThreads => _engine.runtimeInfo.threads;
 
   @override
-  int? get configuredGpuLayers => _llmService.configuredGpuLayers;
+  int? get configuredGpuLayers => _engine.runtimeInfo.gpuLayers;
 
   @override
-  bool? get configuredOffloadKqv => _llmService.configuredOffloadKqv;
+  bool? get configuredOffloadKqv => _engine.runtimeInfo.offloadKqv;
 
   @override
-  String? get runtimeBackend => _llmService.runtimeBackend;
+  String? get runtimeBackend => _engine.runtimeInfo.backend;
 }
 
 /// Comparison over the app's shared local engine.
@@ -104,7 +106,7 @@ final modelComparisonServiceProvider = Provider<ModelComparisonService>((ref) {
   final memoryProbe = ref.watch(processMemoryProbeProvider);
 
   return ModelComparisonService(
-    runtime: LlmComparisonRuntime(ref.watch(llmServiceProvider)),
+    runtime: LlmComparisonRuntime(ref.watch(inferenceEngineProvider)),
     resolveModelPath: storage.resolveModelPath,
     isFileReady: storage.isModelPathDownloaded,
     readDeviceProfile: deviceProfileService.collect,

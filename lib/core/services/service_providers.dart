@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/android_tool_executor_service.dart';
 import 'package:pocket_llm/core/services/device_profile_service.dart';
 import 'package:pocket_llm/core/services/llm_service.dart';
@@ -17,6 +18,16 @@ final llmServiceProvider = Provider<LlmService>((ref) {
     unawaited(service.unloadModel());
   });
   return service;
+});
+
+/// The local inference engine as features see it.
+///
+/// Features depend on this interface rather than on [LlmService], so replacing
+/// the llama.cpp binding is a change behind this provider instead of a change
+/// in every feature. It hands out the same single engine, which is what keeps
+/// one model resident across chat, voice, documents, comparison and agents.
+final inferenceEngineProvider = Provider<InferenceEngine>((ref) {
+  return ref.watch(llmServiceProvider);
 });
 
 final modelStorageServiceProvider = Provider<ModelStorageService>((ref) {

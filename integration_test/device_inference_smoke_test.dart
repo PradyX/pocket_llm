@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:pocket_llm/core/inference/inference_engine.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/features/agents/application/agent_loop_service.dart';
@@ -80,13 +81,15 @@ void main() {
 
     // 1. A real completion through the shared engine, with the prompt the chat
     //    screen would build.
-    final llmService = container.read(llmServiceProvider);
-    await llmService.ensureModelLoaded(
-      path,
-      nCtx: 2048,
-      temperature: 0.2,
-      topP: 0.8,
-      topK: 40,
+    final engine = container.read(inferenceEngineProvider);
+    await engine.ensureModelLoaded(
+      InferenceLoadRequest(
+        modelPath: path,
+        contextTokens: 2048,
+        temperature: 0.2,
+        topP: 0.8,
+        topK: 40,
+      ),
     );
 
     final systemPrompt = composePersonaSystemPrompt(
@@ -102,7 +105,7 @@ void main() {
     );
 
     final answer = await _collect(
-      llmService.generateResponse(chatPrompt.prompt, maxTokens: 32),
+      engine.generateResponse(chatPrompt.prompt, maxTokens: 32),
     );
     // ignore: avoid_print
     print('chat reply: "${answer.trim()}"');
@@ -148,7 +151,7 @@ void main() {
       promptFormatId: model.promptFormatId,
     );
     final toolReply = await _collect(
-      llmService.generateResponse(toolPrompt.prompt, maxTokens: 96),
+      engine.generateResponse(toolPrompt.prompt, maxTokens: 96),
     );
     // ignore: avoid_print
     print('tool turn reply: "${toolReply.trim()}"');
@@ -198,7 +201,7 @@ void main() {
     expect(run.status, isNot(AgentRunStatus.failed), reason: run.errorMessage);
     expect(run.iterations, lessThanOrEqualTo(2));
 
-    await llmService.unloadModel();
+    await engine.unloadModel();
   });
 }
 
