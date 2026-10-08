@@ -55,7 +55,9 @@ class _AgentPageState extends ConsumerState<AgentPage> {
     final textTheme = Theme.of(context).textTheme;
     final state = ref.watch(agentControllerProvider);
     final controller = ref.read(agentControllerProvider.notifier);
-    final models = ref.watch(installedAgentModelsProvider);
+    final installed = ref.watch(installedAgentModelsProvider);
+    final models = agentRunnableModels(installed);
+    final nonToolModels = agentNonToolModels(installed);
 
     ref.listen<ToolApprovalRequest?>(toolApprovalControllerProvider, (_, next) {
       if (next != null) unawaited(_askForToolApproval(next));
@@ -163,8 +165,16 @@ class _AgentPageState extends ConsumerState<AgentPage> {
                   const SizedBox(height: 8),
                   if (models.isEmpty)
                     Text(
-                      'No local model is installed yet. Download or import a '
-                      'GGUF model to run an agent.',
+                      nonToolModels.isEmpty
+                          ? 'No local model is installed yet. Download or '
+                                'import a GGUF model to run an agent.'
+                          : 'None of the installed models can call tools, '
+                                'which an agent run needs. '
+                                '${nonToolModels.map((model) => model.name).join(', ')} '
+                                '${nonToolModels.length == 1 ? 'has' : 'have'} '
+                                'no tool protocol in the chat template, so '
+                                'only a model whose template supports tool '
+                                'calling can run an agent.',
                       style: textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),

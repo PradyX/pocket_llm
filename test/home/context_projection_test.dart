@@ -50,6 +50,18 @@ void main() {
     );
     expect(projection.fixedTokens, greaterThan(0));
     expect(projection.usage.percent, greaterThan(0));
+    // Chat charges this only for a model that can call tools, and reports the
+    // flag so the chip can explain a smaller floor.
+    expect(projection.toolContractIncluded, isFalse);
+    expect(
+      projectConversationContext(
+        messages: const [],
+        systemPrompt: systemPrompt,
+        policy: policy,
+        toolContractIncluded: true,
+      ).toolContractIncluded,
+      isTrue,
+    );
   });
 
   test('the same prompt without tools costs a fraction of the floor', () {

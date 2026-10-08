@@ -82,6 +82,18 @@ class LlmModel {
   /// [ModelCapability.vision] will automatically support image upload.
   bool get supportsVision => capabilities.contains(ModelCapability.vision);
 
+  /// Whether this model can be asked for tool calls.
+  ///
+  /// The catalog's own declaration wins; an imported or referenced GGUF is
+  /// asked through its chat template instead (see
+  /// [GgufMetadata.supportsToolCalling]). Models that cannot carry a tool
+  /// protocol are never sent the tool contract, so their prompt pays only for
+  /// the persona instead of thousands of characters of instructions they were
+  /// not trained to follow.
+  bool get supportsToolCalling =>
+      capabilities.contains(ModelCapability.tools) ||
+      (ggufMetadata?.supportsToolCalling ?? false);
+
   /// Whether this model can transcribe local audio.
   ///
   /// Derived from [capabilities]; a model earns it when its projector carries

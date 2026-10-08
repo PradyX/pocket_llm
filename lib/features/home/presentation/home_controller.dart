@@ -90,9 +90,18 @@ final homeGenerationStatusProvider = StateProvider<HomeGenerationStatus>(
 /// recomputed from what the chat screen currently holds, so it always describes
 /// the conversation on screen.
 class ContextProjection {
-  const ContextProjection({required this.usage, required this.fixedTokens});
+  const ContextProjection({
+    required this.usage,
+    required this.fixedTokens,
+    required this.toolContractIncluded,
+  });
 
   final ContextUsage usage;
+
+  /// Whether the platform's tool contract is part of [fixedTokens]. False for a
+  /// model that cannot call tools, which is why its floor is only the persona
+  /// prompt.
+  final bool toolContractIncluded;
 
   /// Tokens the system prompt and the platform's tool contract cost before a
   /// single message is sent. An empty conversation still pays this, which is
@@ -105,12 +114,14 @@ ContextProjection projectConversationContext({
   required List<Message> messages,
   required String systemPrompt,
   required ContextPolicy policy,
+  bool toolContractIncluded = false,
 }) {
   return ContextProjection(
     usage: const ConversationContextBuilder()
         .build(messages: messages, systemPrompt: systemPrompt, policy: policy)
         .usage,
     fixedTokens: TokenEstimator.estimateMessage(systemPrompt),
+    toolContractIncluded: toolContractIncluded,
   );
 }
 
@@ -155,13 +166,19 @@ final homeContextProjectionProvider = Provider.autoDispose<ContextProjection?>((
     reservedOutputTokens: resolvedConfig.maxOutputTokens,
   );
 
+  // The tool contract is only sent to a model whose template can carry tool
+  // calls, so the projection charges for it exactly when a request would.
+  final toolContractIncluded = model.supportsToolCalling;
   return projectConversationContext(
     messages: ref.watch(homeControllerProvider),
     systemPrompt: composePersonaSystemPrompt(
       persona: persona,
-      toolContract: ref.watch(toolRegistryProvider).describeForPrompt(),
+      toolContract: toolContractIncluded
+          ? ref.watch(toolRegistryProvider).describeForPrompt()
+          : '',
     ),
     policy: policy,
+    toolContractIncluded: toolContractIncluded,
   );
 });
 
@@ -207,11 +224,18 @@ class HomeController extends _$HomeController {
 
   /// System prompt for one request: the persona plus the contract of the tools
   /// that actually run on this platform.
-  String get _systemPrompt {
-    final registry = ref.read(toolRegistryProvider);
+  ///
+  /// A model that cannot call tools is not sent the contract at all. The
+  /// instructions cost roughly 500 tokens on macOS and 700 on Android, and a
+  /// model without a tool template cannot act on them — it would only pay for
+  /// text it was never trained to follow.
+  String _systemPromptFor(LlmModel model) {
+    if (!model.supportsToolCalling) {
+      return composePersonaSystemPrompt(persona: _activePersona);
+    }
     return composePersonaSystemPrompt(
       persona: _activePersona,
-      toolContract: registry.describeForPrompt(),
+      toolContract: ref.read(toolRegistryProvider).describeForPrompt(),
     );
   }
 
@@ -564,7 +588,7 @@ class HomeController extends _$HomeController {
           for (final message in state)
             if (message.id != aiMessageId) message,
         ],
-        systemPrompt: _systemPrompt,
+        systemPrompt: _systemPromptFor(selectedModel),
         policy: contextPolicy,
         documentContext: documentContext,
       );

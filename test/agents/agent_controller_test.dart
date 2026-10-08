@@ -17,11 +17,22 @@ void main() {
   // The log copy path writes to the platform clipboard channel.
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  // The agent runs on tool calls, so the models under test declare the
+  // capability the same way an installed file would: through its own template
+  // or the catalog's declaration.
   final model = LlmModel(
     id: 'm-1',
     name: 'Test model',
     parameterSize: '1B',
     description: 'test model',
+    capabilities: const [ModelCapability.tools],
+    isDownloaded: true,
+  );
+  final textOnlyModel = LlmModel(
+    id: 'm-2',
+    name: 'Text only model',
+    parameterSize: '1B',
+    description: 'a model with no tool protocol',
     isDownloaded: true,
   );
 
@@ -117,6 +128,39 @@ void main() {
       contains('Describe the goal'),
     );
     expect(runtime.prompts, isEmpty);
+  });
+
+  test('says why a model that cannot call tools is not offered', () async {
+    final runtime = ScriptedAgentRuntime(script: ['never']);
+    final container = containerFor(
+      runtime: runtime,
+      installedModels: [textOnlyModel],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(agentControllerProvider.notifier);
+
+    controller.setGoal('Anything');
+    await controller.run();
+
+    expect(
+      container.read(agentControllerProvider).errorMessage,
+      allOf(
+        contains('None of your installed models can call tools'),
+        contains('Text only model'),
+      ),
+    );
+    expect(runtime.prompts, isEmpty);
+
+    // A model that can call tools is still picked from the same list.
+    final runnable = containerFor(
+      runtime: ScriptedAgentRuntime(script: ['done']),
+      installedModels: [textOnlyModel, model],
+    );
+    addTearDown(runnable.dispose);
+    final second = runnable.read(agentControllerProvider.notifier);
+    second.setGoal('Anything');
+    await second.run();
+    expect(runnable.read(agentControllerProvider).modelId, 'm-1');
   });
 
   test('cancelling stops the run and keeps what was produced', () async {

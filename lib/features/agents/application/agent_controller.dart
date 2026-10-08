@@ -9,12 +9,30 @@ import 'package:pocket_llm/features/model_selection/presentation/model_selection
 import 'package:pocket_llm/features/tools/application/tools_providers.dart';
 
 /// Models installed on this device — the only ones an agent run can use.
+///
+/// The screen and the controller filter this list by tool capability, because
+/// an agent run is a sequence of tool calls: a model whose chat template has no
+/// tool protocol can never complete one. The capability comes from each file's
+/// own template, not from its name.
 final installedAgentModelsProvider = Provider<List<LlmModel>>((ref) {
   return [
     for (final model in ref.watch(modelSelectionControllerProvider).models)
       if (model.isDownloaded) model,
   ];
 });
+
+/// Installed models an agent run can actually use.
+List<LlmModel> agentRunnableModels(List<LlmModel> installed) => [
+  for (final model in installed)
+    if (model.supportsToolCalling) model,
+];
+
+/// Installed models that cannot call tools, so the screen can say why they are
+/// not on offer instead of leaving an unexplained gap.
+List<LlmModel> agentNonToolModels(List<LlmModel> installed) => [
+  for (final model in installed)
+    if (!model.supportsToolCalling) model,
+];
 
 /// Where an agent run is.
 enum AgentStage {
@@ -126,14 +144,21 @@ class AgentController extends StateNotifier<AgentState> {
   /// Runs the current goal, streaming every step into the log.
   Future<void> run() async {
     if (state.isRunning) return;
-
-    final models = _ref.read(installedAgentModelsProvider);
+    final models = agentRunnableModels(_ref.read(installedAgentModelsProvider));
     if (models.isEmpty) {
+      final withoutTools = agentNonToolModels(
+        _ref.read(installedAgentModelsProvider),
+      );
+      final installedNames = withoutTools.map((model) => model.name).join(', ');
       state = state.copyWith(
         stage: AgentStage.failed,
-        errorMessage:
-            'No local model is installed. Download or import a GGUF model '
-            'first.',
+        errorMessage: withoutTools.isEmpty
+            ? 'No local model is installed. Download or import a GGUF model '
+                  'first.'
+            : 'None of your installed models can call tools, so an agent run '
+                  'has nothing to work with. Install a model whose chat '
+                  'template supports tool calling — $installedNames cannot — '
+                  'or ask for the same thing in a normal chat.',
       );
       return;
     }

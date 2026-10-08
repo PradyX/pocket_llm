@@ -60,6 +60,37 @@ class GgufMetadata {
     this.stringExtras = const {},
   });
 
+  /// Markers the tool-aware chat templates use to describe their protocol.
+  ///
+  /// A model is only asked for tool calls when its own template knows how to
+  /// carry them, so the list covers the families that ship one: Hermes and
+  /// Qwen (`<tool_call>`), Llama 3.1+ (`<|python_tag|>`), Mistral
+  /// (`[AVAILABLE_TOOLS]`) and the templates that branch on a `tools`
+  /// variable. The bare word `tools` is the catch-all: every template that
+  /// carries a tool protocol mentions it, and a template that does not is
+  /// better off without a contract it was never trained on.
+  static const List<String> _toolTemplateMarkers = [
+    'tool_call',
+    'tool_calls',
+    '[available_tools]',
+    '<|python_tag|>',
+    'tool_choice',
+    'tools',
+  ];
+
+  /// True when the model's chat template carries a tool-calling protocol.
+  ///
+  /// Read from the template rather than the model name: a capability belongs to
+  /// the file that was actually installed, and imports bring their own
+  /// templates. Metadata persisted before this flag existed simply reports
+  /// false rather than guessing.
+  bool get supportsToolCalling {
+    final template = chatTemplate;
+    if (template == null || template.trim().isEmpty) return false;
+    final lower = template.toLowerCase();
+    return _toolTemplateMarkers.any(lower.contains);
+  }
+
   /// Human-friendly parameter count such as `7.2B`, `1.1B` or `800M`.
   String get parameterSizeLabel => formatParameterCount(parameterCount);
 

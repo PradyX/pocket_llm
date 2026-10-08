@@ -815,6 +815,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             generationStatus.isGenerating
                 ? null
                 : contextProjection?.fixedTokens,
+            contextProjection?.toolContractIncluded ?? false,
           ),
         ],
       ),
@@ -892,6 +893,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     LlmModel? selectedModel,
     ContextUsage? contextUsage,
     int? fixedSystemTokens,
+    bool toolContractIncluded,
   ) {
     final canCompose = hasDownloadedModel && !isGenerating;
     final progressText = generationText.isEmpty
@@ -964,6 +966,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               contextUsage,
               isGenerating,
               fixedSystemTokens,
+              toolContractIncluded,
             ),
           if (_draftImages.isNotEmpty)
             Padding(
@@ -1059,6 +1062,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     ContextUsage usage,
     bool isGenerating,
     int? fixedSystemTokens,
+    bool toolContractIncluded,
   ) {
     final style = textTheme.labelSmall?.copyWith(
       color: colorScheme.onSurfaceVariant,
@@ -1067,8 +1071,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     final detail = [
       if (isGenerating) 'Budget for the request now running',
       if (fixedSystemTokens != null) ...[
-        '${formatTokens(fixedSystemTokens)} tokens for the system prompt and '
-            'the tools this device offers, sent with every message',
+        toolContractIncluded
+            ? '${formatTokens(fixedSystemTokens)} tokens for the system prompt '
+                  'and the tools this device offers, sent with every message'
+            : '${formatTokens(fixedSystemTokens)} tokens for the system prompt. '
+                  'This model cannot call tools, so the tool contract is not '
+                  'sent.',
         'What the next message from this conversation would cost. Retrieval '
             'from your knowledge collection is added when you send it.',
       ],
@@ -1119,8 +1127,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
-                      '${formatTokens(fixedSystemTokens)} fixed: system prompt '
-                      'and tools',
+                      toolContractIncluded
+                          ? '${formatTokens(fixedSystemTokens)} fixed: system '
+                                'prompt and tools'
+                          : '${formatTokens(fixedSystemTokens)} fixed: system '
+                                'prompt',
                       style: style,
                       overflow: TextOverflow.ellipsis,
                     ),
