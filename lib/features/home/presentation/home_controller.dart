@@ -82,6 +82,89 @@ final homeGenerationStatusProvider = StateProvider<HomeGenerationStatus>(
   (ref) => const HomeGenerationStatus(),
 );
 
+/// What the next request from the open conversation would cost.
+///
+/// The indicator above the composer used to keep the numbers of the last
+/// request that ran, so switching or clearing a conversation left a figure
+/// behind that described a chat the user was no longer looking at. This is
+/// recomputed from what the chat screen currently holds, so it always describes
+/// the conversation on screen.
+class ContextProjection {
+  const ContextProjection({required this.usage, required this.fixedTokens});
+
+  final ContextUsage usage;
+
+  /// Tokens the system prompt and the platform's tool contract cost before a
+  /// single message is sent. An empty conversation still pays this, which is
+  /// why the figure never reaches zero.
+  final int fixedTokens;
+}
+
+/// Assembles one prompt from the current state without running anything.
+ContextProjection projectConversationContext({
+  required List<Message> messages,
+  required String systemPrompt,
+  required ContextPolicy policy,
+}) {
+  return ContextProjection(
+    usage: const ConversationContextBuilder()
+        .build(messages: messages, systemPrompt: systemPrompt, policy: policy)
+        .usage,
+    fixedTokens: TokenEstimator.estimateMessage(systemPrompt),
+  );
+}
+
+/// Projection for the conversation the chat screen is showing.
+///
+/// Uses the same policy the request will use — the profile's context, the
+/// model's declared limit and the output reservation — so the split it reports
+/// is the one the runtime will really be started with. Two things can add to
+/// the request later and are therefore not part of the projection: retrieved
+/// document chunks, which are chosen from the question at send time, and, in
+/// adaptive mode, the output reservation the last measurements may adjust.
+/// While a request runs, the chat shows that run's own numbers instead.
+/// Kept disposable like the controller it reads, so the chat screen mounting it
+/// never keeps the conversation state alive on its own.
+final homeContextProjectionProvider = Provider.autoDispose<ContextProjection?>((
+  ref,
+) {
+  final selection = ref.watch(modelSelectionControllerProvider);
+  final model = selection.selectedModel;
+  if (model == null || !model.isDownloaded) return null;
+
+  final profiles = ref.watch(inferenceProfilesProvider);
+  final persona = ref
+      .watch(personasProvider)
+      .resolve(
+        ref.watch(conversationControllerProvider).activeConversation?.personaId,
+      );
+  final pinnedProfileId = persona.inferenceProfileId;
+  final profile = pinnedProfileId == null
+      ? profiles.activeProfile
+      : profiles.profileById(pinnedProfileId) ?? profiles.activeProfile;
+  final resolvedConfig = ref
+      .watch(inferenceProfileResolverProvider)
+      .resolve(
+        profile: profile,
+        settings: ref.watch(inferenceSettingsProvider),
+        declaredContextTokens: model.ggufMetadata?.contextLength,
+      );
+  final policy = ContextPolicy.forModel(
+    runtimeContextTokens: resolvedConfig.contextTokens,
+    declaredContextTokens: model.ggufMetadata?.contextLength,
+    reservedOutputTokens: resolvedConfig.maxOutputTokens,
+  );
+
+  return projectConversationContext(
+    messages: ref.watch(homeControllerProvider),
+    systemPrompt: composePersonaSystemPrompt(
+      persona: persona,
+      toolContract: ref.watch(toolRegistryProvider).describeForPrompt(),
+    ),
+    policy: policy,
+  );
+});
+
 /// Text another screen wants placed in the chat composer.
 ///
 /// The voice screen sets it once a clip has been transcribed; the chat page

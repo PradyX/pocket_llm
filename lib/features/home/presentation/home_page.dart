@@ -554,6 +554,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget build(BuildContext context) {
     final messages = ref.watch(homeControllerProvider);
     final generationStatus = ref.watch(homeGenerationStatusProvider);
+    final contextProjection = ref.watch(homeContextProjectionProvider);
     ref.listen<ToolApprovalRequest?>(toolApprovalControllerProvider, (
       previous,
       next,
@@ -804,7 +805,16 @@ class _HomePageState extends ConsumerState<HomePage> {
             hasDownloadedModel,
             canAttachImage,
             selectedModel,
-            generationStatus.contextUsage,
+            // While a request runs the chip reports that run's own budget,
+            // documents included. Idle, it reports what the next request from
+            // the conversation on screen would cost, so clearing or switching
+            // a chat can never leave the last run's numbers behind.
+            generationStatus.isGenerating
+                ? generationStatus.contextUsage ?? contextProjection?.usage
+                : contextProjection?.usage,
+            generationStatus.isGenerating
+                ? null
+                : contextProjection?.fixedTokens,
           ),
         ],
       ),
@@ -881,6 +891,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     bool canAttachImage,
     LlmModel? selectedModel,
     ContextUsage? contextUsage,
+    int? fixedSystemTokens,
   ) {
     final canCompose = hasDownloadedModel && !isGenerating;
     final progressText = generationText.isEmpty
@@ -952,6 +963,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               textTheme,
               contextUsage,
               isGenerating,
+              fixedSystemTokens,
             ),
           if (_draftImages.isNotEmpty)
             Padding(
@@ -1046,6 +1058,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     TextTheme textTheme,
     ContextUsage usage,
     bool isGenerating,
+    int? fixedSystemTokens,
   ) {
     final style = textTheme.labelSmall?.copyWith(
       color: colorScheme.onSurfaceVariant,
@@ -1053,6 +1066,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     final trimming = usage.trimmingLabel;
     final detail = [
       if (isGenerating) 'Budget for the request now running',
+      if (fixedSystemTokens != null) ...[
+        '${formatTokens(fixedSystemTokens)} tokens for the system prompt and '
+            'the tools this device offers, sent with every message',
+        'What the next message from this conversation would cost. Retrieval '
+            'from your knowledge collection is added when you send it.',
+      ],
       usage.detailLabel,
       ?trimming,
     ].join('\n');
@@ -1086,6 +1105,29 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
               ],
             ),
+            // The floor the figure can never go below: what the persona prompt
+            // and this platform's tool contract cost on their own.
+            if (fixedSystemTokens != null) ...[
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Icon(
+                    Icons.shield_moon_outlined,
+                    size: 12,
+                    color: style?.color,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      '${formatTokens(fixedSystemTokens)} fixed: system prompt '
+                      'and tools',
+                      style: style,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (usage.retrievalLabel != null) ...[
               const SizedBox(height: 2),
               Row(
