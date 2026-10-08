@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/utils/cancel_token.dart';
+import 'package:pocket_llm/features/documents/data/pdf_document_extractor.dart';
 import 'package:pocket_llm/features/documents/domain/document.dart';
 import 'package:pocket_llm/features/documents/domain/document_extraction.dart';
 
@@ -79,12 +80,15 @@ class TextDocumentExtractor implements DocumentExtractor {
 
 /// Dispatches extraction to the first extractor that supports the format.
 ///
-/// Formats no extractor supports fail with an actionable message rather than an
-/// empty document, so the UI can explain the limitation. PDF is the known case
-/// today; registering a PDF extractor here is all that is needed to support it.
+/// The default list reads plain text and PDF; a format no extractor supports
+/// fails with an actionable message rather than an empty document, so the UI can
+/// explain the limitation instead of indexing nothing.
 class DocumentExtractionService implements DocumentExtractor {
   DocumentExtractionService({
-    List<DocumentExtractor> extractors = const [TextDocumentExtractor()],
+    List<DocumentExtractor> extractors = const [
+      TextDocumentExtractor(),
+      PdfDocumentExtractor(),
+    ],
   }) : _extractors = extractors;
 
   final List<DocumentExtractor> _extractors;
@@ -110,12 +114,6 @@ class DocumentExtractionService implements DocumentExtractor {
     }
 
     final name = p.basename(path);
-    if (format == DocumentFormat.pdf) {
-      throw DocumentExtractionException(
-        'PDF text extraction is not available yet, so "$name" cannot be '
-        'indexed. Convert it to text or markdown and attach that instead.',
-      );
-    }
     throw DocumentExtractionException(
       '${documentFormatLabel(format)} files are not supported yet, so '
       '"$name" cannot be indexed.',

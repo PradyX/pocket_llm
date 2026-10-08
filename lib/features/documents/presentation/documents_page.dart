@@ -439,9 +439,10 @@ class _EmptyState extends StatelessWidget {
             hasDocumentsElsewhere
                 ? 'Pick another collection above, or add files here. Each '
                       'collection is searched on its own.'
-                : 'Add a text, markdown or source file to ask questions about '
-                      'it. PDFs are recognized, but text extraction for them '
-                      'is not available yet.',
+                : 'Add a text, markdown, source or PDF file to ask questions '
+                      'about it. Text is read on this device and never '
+                      'uploaded; scanned PDFs without selectable text are '
+                      'reported instead of indexed as blank.',
             textAlign: TextAlign.center,
             style: textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
