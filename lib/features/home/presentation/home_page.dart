@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/navigation/app_router.dart';
-import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
@@ -16,8 +15,11 @@ import 'package:pocket_llm/features/conversations/domain/message_tool_activity.d
 import 'package:pocket_llm/features/home/domain/attachment_history.dart';
 import 'package:pocket_llm/features/home/domain/readable_reply.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/features/conversations/presentation/delete_conversation_dialog.dart';
 import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
+import 'package:pocket_llm/features/home/presentation/composer_shortcuts.dart';
+import 'package:pocket_llm/features/home/presentation/context_usage_indicator.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/voice/application/tts_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
@@ -193,7 +195,11 @@ class _HomePageState extends ConsumerState<HomePage> {
       return;
     }
 
-    FocusScope.of(context).unfocus();
+    // A desktop Return-send keeps the field ready for the next message; the
+    // mobile keyboard is dismissed the way it always was.
+    if (!sendsMessageOnEnter) {
+      FocusScope.of(context).unfocus();
+    }
     _messageController.clear();
     final reusedImages = {
       for (final file in draftImages)
@@ -358,6 +364,25 @@ class _HomePageState extends ConsumerState<HomePage> {
           // what this conversation already uses.
           personaId: ref.read(personasProvider).defaultPersonaId,
         );
+  }
+
+  /// Deletes the conversation on screen, once the user has confirmed it.
+  ///
+  /// The chat header and the conversation list offer the same action, so both
+  /// ask the same question before anything is removed.
+  Future<void> _deleteActiveConversation() async {
+    final conversation = ref
+        .read(conversationControllerProvider)
+        .activeConversation;
+    if (conversation == null) return;
+
+    final confirmed = await confirmDeleteConversation(
+      context,
+      conversation.title,
+    );
+    if (!mounted || !confirmed) return;
+
+    await ref.read(homeControllerProvider.notifier).deleteActiveConversation();
   }
 
   /// Chooses the persona for the active conversation, or the app default when
@@ -583,6 +608,18 @@ class _HomePageState extends ConsumerState<HomePage> {
     final isGenerating = generationStatus.isGenerating;
     final generationText = generationStatus.statusText;
     final ttsState = ref.watch(ttsControllerProvider);
+    // While a request runs the dial reports that run's own budget, documents
+    // included. Idle, it reports what the next request from the conversation on
+    // screen would cost, so clearing or switching a chat can never leave the
+    // last run's numbers behind.
+    final contextUsage = generationStatus.isGenerating
+        ? generationStatus.contextUsage ?? contextProjection?.usage
+        : contextProjection?.usage;
+    final fixedSystemTokens = generationStatus.isGenerating
+        ? null
+        : contextProjection?.fixedTokens;
+    final toolContractIncluded =
+        contextProjection?.toolContractIncluded ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -666,20 +703,33 @@ class _HomePageState extends ConsumerState<HomePage> {
           ],
         ),
         actions: [
+          // The dial this conversation's token budget lives in: the ring shows
+          // the share of the model's input budget the next request would use,
+          // and every figure behind it is one click away in the panel that
+          // opens under the bar.
+          if (contextUsage != null && hasDownloadedModel)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: ContextUsageIndicator(
+                usage: contextUsage,
+                fixedSystemTokens: fixedSystemTokens,
+                toolContractIncluded: toolContractIncluded,
+                isGenerating: isGenerating,
+              ),
+            ),
           IconButton(
-            icon: const Icon(Icons.add_comment_outlined),
+            icon: const Icon(Icons.add),
             tooltip: 'New chat',
             onPressed: isGenerating ? null : _startNewConversation,
           ),
-          if (messages.isNotEmpty)
+          // An open conversation can be deleted whatever it holds: a chat that
+          // lost its messages still has its title and its row in the list, and
+          // hiding the action here left no way to remove it from this screen.
+          if (activeConversation != null)
             IconButton(
               icon: const Icon(Icons.delete_outline_rounded),
-              tooltip: 'Clear chat',
-              onPressed: isGenerating
-                  ? null
-                  : () {
-                      ref.read(homeControllerProvider.notifier).clearChat();
-                    },
+              tooltip: 'Delete conversation',
+              onPressed: isGenerating ? null : _deleteActiveConversation,
             ),
         ],
         bottom: activeConversation == null
@@ -805,17 +855,6 @@ class _HomePageState extends ConsumerState<HomePage> {
             hasDownloadedModel,
             canAttachImage,
             selectedModel,
-            // While a request runs the chip reports that run's own budget,
-            // documents included. Idle, it reports what the next request from
-            // the conversation on screen would cost, so clearing or switching
-            // a chat can never leave the last run's numbers behind.
-            generationStatus.isGenerating
-                ? generationStatus.contextUsage ?? contextProjection?.usage
-                : contextProjection?.usage,
-            generationStatus.isGenerating
-                ? null
-                : contextProjection?.fixedTokens,
-            contextProjection?.toolContractIncluded ?? false,
           ),
         ],
       ),
@@ -891,9 +930,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     bool hasDownloadedModel,
     bool canAttachImage,
     LlmModel? selectedModel,
-    ContextUsage? contextUsage,
-    int? fixedSystemTokens,
-    bool toolContractIncluded,
   ) {
     final canCompose = hasDownloadedModel && !isGenerating;
     final progressText = generationText.isEmpty
@@ -959,15 +995,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ],
               ),
             ),
-          if (contextUsage != null && hasDownloadedModel)
-            _buildContextUsageRow(
-              colorScheme,
-              textTheme,
-              contextUsage,
-              isGenerating,
-              fixedSystemTokens,
-              toolContractIncluded,
-            ),
           if (_draftImages.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -1007,33 +1034,40 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                 ),
               Expanded(
-                child: TextField(
-                  controller: _messageController,
-                  enabled: canCompose,
-                  readOnly: !canCompose,
-                  maxLines: 5,
-                  minLines: 1,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    hintText: !hasDownloadedModel
-                        ? 'Download a model to start chatting...'
-                        : isGenerating
-                        ? 'Wait for current response...'
-                        : canAttachImage
-                        ? 'Ask about your image or start a chat...'
-                        : 'Type a message...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
+                // Desktop: Return sends, Shift+Return adds a line. Mobile
+                // keyboards keep their own send action and Return as a line
+                // break, which is what the shortcut wrapper checks.
+                child: ComposerSendOnEnter(
+                  sendsOnEnter: canCompose && sendsMessageOnEnter,
+                  onSend: _sendMessage,
+                  child: TextField(
+                    controller: _messageController,
+                    enabled: canCompose,
+                    readOnly: !canCompose,
+                    maxLines: 5,
+                    minLines: 1,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: !hasDownloadedModel
+                          ? 'Download a model to start chatting...'
+                          : isGenerating
+                          ? 'Wait for current response...'
+                          : canAttachImage
+                          ? 'Ask about your image or start a chat...'
+                          : 'Type a message...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: colorScheme.surfaceContainerHighest,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
                     ),
-                    filled: true,
-                    fillColor: colorScheme.surfaceContainerHighest,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
+                    onSubmitted: canCompose ? (_) => _sendMessage() : null,
                   ),
-                  onSubmitted: canCompose ? (_) => _sendMessage() : null,
                 ),
               ),
               const SizedBox(width: 8),
@@ -1051,126 +1085,6 @@ class _HomePageState extends ConsumerState<HomePage> {
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  /// Compact token budget readout for the last assembled prompt.
-  Widget _buildContextUsageRow(
-    ColorScheme colorScheme,
-    TextTheme textTheme,
-    ContextUsage usage,
-    bool isGenerating,
-    int? fixedSystemTokens,
-    bool toolContractIncluded,
-  ) {
-    final style = textTheme.labelSmall?.copyWith(
-      color: colorScheme.onSurfaceVariant,
-    );
-    final trimming = usage.trimmingLabel;
-    final detail = [
-      if (isGenerating) 'Budget for the request now running',
-      if (fixedSystemTokens != null) ...[
-        toolContractIncluded
-            ? '${formatTokens(fixedSystemTokens)} tokens for the system prompt '
-                  'and the tools this device offers, sent with every message'
-            : '${formatTokens(fixedSystemTokens)} tokens for the system prompt. '
-                  'This model cannot call tools, so the tool contract is not '
-                  'sent.',
-        'What the next message from this conversation would cost. Retrieval '
-            'from your knowledge collection is added when you send it.',
-      ],
-      usage.detailLabel,
-      ?trimming,
-    ].join('\n');
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
-      child: Tooltip(
-        message: detail,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.memory_outlined, size: 14, color: style?.color),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    usage.summaryLabel,
-                    style: style,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (trimming != null)
-                  Text(
-                    'trimmed to fit',
-                    style: style?.copyWith(
-                      color: colorScheme.onSurfaceVariant.withValues(
-                        alpha: 0.7,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            // The floor the figure can never go below: what the persona prompt
-            // and this platform's tool contract cost on their own.
-            if (fixedSystemTokens != null) ...[
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  Icon(
-                    Icons.shield_moon_outlined,
-                    size: 12,
-                    color: style?.color,
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      toolContractIncluded
-                          ? '${formatTokens(fixedSystemTokens)} fixed: system '
-                                'prompt and tools'
-                          : '${formatTokens(fixedSystemTokens)} fixed: system '
-                                'prompt',
-                      style: style,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            if (usage.retrievalLabel != null) ...[
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  Icon(
-                    Icons.folder_copy_outlined,
-                    size: 12,
-                    color: style?.color,
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      usage.retrievalLabel!,
-                      style: style,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 4),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                value: usage.percent.clamp(0.0, 1.0),
-                minHeight: 3,
-                backgroundColor: colorScheme.surfaceContainerHighest,
-                color: colorScheme.primary,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

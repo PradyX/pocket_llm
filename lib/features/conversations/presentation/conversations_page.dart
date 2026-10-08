@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:pocket_llm/features/conversations/domain/conversation.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/features/conversations/presentation/delete_conversation_dialog.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:pocket_llm/features/personas/application/personas_controller.dart';
@@ -52,7 +53,7 @@ class _ConversationsPageState extends ConsumerState<ConversationsPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _startNewConversation(context),
-        icon: const Icon(Icons.add_comment_outlined),
+        icon: const Icon(Icons.add),
         label: const Text('New chat'),
       ),
       body: Column(
@@ -192,7 +193,10 @@ class _ConversationsPageState extends ConsumerState<ConversationsPage> {
           conversationTitle: conversation.title,
         );
       case 'delete':
-        final confirmed = await _confirmDelete(context, conversation.title);
+        final confirmed = await confirmDeleteConversation(
+          context,
+          conversation.title,
+        );
         if (!confirmed) return;
         await controller.deleteConversation(conversation.id);
     }
@@ -299,29 +303,6 @@ class _ConversationsPageState extends ConsumerState<ConversationsPage> {
     );
     inputController.dispose();
     return result;
-  }
-
-  Future<bool> _confirmDelete(BuildContext context, String title) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete conversation?'),
-        content: Text(
-          '"$title" and its messages will be removed from this device.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    return confirmed ?? false;
   }
 
   void _showSnackBar(BuildContext context, String message) {

@@ -13,6 +13,12 @@ class LocalNotificationService {
   bool _isInitialized = false;
   bool _notificationsAvailable = true;
 
+  /// True when the plugin itself could not be set up. Kept apart from
+  /// [_notificationsAvailable], which is about what the user allowed: a
+  /// refused permission must not stop a later request from being made, and a
+  /// failed setup must not present a prompt that cannot be answered.
+  bool _initializationFailed = false;
+
   Future<void> initialize() async {
     if (_isInitialized) return;
 
@@ -42,29 +48,42 @@ class LocalNotificationService {
     );
 
     try {
-      final initialized = await _plugin.initialize(settings: settings);
-      _notificationsAvailable = initialized ?? true;
+      // The returned value is deliberately not treated as availability. On iOS
+      // and macOS the plugin reports the *permission* state here, and this app
+      // defers that question (the request*Permission flags above are false), so
+      // the value is false until the user is asked — reading it as "not
+      // available" used to skip the request and every notice after it.
+      await _plugin.initialize(settings: settings);
     } catch (error, stackTrace) {
       debugPrint(
         'LocalNotificationService initialization disabled notifications: '
         '$error\n$stackTrace',
       );
+      _initializationFailed = true;
       _notificationsAvailable = false;
     }
 
     _isInitialized = true;
   }
 
+  /// Asks the platform for permission to show notifications.
+  ///
+  /// Only a setup failure cancels the question, so a permission the user
+  /// refused earlier can still be asked for again after they change the setting
+  /// in the system. What the platform answers decides whether notices are built
+  /// at all: a notification the system would drop is not worth the work.
   Future<void> requestPermissions() async {
     await initialize();
-    if (!_notificationsAvailable) return;
+    if (_initializationFailed) return;
 
     if (Platform.isAndroid) {
       final androidImpl = _plugin
           .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin
           >();
-      await androidImpl?.requestNotificationsPermission();
+      _recordPermissionAnswer(
+        await androidImpl?.requestNotificationsPermission(),
+      );
       return;
     }
 
@@ -73,7 +92,13 @@ class LocalNotificationService {
           .resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin
           >();
-      await iosImpl?.requestPermissions(alert: true, badge: true, sound: true);
+      _recordPermissionAnswer(
+        await iosImpl?.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        ),
+      );
     }
 
     if (Platform.isMacOS) {
@@ -81,12 +106,29 @@ class LocalNotificationService {
           .resolvePlatformSpecificImplementation<
             MacOSFlutterLocalNotificationsPlugin
           >();
-      await macOsImpl?.requestPermissions(
-        alert: true,
-        badge: true,
-        sound: true,
+      _recordPermissionAnswer(
+        await macOsImpl?.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        ),
       );
     }
+  }
+
+  /// Stores what the platform answered about notification permission.
+  ///
+  /// A null answer means the platform did not report one (older Android
+  /// releases ask at install time), so the last known state is kept.
+  void _recordPermissionAnswer(bool? granted) {
+    if (granted == null) return;
+    _notificationsAvailable = granted;
+    if (granted) return;
+    debugPrint(
+      'LocalNotificationService: notifications are not allowed here, so '
+      'download notices are skipped. Allow them in the system notification '
+      'settings for Pocket LLM to get them.',
+    );
   }
 
   Future<void> showModelDownloadComplete(String modelName) async {

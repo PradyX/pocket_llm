@@ -1275,22 +1275,33 @@ class HomeController extends _$HomeController {
     await _storageService.deleteFiles(removedPaths);
   }
 
-  Future<void> clearChat() async {
+  /// Deletes the conversation on screen, with its messages and attachments.
+  ///
+  /// The chat header offers the same action the conversation list does, so the
+  /// two cannot leave different things behind: the stored messages go, the
+  /// attachments those messages carried go with them, and the list then opens
+  /// the most recent conversation that is left — which the switch listener
+  /// loads — or the empty chat when this was the last one.
+  Future<void> deleteActiveConversation() async {
     final conversationId = _activeConversationId;
-    final attachmentPaths = state
-        .expand((message) => message.attachments)
-        .map((attachment) => attachment.path)
-        .where((path) => path.isNotEmpty)
-        .toSet();
-
-    state = const [];
-    if (conversationId != null) {
-      await ref
-          .read(conversationControllerProvider.notifier)
-          .saveConversationMessages(conversationId, const []);
+    if (conversationId == null) {
+      state = const [];
+      return;
     }
-    if (attachmentPaths.isNotEmpty) {
-      await _storageService.deleteFiles(attachmentPaths);
+
+    await ref
+        .read(conversationControllerProvider.notifier)
+        .deleteConversation(conversationId);
+
+    // A switch to another conversation is announced when the list moves on, so
+    // this only runs when the deleted chat was not the one the list considered
+    // active. The home state is emptied then, because a chat that could still
+    // write into a conversation that no longer exists would lose what it typed.
+    if (_activeConversationId == conversationId) {
+      _activeConversationId = ref
+          .read(conversationControllerProvider)
+          .activeConversationId;
+      state = const [];
     }
   }
 }

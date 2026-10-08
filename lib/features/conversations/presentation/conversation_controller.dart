@@ -237,7 +237,13 @@ class ConversationController extends _$ConversationController {
     _replaceConversation(updated);
   }
 
-  /// Persists [messages] for a conversation and refreshes its list preview.
+  /// Persists a conversation's messages and refreshes its list entry.
+  ///
+  /// The store rebuilds the summary from the messages it has just written, so
+  /// it is reloaded here: the list shows [ConversationListState.summaries], and
+  /// keeping the figures loaded at startup left a chat that was just cleared
+  /// still reading as if it held its old messages — and a chat that was just
+  /// written reading as if it were empty.
   Future<void> saveConversationMessages(
     String conversationId,
     List<Message> messages,
@@ -245,7 +251,13 @@ class ConversationController extends _$ConversationController {
     final conversation = await _conversationFor(conversationId);
     if (conversation == null) return;
     final updated = await _repository.saveMessages(conversation, messages);
-    _replaceConversation(updated);
+    final summaries = await _repository.loadSummaries();
+    state = state.copyWith(
+      summaries: summaries,
+      activeConversation: state.activeConversation?.id == updated.id
+          ? updated
+          : state.activeConversation,
+    );
   }
 
   /// Replaces the placeholder title with the first user message text.
