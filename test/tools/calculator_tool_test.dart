@@ -13,6 +13,33 @@ void main() {
     expect(evaluateExpression('2 ^ 3 ^ 2'), '512');
   });
 
+  test('reads a percentage the way the agent screen writes it', () {
+    // The Agent screen's own example goal, which a real 0.5B model sent as
+    // "18% of 2450" and the parser used to reject as "Expected a number".
+    expect(evaluateExpression('18% of 2450'), '441');
+    expect(evaluateExpression('18 % of 2450'), '441');
+    expect(evaluateExpression('18 percent of 2450'), '441');
+    expect(evaluateExpression('18%'), '0.18');
+    expect(evaluateExpression('2450 * 18%'), '441');
+    expect(evaluateExpression('18% OF 2450'), '441');
+    expect(evaluateExpression('(2 + 3)%'), '0.05');
+    // Modulo keeps working when an operand follows the sign.
+    expect(evaluateExpression('18 % 5'), '3');
+    expect(evaluateExpression('18%5'), '3');
+    expect(evaluateExpression('18 % (2 + 1)'), '0');
+    // A percentage with nothing to take a percentage of is still invalid.
+    expect(
+      () => evaluateExpression('18% of'),
+      throwsA(
+        isA<Exception>().having(
+          (error) => error.toString(),
+          'message',
+          contains('Expected a'),
+        ),
+      ),
+    );
+  });
+
   test('handles signs and decimals', () {
     expect(evaluateExpression('-5 + 2'), '-3');
     expect(evaluateExpression('3 * -2'), '-6');

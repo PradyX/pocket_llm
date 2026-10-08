@@ -23,8 +23,9 @@ ToolEntry buildCalculatorTool() {
           name: 'expression',
           type: ToolParameterType.string,
           description:
-              'Arithmetic to evaluate, for example "(2 + 3) * 4". '
-              'Supports + - * / % ^ and parentheses.',
+              'Arithmetic to evaluate, for example "(2 + 3) * 4" or '
+              '"18% of 2450". Supports + - * / % ^, parentheses and the words '
+              'percent/of (18% = 0.18, "18% of 2450" = 441).',
           maxLength: maximumExpressionLength,
         ),
       ],
@@ -63,9 +64,16 @@ String _formatNumber(double value) {
   return text.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
 }
 
-/// Recursive-descent parser for `+ - * / % ^`, unary signs and parentheses.
+/// Recursive-descent parser for `+ - * / % ^`, unary signs, parentheses and
+/// percentages.
 ///
 /// Precedence, lowest first: sum, product, power (right-associative), unary.
+///
+/// `%` is modulo when an operand follows (`18 % 5` = 3) and percent when it ends
+/// the factor (`18%` = 0.18), because that is how people write both: the agent
+/// screen's own example is "What is 18% of 2450?". A percent may be followed by
+/// `of` to multiply by the thing it is a percentage of, so `18% of 2450` = 441
+/// and `2450 * 18%` = 441. The word `percent` means the same as the suffix.
 class _ExpressionParser {
   _ExpressionParser(this.source);
 
@@ -120,13 +128,58 @@ class _ExpressionParser {
         if (divisor == 0) throw Exception('Division by zero.');
         value /= divisor;
       } else if (_match('%')) {
-        final divisor = _parsePower();
-        if (divisor == 0) throw Exception('Division by zero.');
-        value %= divisor;
+        if (_startsOperand()) {
+          final divisor = _parsePower();
+          if (divisor == 0) throw Exception('Division by zero.');
+          value %= divisor;
+        } else {
+          value = _applyPercent(value);
+        }
+      } else if (_matchWord('percent')) {
+        value = _applyPercent(value);
       } else {
         return value;
       }
     }
+  }
+
+  /// Turns a factor into a percentage of something: `18%` is 0.18, and a
+  /// following `of` says what it is a percentage of (`18% of 2450` = 441).
+  double _applyPercent(double value) {
+    value /= 100;
+    _skipSpaces();
+    if (_matchWord('of')) {
+      value *= _parsePower();
+    }
+    return value;
+  }
+
+  /// True when the next token starts a value, which is what tells a modulo
+  /// (`18 % 5`) apart from a percent (`18% of 2450`).
+  bool _startsOperand() {
+    var index = _index;
+    while (index < source.length && source[index] == ' ') {
+      index++;
+    }
+    if (index >= source.length) return false;
+    final character = source[index];
+    return _isDigit(character) || character == '.' || character == '(';
+  }
+
+  /// Consumes [word] when it appears here as a whole word.
+  bool _matchWord(String word) {
+    _skipSpaces();
+    final end = _index + word.length;
+    if (end > source.length) return false;
+    if (source.substring(_index, end).toLowerCase() != word) return false;
+    if (end < source.length && _isDigit(source[end])) return false;
+    _index = end;
+    return true;
+  }
+
+  bool _isDigit(String character) {
+    final code = character.codeUnitAt(0);
+    return code >= 0x30 && code <= 0x39;
   }
 
   double _parsePower() {
@@ -169,9 +222,7 @@ class _ExpressionParser {
     final start = _index;
     while (_index < source.length) {
       final character = source[_index];
-      final isDigit =
-          character.codeUnitAt(0) >= 0x30 && character.codeUnitAt(0) <= 0x39;
-      if (!isDigit && character != '.') break;
+      if (!_isDigit(character) && character != '.') break;
       _index++;
     }
 
