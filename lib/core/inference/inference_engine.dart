@@ -9,15 +9,24 @@ import 'dart:async';
 /// `llama_cpp_dart` type; a second implementation can be swapped in behind this
 /// interface without touching a feature module.
 ///
-/// Deliberately absent for now, because nothing consumes them and a runtime
-/// cannot be asked for what it does not expose:
+/// Deliberately absent. Each was re-checked against the pinned runtime's own
+/// API while Road Map 1 section 17 was evaluated (2026-10-08):
 ///
-/// * `tokenize` — token counts come from `TokenEstimator` (the bundled isolate
-///   API exposes no tokenizer), so a real tokenizer is an addition, not a
-///   move.
-/// * `getMetadata` — GGUF metadata is read by this app's own GGUF reader, not
-///   by the runtime.
-/// * `embeddings` — reported through [InferenceCapabilities] as unsupported.
+/// * `tokenize` — the binding does have a `Tokenizer`, but it needs the
+///   model's vocabulary, which lives inside the runtime isolate and cannot be
+///   reached from here, so token counts stay `TokenEstimator` estimates. Both
+///   the pinned `0.9.0-dev.10` and the `0.9.0-dev.12` candidate tokenize only
+///   inside the isolate: this is a binding gap, not a missing feature here,
+///   and it closes with a real count the day one of them exposes it.
+/// * `getMetadata` — deliberately not here: this app reads GGUF metadata with
+///   its own reader, which is authoritative and answers before any model is
+///   loaded, so routing the question through a resident runtime would be a
+///   detour.
+/// * `embeddings` — the binding does expose `LlamaEngine.embed`, so the
+///   runtime could answer; what is missing is an engine that offers it and a
+///   consumer that wants it (the knowledge index is lexical by design).
+///   [InferenceCapabilities.embeddings] therefore stays false: a capability
+///   flag describes what can be asked for through this seam.
 abstract interface class InferenceEngine {
   /// True while a model is resident in memory.
   bool get isLoaded;
@@ -166,7 +175,8 @@ class InferenceCapabilities {
   /// Audio input, which needs the same bundled runtime.
   final bool audio;
 
-  /// Embedding vectors, which the bundled runtime does not expose.
+  /// Embedding vectors. False today: the binding can produce them, but no
+  /// implementation of this interface offers them and nothing asks.
   final bool embeddings;
 }
 

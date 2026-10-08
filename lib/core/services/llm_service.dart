@@ -78,7 +78,9 @@ class LlmService implements InferenceEngine {
       gpuOffload: supportsGpuOffload,
       vision: multimodal,
       audio: multimodal,
-      // The bundled isolate API exposes no embedding entry point.
+      // The runtime can produce embeddings, but no method on the seam asks
+      // for one and the knowledge index is lexical, so nothing here can offer
+      // it yet. See `InferenceEngine`'s note on the section 17 evaluation.
       embeddings: false,
     );
   }

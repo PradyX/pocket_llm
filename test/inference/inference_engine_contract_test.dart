@@ -235,5 +235,27 @@ void main() {
             'one runtime and make the swap unsafe.',
       );
     });
+
+    test('the pinned runtime is the one section 17 was evaluated against', () {
+      // Road Map 1 section 17: a newer binding is not adopted until its
+      // checklist is run and recorded. Moving this pin without re-reading the
+      // record is what this breaks on.
+      const evaluatedVersion = '0.9.0-dev.10';
+
+      final pin = RegExp(
+        r'^\s*llama_cpp_dart:\s*(\S+)\s*$',
+        multiLine: true,
+      ).firstMatch(File('pubspec.yaml').readAsStringSync())?.group(1);
+
+      expect(
+        pin,
+        evaluatedVersion,
+        reason:
+            'The runtime pin changed. Re-run the 13-point checklist in Road Map '
+            '1 section 17, record it in the vault note "Architecture and '
+            'Runtime", and update this test with the version that was '
+            'evaluated.',
+      );
+    });
   });
 }
