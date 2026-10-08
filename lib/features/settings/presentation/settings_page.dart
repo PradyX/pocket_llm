@@ -101,6 +101,31 @@ class SettingsPage extends ConsumerWidget {
               ],
             ),
           ),
+          const SizedBox(height: 24),
+          Text(
+            'Data',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.inventory_2_outlined),
+                  title: const Text('Backup and restore'),
+                  subtitle: const Text(
+                    'Save chats, personas, profiles, settings and benchmarks '
+                    'to one file',
+                  ),
+                  onTap: () => context.push(AppRoutes.backup),
+                ),
+              ],
+            ),
+          ),
           // The prebuilt global "LLM Inference" controls (adaptive mode, sampling
           // preset, max output tokens, advanced sampling override) are hidden for
           // now while Inference Profiles own per-chat sampling. Their providers are
