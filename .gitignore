@@ -75,3 +75,6 @@ lib/firebase_options.dart
 /linux/lib/*
 /ios/llama-runtime.version
 *.md
+
+# Agent workspace state
+.freebuff/
