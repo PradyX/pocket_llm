@@ -14,7 +14,9 @@ import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/features/conversations/application/conversation_context_builder.dart';
+import 'package:pocket_llm/features/conversations/application/conversation_memory_service.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
+import 'package:pocket_llm/features/conversations/domain/conversation_memory.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/conversations/domain/message_attachment.dart';
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
@@ -103,9 +105,9 @@ class ContextProjection {
   /// prompt.
   final bool toolContractIncluded;
 
-  /// Tokens the system prompt and the platform's tool contract cost before a
-  /// single message is sent. An empty conversation still pays this, which is
-  /// why the figure never reaches zero.
+  /// Tokens the system prompt, the platform's tool contract and the stored
+  /// summary of older turns cost before a single message is sent. An empty
+  /// conversation still pays this, which is why the figure never reaches zero.
   final int fixedTokens;
 }
 
@@ -115,12 +117,21 @@ ContextProjection projectConversationContext({
   required String systemPrompt,
   required ContextPolicy policy,
   bool toolContractIncluded = false,
+  ConversationMemory? memory,
 }) {
+  final assembly = const ConversationContextBuilder().build(
+    messages: messages,
+    systemPrompt: systemPrompt,
+    policy: policy,
+    memory: memory,
+  );
   return ContextProjection(
-    usage: const ConversationContextBuilder()
-        .build(messages: messages, systemPrompt: systemPrompt, policy: policy)
-        .usage,
-    fixedTokens: TokenEstimator.estimateMessage(systemPrompt),
+    usage: assembly.usage,
+    // The summary of older turns is charged before any message, so it belongs
+    // to the floor the chip reports rather than to the history.
+    fixedTokens:
+        TokenEstimator.estimateMessage(systemPrompt) +
+        assembly.usage.memoryTokens,
     toolContractIncluded: toolContractIncluded,
   );
 }
@@ -179,6 +190,12 @@ final homeContextProjectionProvider = Provider.autoDispose<ContextProjection?>((
     ),
     policy: policy,
     toolContractIncluded: toolContractIncluded,
+    // A stored summary of older turns is sent with every request, exactly like
+    // the system prompt, so the projection charges for it too.
+    memory: ref
+        .watch(conversationControllerProvider)
+        .activeConversation
+        ?.memory,
   );
 });
 
@@ -198,9 +215,24 @@ class HomeController extends _$HomeController {
   bool _stopRequestedByUser = false;
   double? _adaptiveTokensPerSecondEma;
 
+  /// The running local summary of older turns, when one is in flight.
+  ///
+  /// Road Map 1 Phase 4 Strategy B: summarising is a second local generation,
+  /// so it runs after the reply and is cancelled the moment the user asks for
+  /// something new — the chat request always has priority over bookkeeping.
+  Future<void>? _memoryRefresh;
+  bool _memoryRefreshCancelled = false;
+
+  static const ConversationMemoryService _memoryService =
+      ConversationMemoryService();
+
   InferenceEngine get _engine => ref.read(inferenceEngineProvider);
   ModelStorageService get _storageService =>
       ref.read(modelStorageServiceProvider);
+
+  /// Memory already written for the open conversation, if any.
+  ConversationMemory? get _conversationMemory =>
+      ref.read(conversationControllerProvider).activeConversation?.memory;
 
   /// Persona the active conversation chats with.
   ///
@@ -357,6 +389,11 @@ class HomeController extends _$HomeController {
 
     final conversationId = await _ensureActiveConversation();
     if (conversationId == null) return;
+
+    // A summary that is still being written is cancelled before the model is
+    // asked for a reply: one generation runs at a time, and the chat turn is
+    // the one the user is waiting for.
+    await _cancelMemoryRefresh();
 
     _stopRequestedByUser = false;
     _setStatus(
@@ -591,6 +628,7 @@ class HomeController extends _$HomeController {
         systemPrompt: _systemPromptFor(selectedModel),
         policy: contextPolicy,
         documentContext: documentContext,
+        memory: _conversationMemory,
       );
       final messageSources = _sourcesFrom(documentContext);
 
@@ -715,6 +753,7 @@ class HomeController extends _$HomeController {
           promptTokens: promptTokens,
           contextTokens: contextTokens,
         );
+        _startMemoryRefresh(assembly: assembly, model: selectedModel);
       } else if (firstReply is RegistryToolReply) {
         await _answerAfterToolCall(
           aiMessageId: aiMessageId,
@@ -965,6 +1004,84 @@ class HomeController extends _$HomeController {
       sources: sources,
       toolActivity: toolActivity,
     );
+    _startMemoryRefresh(assembly: assembly, model: selectedModel);
+  }
+
+  /// Condenses the turns this request could not fit, in the background.
+  ///
+  /// Road Map 1 Phase 4 Strategy B: without this the oldest messages are simply
+  /// dropped, and a long chat loses its beginning. The refresh folds the newly
+  /// omitted messages into the conversation's stored memory, which the next
+  /// request is charged for instead of the text it stands for. It runs only
+  /// after a completed reply, only when enough text was left out, and never at
+  /// the same time as another refresh.
+  void _startMemoryRefresh({
+    required ContextAssembly assembly,
+    required LlmModel model,
+  }) {
+    if (_memoryRefresh != null) return;
+    if (assembly.omittedMessages.isEmpty) return;
+    if (!_memoryService.shouldRefresh(assembly.omittedMessages)) return;
+
+    _memoryRefreshCancelled = false;
+    final refresh = _runMemoryRefresh(assembly: assembly, model: model);
+    _memoryRefresh = refresh;
+    unawaited(
+      refresh.whenComplete(() {
+        if (identical(_memoryRefresh, refresh)) _memoryRefresh = null;
+      }),
+    );
+  }
+
+  Future<void> _runMemoryRefresh({
+    required ContextAssembly assembly,
+    required LlmModel model,
+  }) async {
+    final conversationId = _activeConversationId;
+    if (conversationId == null) return;
+
+    final omitted = assembly.omittedMessages;
+    final anchorMessageId = omitted.last.id;
+    final anchorIndex = state.indexWhere(
+      (message) => message.id == anchorMessageId,
+    );
+    if (anchorIndex < 0) return;
+
+    try {
+      final memory = await _memoryService.refresh(
+        engine: _engine,
+        messages: omitted,
+        anchorMessageId: anchorMessageId,
+        coveredCount: anchorIndex + 1,
+        modelId: model.id,
+        previous: _conversationMemory,
+      );
+      // A summary cut short by a new request is not worth keeping: the next
+      // refresh starts from the previous memory instead of a half sentence.
+      if (memory == null || _memoryRefreshCancelled) return;
+      await ref
+          .read(conversationControllerProvider.notifier)
+          .setMemory(conversationId, memory);
+    } catch (error) {
+      // Summarising is an addition to the chat, never a requirement: a failure
+      // leaves the previous memory in place and the chat keeps working with
+      // plain sliding context.
+      debugPrint('HomeController: could not summarize older turns: $error');
+    }
+  }
+
+  /// Stops an in-flight summary so the next request can own the model.
+  Future<void> _cancelMemoryRefresh() async {
+    final pending = _memoryRefresh;
+    if (pending == null) return;
+    _memoryRefreshCancelled = true;
+    _engine.cancel();
+    try {
+      await pending.timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // A summary that will not end does not hold up the request.
+    }
+    _memoryRefresh = null;
   }
 
   /// The message list the model was given, ready to extend for a follow-up.

@@ -10,9 +10,9 @@ import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 /// the middle. It sits in the chat's app bar, next to the new-chat button.
 /// Clicking it opens the budget panel under the bar — used against available
 /// tokens, the bar, the window and answer reservation, what the system prompt,
-/// the tool contract, the history and any retrieved documents cost, and what
-/// the assembly had to drop or shorten — so the bar stays one quiet dial until
-/// the figures are asked for. A request that had to trim messages turns the
+/// the tool contract, the summary of earlier turns, the history and any
+/// retrieved documents cost, and what the assembly had to drop or shorten — so
+/// the bar stays one quiet dial until the figures are asked for. A request that had to trim messages turns the
 /// ring to the warning colour, so that is visible without opening anything.
 class ContextUsageIndicator extends StatefulWidget {
   const ContextUsageIndicator({
@@ -232,6 +232,14 @@ class _ContextUsagePanel extends StatelessWidget {
                 label: 'Conversation history',
                 value: formatTokens(historyTokens),
               ),
+            if (usage.memoryCoveredMessages > 0)
+              _MetricRow(
+                label: 'Earlier turns (summary)',
+                value:
+                    '${formatTokens(usage.memoryTokens)} · '
+                    '${usage.memoryCoveredMessages} '
+                    'message${usage.memoryCoveredMessages == 1 ? '' : 's'}',
+              ),
             if (usage.retrievedSources > 0)
               _MetricRow(
                 label: 'Retrieved documents',
@@ -277,8 +285,12 @@ class _ContextUsagePanel extends StatelessWidget {
               ),
             const SizedBox(height: 8),
             Text(
-              'Older turns drop once the input budget runs out, and a long '
-              'message keeps its start and end.',
+              usage.memoryCoveredMessages > 0
+                  ? 'Turns that no longer fit are condensed locally into the '
+                        'summary above, so a long chat keeps its beginning.'
+                  : 'Older turns are dropped once the input budget runs out '
+                        'and are condensed locally into a summary as the chat '
+                        'grows. A long message keeps its start and end.',
               style: labelStyle,
             ),
           ],

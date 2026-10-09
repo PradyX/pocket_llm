@@ -173,6 +173,8 @@ class ContextUsage {
     required this.includedMessages,
     required this.droppedMessages,
     required this.truncatedMessages,
+    this.memoryTokens = 0,
+    this.memoryCoveredMessages = 0,
     this.retrievalTokens = 0,
     this.retrievedSources = 0,
   });
@@ -192,6 +194,12 @@ class ContextUsage {
   final int includedMessages;
   final int droppedMessages;
   final int truncatedMessages;
+
+  /// Tokens spent on the local summary of older turns.
+  final int memoryTokens;
+
+  /// How many older messages that summary stands for.
+  final int memoryCoveredMessages;
 
   /// Tokens spent on the retrieved local document section.
   final int retrievalTokens;
@@ -215,6 +223,14 @@ class ContextUsage {
   String get detailLabel =>
       '${formatTokens(contextTokens)} context · '
       '${formatTokens(reservedOutputTokens)} reserved for the answer';
+
+  /// Conversation memory line, or null when nothing is summarized.
+  String? get memoryLabel {
+    if (memoryCoveredMessages <= 0) return null;
+    return '$memoryCoveredMessages earlier '
+        'message${memoryCoveredMessages == 1 ? '' : 's'} summarized · '
+        '${formatTokens(memoryTokens)} tokens';
+  }
 
   /// Local documents line, or null when none were used.
   String? get retrievalLabel {

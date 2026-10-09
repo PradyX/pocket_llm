@@ -1,4 +1,5 @@
 import 'package:pocket_llm/core/utils/id_generator.dart';
+import 'package:pocket_llm/features/conversations/domain/conversation_memory.dart';
 
 /// Title assigned to a conversation before its first user message arrives.
 const String defaultConversationTitle = 'New chat';
@@ -20,6 +21,14 @@ class Conversation {
   final String? inferenceProfileId;
   final String? systemPrompt;
   final bool isPinned;
+
+  /// Local summary of the turns that no longer fit the context window.
+  ///
+  /// Road Map 1 Phase 4 Strategy B: optional, additive and version-tolerant, so
+  /// a conversation stored by an earlier build loads with `null` and keeps
+  /// working with plain sliding context until a summary is written.
+  final ConversationMemory? memory;
+
   final Map<String, dynamic> metadata;
 
   const Conversation({
@@ -32,6 +41,7 @@ class Conversation {
     this.inferenceProfileId,
     this.systemPrompt,
     this.isPinned = false,
+    this.memory,
     this.metadata = const {},
   });
 
@@ -67,6 +77,7 @@ class Conversation {
     Object? inferenceProfileId = _unset,
     Object? systemPrompt = _unset,
     bool? isPinned,
+    Object? memory = _unset,
   }) {
     return Conversation(
       id: id,
@@ -84,6 +95,7 @@ class Conversation {
           ? this.systemPrompt
           : systemPrompt as String?,
       isPinned: isPinned ?? this.isPinned,
+      memory: memory == _unset ? this.memory : memory as ConversationMemory?,
       metadata: metadata,
     );
   }
@@ -102,6 +114,7 @@ class Conversation {
       inferenceProfileId: inferenceProfileId,
       systemPrompt: systemPrompt,
       isPinned: isPinned,
+      memory: memory,
       metadata: metadata,
     );
   }
@@ -117,6 +130,7 @@ class Conversation {
       'inferenceProfileId': inferenceProfileId,
       'systemPrompt': systemPrompt,
       'isPinned': isPinned,
+      'memory': memory?.toJson(),
       'metadata': metadata,
     };
   }
@@ -141,6 +155,7 @@ class Conversation {
       inferenceProfileId: json['inferenceProfileId'] as String?,
       systemPrompt: json['systemPrompt'] as String?,
       isPinned: json['isPinned'] as bool? ?? false,
+      memory: ConversationMemory.fromJson(json['memory']),
       metadata: rawMetadata is Map
           ? Map<String, dynamic>.from(rawMetadata)
           : const {},

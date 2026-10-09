@@ -6,6 +6,7 @@ import 'package:pocket_llm/features/conversations/data/conversation_migration.da
 import 'package:pocket_llm/features/conversations/data/conversation_repository.dart';
 import 'package:pocket_llm/features/conversations/data/conversation_store.dart';
 import 'package:pocket_llm/features/conversations/domain/conversation.dart';
+import 'package:pocket_llm/features/conversations/domain/conversation_memory.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -206,6 +207,16 @@ class ConversationController extends _$ConversationController {
       return;
     }
     final updated = await _repository.setActiveModel(conversationId, modelId);
+    _replaceConversation(updated);
+  }
+
+  /// Stores (or clears) the local summary of a conversation's older turns.
+  Future<void> setMemory(
+    String conversationId,
+    ConversationMemory? memory,
+  ) async {
+    if (_findSummary(conversationId) == null) return;
+    final updated = await _repository.setMemory(conversationId, memory);
     _replaceConversation(updated);
   }
 

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/features/conversations/data/conversation_store.dart';
 import 'package:pocket_llm/features/conversations/domain/conversation.dart';
+import 'package:pocket_llm/features/conversations/domain/conversation_memory.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 
 /// Format marker for exported conversation payloads.
@@ -88,6 +89,20 @@ class ConversationRepository {
     return _update(
       conversationId,
       (conversation) => conversation.copyWith(activeModelId: modelId),
+    );
+  }
+
+  /// Stores (or clears) the local summary of the conversation's older turns.
+  ///
+  /// Road Map 1 Phase 4 Strategy B. Kept on the conversation itself so it
+  /// survives restarts, exports and backups with the history it describes.
+  Future<Conversation> setMemory(
+    String conversationId,
+    ConversationMemory? memory,
+  ) {
+    return _update(
+      conversationId,
+      (conversation) => conversation.copyWith(memory: memory),
     );
   }
 
