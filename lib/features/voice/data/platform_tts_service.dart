@@ -39,6 +39,18 @@ abstract class SpeechSynthesisEngine {
     SpeechVoice? voice,
   });
 
+  /// Holds the current utterance where it is.
+  ///
+  /// Where it resumes from is the platform's business: Apple continues at the
+  /// exact word, and so does Android 8.0 and later. On Android 7 the engine
+  /// reports no text ranges, so resuming restarts the sentence it was in — a
+  /// smaller annoyance than not being able to pause at all, and the reason the
+  /// control says "Pause" rather than promising a word-perfect stop.
+  Future<void> pause();
+
+  /// Continues a paused utterance.
+  Future<void> resume();
+
   /// Stops the current utterance immediately.
   Future<void> stop();
 }
@@ -215,6 +227,18 @@ class SttsSpeechEngine implements SpeechSynthesisEngine {
       return candidate.id;
     }
     return null;
+  }
+
+  @override
+  Future<void> pause() async {
+    await prepare();
+    await _tts.pause();
+  }
+
+  @override
+  Future<void> resume() async {
+    await prepare();
+    await _tts.resume();
   }
 
   @override

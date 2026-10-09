@@ -36,6 +36,8 @@ class _FakeTts extends Tts {
   final List<String> chosenVoices = [];
   Object? startError;
   bool stopped = false;
+  int pauseCalls = 0;
+  int resumeCalls = 0;
 
   @override
   Future<bool> isSupported() async {
@@ -67,6 +69,17 @@ class _FakeTts extends Tts {
     if (error != null) throw error;
     spoken.add(text);
     if (finishOnStart) finish();
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCalls++;
+    _states.add(TtsState.pause);
+  }
+
+  @override
+  Future<void> resume() async {
+    resumeCalls++;
   }
 
   @override
@@ -201,6 +214,34 @@ void main() {
     await engine.stop();
     await run;
     expect(tts.stopped, isTrue);
+  });
+
+  test('a paused utterance keeps speaking and is not finished', () async {
+    final tts = _FakeTts(finishOnStart: false);
+    final engine = _engine(tts);
+    addTearDown(tts.close);
+
+    var finished = false;
+    final run = engine
+        .speak(text: 'Hello there', rate: defaultSpeechRate)
+        .then((_) => finished = true);
+    await _waitFor(() => tts.spoken.isNotEmpty);
+
+    await engine.pause();
+    // The engine reports the hold on its state stream; that must not be read as
+    // the end of the utterance, or the controller would clear "Speaking..."
+    // while the device is holding the sentence.
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(finished, isFalse);
+    expect(tts.pauseCalls, 1);
+
+    await engine.resume();
+    expect(tts.resumeCalls, 1);
+    expect(finished, isFalse);
+
+    tts.finish();
+    await run;
+    expect(finished, isTrue);
   });
 
   test('clamps the rate to what the engines accept', () async {

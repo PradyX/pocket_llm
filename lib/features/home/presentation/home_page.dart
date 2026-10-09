@@ -343,6 +343,17 @@ class _HomePageState extends ConsumerState<HomePage> {
     await _readReplyAloud(message);
   }
 
+  /// Holds the reply that is being read, or continues it.
+  Future<void> _toggleReadingPause() async {
+    final controller = ref.read(ttsControllerProvider.notifier);
+    final isPaused = ref.read(ttsControllerProvider).isPaused;
+    if (isPaused) {
+      await controller.resume();
+    } else {
+      await controller.pause();
+    }
+  }
+
   /// Speaks one reply. Only one is read at a time, so starting another stops
   /// the first and the audio never overlaps.
   Future<void> _readReplyAloud(Message message) async {
@@ -880,6 +891,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                         isReading:
                             ttsState.isSpeaking &&
                             _readingMessageId == message.id,
+                        isPaused: ttsState.isPaused,
+                        onPauseReading: () => _toggleReadingPause(),
                       );
                     },
                   ),
@@ -1369,12 +1382,21 @@ class _ChatBubble extends StatefulWidget {
   /// True while this message is the one being read.
   final bool isReading;
 
+  /// True while that reading is held where it is; the pause action then
+  /// continues it instead.
+  final bool isPaused;
+
+  /// Holds the reading or continues it. Only shown while [isReading].
+  final VoidCallback? onPauseReading;
+
   const _ChatBubble({
     required this.message,
     this.onRegenerate,
     this.onEditResend,
     this.onReadAloud,
     this.isReading = false,
+    this.isPaused = false,
+    this.onPauseReading,
   });
 
   @override
@@ -1557,6 +1579,24 @@ class _ChatBubbleState extends State<_ChatBubble> {
                       label: Text(
                         widget.isReading ? 'Stop reading' : 'Read aloud',
                       ),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: actionForeground,
+                        side: BorderSide(color: actionBorder),
+                      ),
+                    ),
+                  // Pausing only exists while something is being read, so the
+                  // row never offers a control that would do nothing.
+                  if (widget.isReading && widget.onPauseReading != null)
+                    OutlinedButton.icon(
+                      onPressed: widget.onPauseReading,
+                      icon: Icon(
+                        widget.isPaused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_circle_outline,
+                        size: 16,
+                      ),
+                      label: Text(widget.isPaused ? 'Resume' : 'Pause'),
                       style: OutlinedButton.styleFrom(
                         visualDensity: VisualDensity.compact,
                         foregroundColor: actionForeground,

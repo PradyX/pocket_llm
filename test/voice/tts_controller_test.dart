@@ -24,6 +24,9 @@ class _FakeEngine implements SpeechSynthesisEngine {
   double? lastRate;
   SpeechVoice? lastVoice;
   int stopCalls = 0;
+  int pauseCalls = 0;
+  int resumeCalls = 0;
+  String? pauseError;
   Completer<void>? pending;
 
   @override
@@ -48,6 +51,18 @@ class _FakeEngine implements SpeechSynthesisEngine {
     final failure = speakError;
     if (failure != null) throw Exception(failure);
     await pending?.future;
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCalls++;
+    final failure = pauseError;
+    if (failure != null) throw Exception(failure);
+  }
+
+  @override
+  Future<void> resume() async {
+    resumeCalls++;
   }
 
   @override
@@ -241,6 +256,87 @@ void main() {
 
     await run;
     expect(container.read(ttsControllerProvider).isSpeaking, isFalse);
+  });
+
+  test('holds an utterance and continues it', () async {
+    final engine = _FakeEngine();
+    engine.pending = Completer<void>();
+    final container = containerFor(engine: engine);
+    addTearDown(container.dispose);
+    final controller = container.read(ttsControllerProvider.notifier);
+
+    final run = controller.speak('Hello');
+    await pumpUntil(() => engine.spoken.isNotEmpty);
+
+    await controller.pause();
+    var state = container.read(ttsControllerProvider);
+    expect(engine.pauseCalls, 1);
+    expect(state.isPaused, isTrue);
+    // Paused is not stopped: the utterance is still the current one.
+    expect(state.isSpeaking, isTrue);
+    expect(state.statusText, 'Paused');
+
+    await controller.resume();
+    state = container.read(ttsControllerProvider);
+    expect(engine.resumeCalls, 1);
+    expect(state.isPaused, isFalse);
+    expect(state.statusText, 'Speaking...');
+
+    engine.pending!.complete();
+    await run;
+    expect(container.read(ttsControllerProvider).isSpeaking, isFalse);
+    expect(container.read(ttsControllerProvider).isPaused, isFalse);
+  });
+
+  test('does nothing when there is no utterance to hold', () async {
+    final engine = _FakeEngine();
+    final container = containerFor(engine: engine);
+    addTearDown(container.dispose);
+    final controller = container.read(ttsControllerProvider.notifier);
+
+    await controller.pause();
+    await controller.resume();
+
+    expect(engine.pauseCalls, 0);
+    expect(engine.resumeCalls, 0);
+    expect(container.read(ttsControllerProvider).isPaused, isFalse);
+  });
+
+  test('stops a paused utterance without resuming it first', () async {
+    final engine = _FakeEngine();
+    engine.pending = Completer<void>();
+    final container = containerFor(engine: engine);
+    addTearDown(container.dispose);
+    final controller = container.read(ttsControllerProvider.notifier);
+
+    final run = controller.speak('Hello');
+    await pumpUntil(() => engine.spoken.isNotEmpty);
+    await controller.pause();
+    await controller.stop();
+
+    final state = container.read(ttsControllerProvider);
+    expect(state.isSpeaking, isFalse);
+    expect(state.isPaused, isFalse);
+    await run;
+  });
+
+  test('reports a device that refused to hold the reading', () async {
+    final engine = _FakeEngine()..pauseError = 'the engine was busy';
+    engine.pending = Completer<void>();
+    final container = containerFor(engine: engine);
+    addTearDown(container.dispose);
+    final controller = container.read(ttsControllerProvider.notifier);
+
+    final run = controller.speak('Hello');
+    await pumpUntil(() => engine.spoken.isNotEmpty);
+    await controller.pause();
+
+    final state = container.read(ttsControllerProvider);
+    expect(state.isPaused, isFalse);
+    expect(state.errorMessage, contains('could not hold'));
+
+    engine.pending!.complete();
+    await run;
   });
 
   test('keeps the choice of voice in the settings', () async {

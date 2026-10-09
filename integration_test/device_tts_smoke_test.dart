@@ -90,4 +90,58 @@ void main() {
       completes,
     ).timeout(const Duration(seconds: 60));
   });
+
+  testWidgets('an utterance can be held and continued, without a sound', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    if (!isSpeechSynthesisSupported) return;
+
+    // Pause and resume are the platform's, not this app's, so only a device can
+    // say whether they behave: the unit tests prove the controller follows the
+    // engine, not that the engine holds a sentence and continues it. Still
+    // silent (volume zero).
+    final tts = Tts();
+    await tts.setVolume(0.0);
+    final engine = SttsSpeechEngine(tts: tts);
+    await engine.prepare();
+
+    var finished = false;
+    final spokenAt = DateTime.now();
+    final run = engine
+        .speak(text: _longSentence, rate: defaultSpeechRate)
+        .then((_) => finished = true);
+
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    final wasSpeaking = !finished;
+    await engine.pause();
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    // A held utterance is not a finished one: if pausing ended it, the
+    // controller would clear "Speaking..." while the sentence is still there.
+    final endedWhileHeld = finished;
+    await engine.resume();
+
+    await run.timeout(const Duration(seconds: 60));
+    // ignore: avoid_print
+    print(
+      'pause/resume: speaking when held=$wasSpeaking · ended while held='
+      '$endedWhileHeld · total ${DateTime.now().difference(spokenAt).inMilliseconds} ms',
+    );
+
+    expect(
+      wasSpeaking,
+      isTrue,
+      reason:
+          'the engine was already done before the pause, so the hold was '
+          'never exercised',
+    );
+    expect(endedWhileHeld, isFalse, reason: 'pausing ended the utterance');
+    expect(finished, isTrue, reason: 'the utterance never finished after resuming');
+  });
 }
+
+/// Long enough that the hold lands in the middle of it on every platform.
+const String _longSentence =
+    'Pocket LLM checks on this device that a sentence can be held where it is '
+    'and then continued, which is what the pause control on a reply does. It '
+    'reads this sentence silently so that running the test never makes a sound.';

@@ -19,6 +19,7 @@ class TtsState {
   const TtsState({
     this.isSupported = false,
     this.isSpeaking = false,
+    this.isPaused = false,
     this.isLoadingVoices = false,
     this.voices = const [],
     this.selectedVoice,
@@ -32,6 +33,10 @@ class TtsState {
   final bool isSupported;
 
   final bool isSpeaking;
+
+  /// True while an utterance is held where it is and can be resumed.
+  final bool isPaused;
+
   final bool isLoadingVoices;
 
   /// Voices the device reported, sorted by language then name.
@@ -68,6 +73,7 @@ class TtsState {
   TtsState copyWith({
     bool? isSupported,
     bool? isSpeaking,
+    bool? isPaused,
     bool? isLoadingVoices,
     List<SpeechVoice>? voices,
     Object? selectedVoice = _unset,
@@ -80,6 +86,7 @@ class TtsState {
     return TtsState(
       isSupported: isSupported ?? this.isSupported,
       isSpeaking: isSpeaking ?? this.isSpeaking,
+      isPaused: isPaused ?? this.isPaused,
       isLoadingVoices: isLoadingVoices ?? this.isLoadingVoices,
       voices: voices ?? this.voices,
       selectedVoice: selectedVoice == _unset
@@ -179,6 +186,7 @@ class TtsController extends StateNotifier<TtsState> {
     final utterance = ++_utterance;
     state = state.copyWith(
       isSpeaking: true,
+      isPaused: false,
       statusText: 'Speaking...',
       clearError: true,
     );
@@ -194,9 +202,51 @@ class TtsController extends StateNotifier<TtsState> {
       );
     } finally {
       if (mounted && utterance == _utterance) {
-        state = state.copyWith(isSpeaking: false, statusText: '');
+        state = state.copyWith(
+          isSpeaking: false,
+          isPaused: false,
+          statusText: '',
+        );
       }
     }
+  }
+
+  /// Holds the utterance where it is, without ending it.
+  ///
+  /// The engine call is the one that can fail; the state only follows once the
+  /// device has accepted it, so the button never claims a pause that did not
+  /// happen.
+  Future<void> pause() async {
+    if (!state.isSpeaking || state.isPaused) return;
+    try {
+      await _ref.read(speechSynthesisEngineProvider).pause();
+    } catch (error) {
+      if (!mounted) return;
+      state = state.copyWith(
+        errorMessage:
+            'The device could not hold this reading: ${_messageOf(error)}',
+      );
+      return;
+    }
+    if (!mounted) return;
+    state = state.copyWith(isPaused: true, statusText: 'Paused');
+  }
+
+  /// Continues an utterance that was paused.
+  Future<void> resume() async {
+    if (!state.isSpeaking || !state.isPaused) return;
+    try {
+      await _ref.read(speechSynthesisEngineProvider).resume();
+    } catch (error) {
+      if (!mounted) return;
+      state = state.copyWith(
+        errorMessage:
+            'The device could not continue this reading: ${_messageOf(error)}',
+      );
+      return;
+    }
+    if (!mounted) return;
+    state = state.copyWith(isPaused: false, statusText: 'Speaking...');
   }
 
   /// Stops the current utterance immediately.
@@ -210,7 +260,7 @@ class TtsController extends StateNotifier<TtsState> {
       // never gets stuck showing an utterance that is over.
     }
     if (!mounted) return;
-    state = state.copyWith(isSpeaking: false, statusText: '');
+    state = state.copyWith(isSpeaking: false, isPaused: false, statusText: '');
   }
 
   /// Moves the rate while the slider is being dragged; nothing is stored yet.

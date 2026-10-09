@@ -679,6 +679,19 @@ class _TextToSpeechCardState extends ConsumerState<_TextToSpeechCard> {
             ),
             if (state.isSpeaking)
               TextButton.icon(
+                onPressed: state.isPaused
+                    ? controller.resume
+                    : controller.pause,
+                icon: Icon(
+                  state.isPaused
+                      ? Icons.play_arrow_rounded
+                      : Icons.pause_circle_outline,
+                  size: 18,
+                ),
+                label: Text(state.isPaused ? 'Resume' : 'Pause'),
+              ),
+            if (state.isSpeaking)
+              TextButton.icon(
                 onPressed: controller.stop,
                 icon: const Icon(Icons.stop_circle_outlined, size: 18),
                 label: const Text('Stop'),
