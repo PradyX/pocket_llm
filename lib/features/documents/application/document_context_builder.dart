@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart'
     show TokenEstimator;
 import 'package:pocket_llm/features/documents/domain/document_context.dart';
@@ -37,11 +39,16 @@ class DocumentContextBuilder {
   /// Returns [DocumentContext.empty] when there is nothing to retrieve or no
   /// budget for it. [collectionId] limits retrieval to one knowledge
   /// collection; null searches every indexed document.
+  ///
+  /// [queryVector] is the embedded [query] when the caller has one. A retriever
+  /// that ranks by meaning cannot search without it, so a missing vector falls
+  /// back to term-based results instead of no results.
   DocumentContext build({
     required DocumentRetriever retriever,
     required String query,
     required int tokenBudget,
     String? collectionId,
+    Float32List? queryVector,
   }) {
     if (tokenBudget <= 0 || query.trim().isEmpty) return DocumentContext.empty;
     if (collectionId == null
@@ -54,6 +61,7 @@ class DocumentContextBuilder {
       query,
       limit: candidateLimit,
       collectionId: collectionId,
+      queryVector: queryVector,
     );
     if (candidates.isEmpty) {
       final section = '$instructions\n\n$noMatchNotice';

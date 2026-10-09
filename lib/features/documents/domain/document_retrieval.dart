@@ -21,6 +21,11 @@ class DocumentSearchHit {
   final DocumentChunk chunk;
 
   /// Higher is better; scores are only comparable within a single query.
+  ///
+  /// The number means whatever the retriever that produced it ranks by: a BM25
+  /// weight, a cosine similarity, or — when lexical and vector hits are fused —
+  /// a reciprocal rank sum, which is a small number near zero by design. Read it
+  /// as an ordering, never as a quality percentage.
   final double score;
 
   /// Query terms this chunk matched, so a response can explain why a source

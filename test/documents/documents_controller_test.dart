@@ -58,6 +58,10 @@ void main() {
               ? await libraryLoader()
               : (library ?? buildLibrary()),
         ),
+        // These tests are about lexical documents: saying so here keeps them
+        // from building the model catalog, which asks the platform for the
+        // model directory.
+        documentModelsProvider.overrideWithValue(const []),
         if (picked != null)
           documentPickerProvider.overrideWith(
             (ref) =>
@@ -114,7 +118,7 @@ void main() {
     expect(current.errorMessage, isNull);
     expect(current.isIndexing, isFalse);
 
-    notifier.search('docker');
+    await notifier.search('docker');
     expect(state(container).searchResults, hasLength(1));
     expect(
       state(container).searchResults.single.citationLabel,
@@ -200,9 +204,9 @@ void main() {
     expect(current.statusMessage, contains('indexed'));
     expect(current.documents, hasLength(1));
 
-    notifier.search('kubernetes');
+    await notifier.search('kubernetes');
     expect(state(container).searchResults, hasLength(1));
-    notifier.search('docker');
+    await notifier.search('docker');
     expect(state(container).searchResults, isEmpty);
   });
 
@@ -225,7 +229,7 @@ void main() {
     final container = buildContainer(picked: [file.path]);
     final notifier = await loaded(container);
     await notifier.pickDocuments();
-    notifier.search('removable');
+    await notifier.search('removable');
     expect(state(container).searchResults, hasLength(1));
 
     final documentId = state(container).documents.single.id;
@@ -246,10 +250,10 @@ void main() {
     final notifier = await loaded(container);
     await notifier.pickDocuments();
 
-    notifier.search('searchable');
+    await notifier.search('searchable');
     expect(state(container).searchResults, hasLength(1));
 
-    notifier.search('   ');
+    await notifier.search('   ');
     expect(state(container).searchResults, isEmpty);
     expect(state(container).searchQuery, isEmpty);
   });
@@ -266,7 +270,7 @@ void main() {
     await notifier.refreshDocument(state(container).documents.single.id);
 
     expect(state(container).outdatedCount, 0);
-    notifier.search('zebras');
+    await notifier.search('zebras');
     expect(state(container).searchResults, hasLength(1));
   });
 
@@ -342,7 +346,7 @@ void main() {
       expect(state(container).documentCountIn(defaultCollectionId), 0);
       expect(state(container).totalDocumentCount, 1);
 
-      notifier.search('zebras');
+      await notifier.search('zebras');
       expect(state(container).searchResults, hasLength(1));
     });
 
@@ -362,12 +366,12 @@ void main() {
       expect(general.chunkCount, 0);
       // The preview follows the collection, so it never shows another one's
       // chunks.
-      notifier.search('docker');
+      await notifier.search('docker');
       expect(state(container).searchResults, isEmpty);
 
       notifier.setActiveCollection(work.id);
       expect(state(container).documents, hasLength(1));
-      notifier.search('docker');
+      await notifier.search('docker');
       expect(state(container).searchResults, hasLength(1));
     });
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -87,6 +89,7 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
               onCreate: () => _createCollection(notifier),
               onRename: () => _renameCollection(notifier),
               onRemove: () => _confirmRemoveCollection(notifier),
+              onChooseSearch: () => _chooseSearchBackend(notifier),
             ),
           if (state.isReadOnly)
             _NoticeCard(
@@ -183,11 +186,84 @@ class _DocumentsPageState extends ConsumerState<DocumentsPage> {
             _SearchPreview(
               controller: _searchController,
               state: state,
-              onChanged: notifier.search,
+              onChanged: (value) => unawaited(notifier.search(value)),
             ),
           ],
         ],
       ),
+    );
+  }
+
+  /// Lets the user decide whether a collection is searched by terms or by
+  /// embeddings, and with which model.
+  ///
+  /// Choosing a model does not re-embed anything by itself: the documents report
+  /// themselves as changed, and "Re-index changed" rebuilds them, so a large
+  /// collection is never quietly re-embedded behind the user's back.
+  Future<void> _chooseSearchBackend(DocumentsNotifier notifier) async {
+    final current = ref.read(documentsProvider);
+    final collection = current.activeCollection;
+    if (collection == null) return;
+
+    const termsChoice = '__terms__';
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return SimpleDialog(
+          title: Text('How "${collection.name}" searches'),
+          children: [
+            const SimpleDialogOption(
+              onPressed: null,
+              child: Text(
+                'Terms need no model and stay exact. Embeddings also find text '
+                'that means the same thing, and need a model on this device.',
+              ),
+            ),
+            const Divider(height: 1),
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(termsChoice),
+              child: Text(
+                current.activeEmbeddingModelId == null
+                    ? '✓ Search by terms'
+                    : 'Search by terms',
+                style: theme.textTheme.bodyLarge,
+              ),
+            ),
+            for (final option in current.embeddingModels)
+              SimpleDialogOption(
+                onPressed: option.isInstalled
+                    ? () => Navigator.of(context).pop(option.id)
+                    : null,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      current.activeEmbeddingModelId == option.id
+                          ? '✓ ${option.name}'
+                          : option.name,
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                    Text(
+                      option.isInstalled
+                          ? 'Installed · search by meaning'
+                          : 'Not installed — download it on the Models screen',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (choice == null || !mounted) return;
+
+    await notifier.setCollectionEmbeddingModel(
+      collection.id,
+      choice == termsChoice ? null : choice,
     );
   }
 
@@ -470,6 +546,7 @@ class _CollectionBar extends StatelessWidget {
     required this.onCreate,
     required this.onRename,
     required this.onRemove,
+    required this.onChooseSearch,
   });
 
   final DocumentsState state;
@@ -477,6 +554,7 @@ class _CollectionBar extends StatelessWidget {
   final VoidCallback onCreate;
   final VoidCallback onRename;
   final VoidCallback onRemove;
+  final VoidCallback onChooseSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -526,6 +604,20 @@ class _CollectionBar extends StatelessWidget {
                       color: colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  if (active?.embeddingModelId != null)
+                    Text(
+                      state.vectorCount == 0
+                          ? 'No vectors yet — re-index the changed documents'
+                          : '${state.vectorCount} of ${state.chunkCount} chunks '
+                                'have vectors',
+                      style: textTheme.labelSmall?.copyWith(
+                        color:
+                            state.vectorCount == state.chunkCount &&
+                                state.chunkCount > 0
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -540,8 +632,13 @@ class _CollectionBar extends StatelessWidget {
               onSelected: (value) {
                 if (value == 'rename') onRename();
                 if (value == 'remove') onRemove();
+                if (value == 'search') onChooseSearch();
               },
               itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'search',
+                  child: Text('How it searches…'),
+                ),
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
                 if (active != null && !active.isDefault)
                   const PopupMenuItem(value: 'remove', child: Text('Remove')),

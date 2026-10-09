@@ -5,7 +5,11 @@ enum ModelCapability {
   audio('audio', 'Audio'),
   tools('tools', 'Tools'),
   thinking('thinking', 'Thinking'),
-  coding('coding', 'Coding');
+  coding('coding', 'Coding'),
+
+  /// Turns text into vectors instead of into more text, which is what a
+  /// knowledge collection answers from when it stops using lexical search.
+  embedding('embedding', 'Embeddings');
 
   const ModelCapability(this.id, this.label);
 
@@ -99,6 +103,28 @@ class LlmModel {
   /// Derived from [capabilities]; a model earns it when its projector carries
   /// an audio encoder.
   bool get supportsAudio => capabilities.contains(ModelCapability.audio);
+
+  /// GGUF architectures that only produce embeddings.
+  ///
+  /// A BERT-family file cannot generate text, so offering one as a chat model
+  /// would be an error the user pays for by downloading it. Catalog models
+  /// declare the capability; an imported file is recognised from its own
+  /// metadata, which is the only thing an arbitrary GGUF can be trusted about.
+  static const Set<String> embeddingArchitectures = {
+    'bert',
+    'nomic-bert',
+    'nomic-bert-moe',
+    'jina-bert-v2',
+    'jina-bert-v3',
+    'gte',
+  };
+
+  /// Whether this model turns text into vectors rather than into text.
+  bool get isEmbeddingModel =>
+      capabilities.contains(ModelCapability.embedding) ||
+      embeddingArchitectures.contains(
+        ggufMetadata?.architecture.trim().toLowerCase(),
+      );
 
   /// Whether the model file lives outside the app's model directory.
   bool get isExternal {
@@ -238,6 +264,22 @@ class LlmModel {
 
   /// Hardcoded sample models for initial UI.
   static const List<LlmModel> availableModels = [
+    // The smallest useful retriever for local documents: 384-dimensional,
+    // Apache-2.0, about 34 MB at Q8. A decoder chat model can be mean-pooled
+    // into vectors, but it is worse at retrieval and would tie a collection's
+    // index to whichever chat model happened to build it.
+    LlmModel(
+      id: 'bge-small-en-v15-q8',
+      name: 'BGE Small (Embeddings)',
+      parameterSize: '33M',
+      description:
+          'Turns text into vectors for local document search. Not a chat '
+          'model: install it to answer a collection from embeddings.',
+      capabilities: [ModelCapability.embedding],
+      downloadUrl:
+          'https://huggingface.co/ggml-org/bge-small-en-v1.5-Q8_0-GGUF/resolve/main/bge-small-en-v1.5-q8_0.gguf',
+      localFileName: 'bge-small-en-v1.5-q8_0.gguf',
+    ),
     LlmModel(
       id: 'qwen-2.5-0.5b',
       name: 'Qwen 2.5',

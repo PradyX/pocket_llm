@@ -270,5 +270,22 @@ Future<String?> _findModelFile() async {
   if (candidates.isEmpty) return null;
 
   candidates.sort((a, b) => a.lengthSync().compareTo(b.lengthSync()));
-  return candidates.first.path;
+
+  // An embedding model is smaller than any chat model but cannot answer a
+  // prompt, so it is skipped by the same rule that keeps one out of the chat
+  // model picker. Metadata, not the file name, decides.
+  final reader = GgufReader();
+  for (final candidate in candidates) {
+    try {
+      final metadata = await reader.info(candidate.path);
+      if (!LlmModel.embeddingArchitectures.contains(
+        metadata.architecture.trim().toLowerCase(),
+      )) {
+        return candidate.path;
+      }
+    } catch (_) {
+      // Not a readable GGUF: not a candidate for this test.
+    }
+  }
+  return null;
 }

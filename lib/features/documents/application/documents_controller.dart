@@ -1,16 +1,52 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/cancel_token.dart';
+import 'package:pocket_llm/features/documents/application/document_embedding_models.dart';
 import 'package:pocket_llm/features/documents/application/document_library.dart';
 import 'package:pocket_llm/features/documents/domain/document.dart';
 import 'package:pocket_llm/features/documents/domain/document_extraction.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
+import 'package:pocket_llm/features/documents/domain/embedding_model_ref.dart';
 import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
+import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
+import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 
 /// The document index on this device, opened once per session.
+///
+/// The embedding engine is handed over here so a collection can answer from
+/// vectors; when it is absent the library still runs, and says so for those
+/// collections instead of failing.
 final documentLibraryProvider = FutureProvider<DocumentLibrary>(
-  (ref) => DocumentLibrary.open(),
+  (ref) =>
+      DocumentLibrary.open(embeddingEngine: ref.watch(embeddingEngineProvider)),
 );
+
+/// Models the document feature may use, as the catalog has them.
+///
+/// A narrow seam rather than a direct read of the model screen's controller: a
+/// document test can then say what models exist without building the catalog,
+/// which asks the platform for the model directory on first use.
+final documentModelsProvider = Provider<List<LlmModel>>((ref) {
+  return ref.watch(modelSelectionControllerProvider).models;
+});
+
+/// Embedding models this app knows about, and which of them are installed.
+///
+/// The document feature never reads the model catalog itself: this resolver is
+/// the only thing that knows an embedding model is a model, so indexing, the
+/// question path and the screen agree on what "installed" means.
+final documentEmbeddingModelsProvider = Provider<DocumentEmbeddingModels>((
+  ref,
+) {
+  return DocumentEmbeddingModels(
+    models: ref.watch(documentModelsProvider),
+    resolvePath: ref.watch(modelStorageServiceProvider).resolveModelPath,
+  );
+});
 
 /// Opens the local file picker for the documents screen.
 ///
@@ -40,6 +76,22 @@ class CollectionCounts {
   final int changed;
 }
 
+/// One embedding model the retrieval picker can offer.
+class EmbeddingModelOption {
+  const EmbeddingModelOption({
+    required this.id,
+    required this.name,
+    required this.isInstalled,
+  });
+
+  final String id;
+  final String name;
+
+  /// False when the model still has to be downloaded before a collection can
+  /// use it.
+  final bool isInstalled;
+}
+
 /// What the documents screen shows.
 class DocumentsState {
   const DocumentsState({
@@ -49,6 +101,7 @@ class DocumentsState {
     this.countsByCollection = const {},
     this.outdatedDocumentIds = const {},
     this.chunkCount = 0,
+    this.vectorCount = 0,
     this.isReady = false,
     this.isReadOnly = false,
     this.errorMessage,
@@ -57,6 +110,7 @@ class DocumentsState {
     this.activeLabel,
     this.searchQuery = '',
     this.searchResults = const [],
+    this.embeddingModels = const [],
   });
 
   /// Documents in the active collection, oldest first.
@@ -77,6 +131,10 @@ class DocumentsState {
 
   /// Total retrievable chunks in the active collection.
   final int chunkCount;
+
+  /// Chunks of the active collection that have a stored vector, which is what
+  /// an embedding-backed collection answers from.
+  final int vectorCount;
 
   /// False until the stored index has been read.
   final bool isReady;
@@ -100,6 +158,22 @@ class DocumentsState {
   /// Last retrieval query and its hits.
   final String searchQuery;
   final List<DocumentSearchHit> searchResults;
+
+  /// Embedding models that can be chosen for a collection, installed first.
+  final List<EmbeddingModelOption> embeddingModels;
+
+  /// Embedding model of the collection currently shown, or null when it
+  /// searches lexically.
+  ///
+  /// The stored value comes from the collection, so a model that was deleted
+  /// from disk still shows here — the collection keeps asking for it until the
+  /// user changes it.
+  String? get activeEmbeddingModelId => activeCollection?.embeddingModelId;
+
+  /// Embedding models that are installed on this device.
+  List<EmbeddingModelOption> get installedEmbeddingModels => embeddingModels
+      .where((option) => option.isInstalled)
+      .toList(growable: false);
 
   bool get isIndexing => progress != null;
 
@@ -151,6 +225,7 @@ class DocumentsState {
     Map<String, CollectionCounts>? countsByCollection,
     Set<String>? outdatedDocumentIds,
     int? chunkCount,
+    int? vectorCount,
     bool? isReady,
     bool? isReadOnly,
     String? errorMessage,
@@ -163,6 +238,7 @@ class DocumentsState {
     bool clearActiveLabel = false,
     String? searchQuery,
     List<DocumentSearchHit>? searchResults,
+    List<EmbeddingModelOption>? embeddingModels,
   }) {
     return DocumentsState(
       documents: documents ?? this.documents,
@@ -171,6 +247,7 @@ class DocumentsState {
       countsByCollection: countsByCollection ?? this.countsByCollection,
       outdatedDocumentIds: outdatedDocumentIds ?? this.outdatedDocumentIds,
       chunkCount: chunkCount ?? this.chunkCount,
+      vectorCount: vectorCount ?? this.vectorCount,
       isReady: isReady ?? this.isReady,
       isReadOnly: isReadOnly ?? this.isReadOnly,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
@@ -179,6 +256,7 @@ class DocumentsState {
       activeLabel: clearActiveLabel ? null : activeLabel ?? this.activeLabel,
       searchQuery: searchQuery ?? this.searchQuery,
       searchResults: searchResults ?? this.searchResults,
+      embeddingModels: embeddingModels ?? this.embeddingModels,
     );
   }
 }
@@ -330,8 +408,12 @@ class DocumentsNotifier extends StateNotifier<DocumentsState> {
       final indexed = await _run(
         library,
         label: _fileNameOf(path),
-        operation: (token, onProgress) => library.addDocument(
+        operation: (token, onProgress) async => library.addDocument(
           path: path,
+          embeddingModel: await _embeddingModelFor(
+            library,
+            library.activeCollectionId,
+          ),
           cancelToken: token,
           onProgress: onProgress,
         ),
@@ -347,9 +429,13 @@ class DocumentsNotifier extends StateNotifier<DocumentsState> {
     await _run(
       library,
       label: name ?? _fileNameOf(path),
-      operation: (token, onProgress) => library.addDocument(
+      operation: (token, onProgress) async => library.addDocument(
         path: path,
         name: name,
+        embeddingModel: await _embeddingModelFor(
+          library,
+          library.activeCollectionId,
+        ),
         cancelToken: token,
         onProgress: onProgress,
       ),
@@ -365,8 +451,12 @@ class DocumentsNotifier extends StateNotifier<DocumentsState> {
     await _run(
       library,
       label: document.source.name,
-      operation: (token, onProgress) => library.refreshDocument(
+      operation: (token, onProgress) async => library.refreshDocument(
         documentId,
+        embeddingModel: await _embeddingModelFor(
+          library,
+          document.collectionId,
+        ),
         cancelToken: token,
         onProgress: onProgress,
       ),
@@ -395,8 +485,12 @@ class DocumentsNotifier extends StateNotifier<DocumentsState> {
       final refreshed = await _run(
         library,
         label: document.source.name,
-        operation: (token, onProgress) => library.refreshDocument(
+        operation: (token, onProgress) async => library.refreshDocument(
           document.id,
+          embeddingModel: await _embeddingModelFor(
+            library,
+            document.collectionId,
+          ),
           cancelToken: token,
           onProgress: onProgress,
         ),
@@ -427,17 +521,70 @@ class DocumentsNotifier extends StateNotifier<DocumentsState> {
 
   /// Runs a retrieval query over the active collection and shows what the
   /// model would be given.
-  void search(String query) {
+  ///
+  /// A collection that answers from embeddings also embeds the query, so the
+  /// preview shows the same chunks chat would receive; every failure along that
+  /// path falls back to lexical results rather than an empty list.
+  Future<void> search(String query) async {
     final library = _library;
     final trimmed = query.trim();
     if (library == null || trimmed.isEmpty) {
       state = state.copyWith(searchQuery: trimmed, searchResults: const []);
       return;
     }
+    final collectionId = library.activeCollectionId;
+    final queryVector = await _queryVectorFor(library, collectionId, trimmed);
+    if (!mounted) return;
     state = state.copyWith(
       searchQuery: trimmed,
-      searchResults: library.search(trimmed, limit: 3),
+      searchResults: library.search(
+        trimmed,
+        limit: 3,
+        collectionId: collectionId,
+        queryVector: queryVector,
+      ),
     );
+  }
+
+  /// Points a collection at an embedding model, or back to lexical search.
+  ///
+  /// Documents already indexed keep their chunks and start reporting a
+  /// re-index reason: re-embedding a large collection is a decision, not a
+  /// side effect of a menu tap.
+  Future<void> setCollectionEmbeddingModel(
+    String collectionId,
+    String? embeddingModelId,
+  ) async {
+    final library = _library;
+    if (library == null || state.isIndexing) return;
+
+    final target = embeddingModelId?.trim();
+    if (target != null && target.isNotEmpty) {
+      final resolver = _ref.read(documentEmbeddingModelsProvider);
+      final model = await resolver.resolve(target);
+      if (model == null) {
+        final name = resolver.modelById(target)?.name ?? target;
+        state = state.copyWith(
+          clearStatus: true,
+          errorMessage: resolver.isInstalled(target)
+              ? '"$name" could not be found on this device. Re-download it on '
+                    'the Models screen, then choose it here.'
+              : '"$name" is not installed. Download it on the Models screen '
+                    'first, then choose it here.',
+        );
+        return;
+      }
+    }
+
+    if (!library.setCollectionEmbeddingModel(collectionId, target)) return;
+    final collection = library.collectionById(collectionId);
+    _publishFromLibrary(
+      statusMessage: target == null || target.isEmpty
+          ? '"${collection?.name ?? 'The collection'}" now searches by terms.'
+          : '"${collection?.name ?? 'The collection'}" now answers from '
+                'embeddings. Refresh its documents to build the vectors.',
+    );
+    await _refreshPreview();
   }
 
   /// Cancels the ingest currently running, if any.
@@ -537,8 +684,10 @@ class DocumentsNotifier extends StateNotifier<DocumentsState> {
       countsByCollection: counts,
       outdatedDocumentIds: outdatedDocumentIds,
       chunkCount: library.chunkCountIn(activeCollectionId),
+      vectorCount: library.vectorCountIn(activeCollectionId),
       isReady: true,
       isReadOnly: library.isReadOnly,
+      embeddingModels: _embeddingModelOptions(),
       statusMessage: statusMessage,
       clearStatus: statusMessage == null,
       clearProgress: true,
@@ -546,12 +695,73 @@ class DocumentsNotifier extends StateNotifier<DocumentsState> {
     );
 
     // Keep the retrieval preview honest: chunk text and scores may have
-    // changed with the index.
+    // changed with the index. A collection with vectors needs its query
+    // embedded, which is why this is not a plain search.
     if (state.searchQuery.isNotEmpty) {
-      state = state.copyWith(
-        searchResults: library.search(state.searchQuery, limit: 3),
-      );
+      unawaited(_refreshPreview());
     }
+  }
+
+  /// Re-runs the last preview query against the current index.
+  Future<void> _refreshPreview() async {
+    final library = _library;
+    final query = state.searchQuery;
+    if (library == null || query.isEmpty) return;
+    final collectionId = library.activeCollectionId;
+    final queryVector = await _queryVectorFor(library, collectionId, query);
+    if (!mounted || state.searchQuery != query) return;
+    state = state.copyWith(
+      searchResults: library.search(
+        query,
+        limit: 3,
+        collectionId: collectionId,
+        queryVector: queryVector,
+      ),
+    );
+  }
+
+  /// The embedding model a collection needs, or null when it searches by terms
+  /// or its model is not on this device.
+  ///
+  /// Returning null for a missing model is deliberate: the library then reports
+  /// the actionable error itself when the user indexes something, instead of
+  /// every ingest silently building a half-index.
+  Future<EmbeddingModelRef?> _embeddingModelFor(
+    DocumentLibrary library,
+    String collectionId,
+  ) async {
+    final modelId = library.collectionById(collectionId)?.embeddingModelId;
+    if (modelId == null || modelId.isEmpty) return null;
+    return _ref.read(documentEmbeddingModelsProvider).resolve(modelId);
+  }
+
+  /// The embedded query for a collection, or null when it has none.
+  Future<Float32List?> _queryVectorFor(
+    DocumentLibrary library,
+    String collectionId,
+    String query,
+  ) async {
+    final model = await _embeddingModelFor(library, collectionId);
+    if (model == null) return null;
+    return library.embedQuery(query, model: model);
+  }
+
+  /// Every embedding model the picker can offer, installed first.
+  List<EmbeddingModelOption> _embeddingModelOptions() {
+    final resolver = _ref.read(documentEmbeddingModelsProvider);
+    final options = [
+      for (final model in resolver.embeddingModels)
+        EmbeddingModelOption(
+          id: model.id,
+          name: model.name,
+          isInstalled: resolver.isInstalled(model.id),
+        ),
+    ];
+    options.sort((a, b) {
+      if (a.isInstalled != b.isInstalled) return a.isInstalled ? -1 : 1;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+    return options;
   }
 
   static String _fileNameOf(String path) {

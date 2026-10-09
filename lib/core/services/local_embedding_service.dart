@@ -10,6 +10,30 @@ import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
 import 'package:pocket_llm/core/utils/cancel_token.dart';
 import 'package:pocket_llm/core/utils/logger.dart';
 
+/// How an embedding context is sized.
+///
+/// Split out from the load call because the relationship between these three
+/// numbers is what makes a batched embed work at all: every sequence needs a
+/// window of its own (`nCtx` and `nSeqMax`), while one batched decode has to
+/// hold every token of the batch at once (`nBatch`). Sizing the batch for a
+/// single text is the mistake this pins down.
+class EmbeddingContextPlan {
+  const EmbeddingContextPlan({
+    required this.window,
+    required this.sequences,
+    required this.batchTokens,
+  });
+
+  /// Tokens one sequence may use.
+  final int window;
+
+  /// Sequences one batch may contain.
+  final int sequences;
+
+  /// Tokens one batched decode may hold: `window × sequences`.
+  final int batchTokens;
+}
+
 /// The bundled llama.cpp runtime, loaded a second time for embeddings.
 ///
 /// Chat and embeddings cannot share one engine: an embedding context is
@@ -68,15 +92,16 @@ class LocalEmbeddingService implements EmbeddingEngine {
     final isMobile = Platform.isAndroid || Platform.isIOS;
     final threads =
         request.threads ?? LlmService.defaultComputeThreads(isMobile: isMobile);
-    final window = math.max(32, request.maxInputTokens);
-    final batchSize = math.max(1, request.batchSize);
+    final plan = LocalEmbeddingService.planFor(
+      maxInputTokens: request.maxInputTokens,
+      batchSize: request.batchSize,
+    );
 
     final contextParams = ContextParams(
-      nCtx: window,
-      nBatch: window,
-      nUbatch: window,
-      // One sequence per text in a batch, so a batch is a single decode.
-      nSeqMax: batchSize,
+      nCtx: plan.window,
+      nBatch: plan.batchTokens,
+      nUbatch: plan.window,
+      nSeqMax: plan.sequences,
       nThreads: threads,
       nThreadsBatch: threads,
       // Pooled embeddings are the whole point: a mean over the model's hidden
@@ -117,11 +142,30 @@ class LocalEmbeddingService implements EmbeddingEngine {
 
     _modelId = request.modelId;
     _dimensions = request.dimensions;
-    _maxInputTokens = window;
-    _batchSize = batchSize;
+    _maxInputTokens = plan.window;
+    _batchSize = plan.sequences;
     AppLogger.debug(
       '[LocalEmbeddingService] Ready: ${request.modelId}, '
-      'window $window tokens, batch $batchSize.',
+      'window ${plan.window} tokens, batch ${plan.sequences} '
+      '(${plan.batchTokens} tokens per decode).',
+    );
+  }
+
+  /// Sizes an embedding context for [maxInputTokens] and [batchSize].
+  ///
+  /// A window shorter than a few tokens cannot tokenize anything useful, and a
+  /// batch has to hold at least one sequence, so both are clamped upwards
+  /// rather than trusted.
+  static EmbeddingContextPlan planFor({
+    required int maxInputTokens,
+    required int batchSize,
+  }) {
+    final window = math.max(32, maxInputTokens);
+    final sequences = math.max(1, batchSize);
+    return EmbeddingContextPlan(
+      window: window,
+      sequences: sequences,
+      batchTokens: window * sequences,
     );
   }
 

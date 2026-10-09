@@ -23,9 +23,11 @@ import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 import 'package:pocket_llm/features/conversations/domain/message_tool_activity.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
 import 'package:pocket_llm/features/documents/application/document_context_builder.dart';
+import 'package:pocket_llm/features/documents/application/document_library.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/documents/domain/document_context.dart';
 import 'package:pocket_llm/features/documents/domain/document_scope.dart';
+import 'package:pocket_llm/features/documents/domain/embedding_model_ref.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/domain/inference_profile.dart';
@@ -617,9 +619,10 @@ class HomeController extends _$HomeController {
           ? DocumentContext.empty
           : const DocumentContextBuilder().build(
               retriever: documentRetrieval.retriever,
-              query: _latestUserText(),
+              query: documentRetrieval.query,
               tokenBudget: contextPolicy.retrievalTokens,
               collectionId: documentRetrieval.collectionId,
+              queryVector: documentRetrieval.queryVector,
             );
       final assembly = const ConversationContextBuilder().build(
         messages: [
@@ -1212,14 +1215,38 @@ class HomeController extends _$HomeController {
       final collectionId = scope.collectionId;
       if (collectionId == null) return null;
       if (library.chunkCountIn(collectionId) == 0) return null;
+
+      // A collection that answers from embeddings needs this question embedded
+      // with the same model that built its index. Failing to do that is not a
+      // failure of the request: the search then falls back to terms, which is
+      // why a null vector is passed on rather than an error.
+      final query = _latestUserText();
+      final model = await _embeddingModelFor(library, collectionId);
+      final queryVector = model == null
+          ? null
+          : await library.embedQuery(query, model: model);
+
       return _DocumentRetrieval(
         retriever: library.retriever,
         collectionId: collectionId,
+        query: query,
+        queryVector: queryVector,
       );
     } catch (error) {
       debugPrint('HomeController: could not open the document index: $error');
       return null;
     }
+  }
+
+  /// The embedding model a collection needs to answer this request, or null
+  /// when it searches by terms or its model is not installed.
+  Future<EmbeddingModelRef?> _embeddingModelFor(
+    DocumentLibrary library,
+    String collectionId,
+  ) async {
+    final modelId = library.collectionById(collectionId)?.embeddingModelId;
+    if (modelId == null || modelId.isEmpty) return null;
+    return ref.read(documentEmbeddingModelsProvider).resolve(modelId);
   }
 
   /// Text of the newest user message, used as the retrieval query.
@@ -1468,8 +1495,17 @@ class _DocumentRetrieval {
   const _DocumentRetrieval({
     required this.retriever,
     required this.collectionId,
+    required this.query,
+    this.queryVector,
   });
 
   final DocumentRetriever retriever;
   final String collectionId;
+
+  /// The newest user text this request retrieves for, embedded once so the
+  /// question that is searched is the question that is answered.
+  final String query;
+
+  /// The embedded [query], or null when the collection answers from terms.
+  final Float32List? queryVector;
 }

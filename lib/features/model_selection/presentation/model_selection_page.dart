@@ -933,6 +933,7 @@ class _ModelSelectionPageState extends ConsumerState<ModelSelectionPage> {
       ModelCapability.tools => Icons.build_rounded,
       ModelCapability.thinking => Icons.psychology_rounded,
       ModelCapability.coding => Icons.code_rounded,
+      ModelCapability.embedding => Icons.hub_rounded,
     };
   }
 

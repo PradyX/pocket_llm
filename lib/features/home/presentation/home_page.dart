@@ -625,8 +625,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
     final selectionState = ref.watch(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
+    // Embedding models are installed models too, but they cannot answer a
+    // chat: they are offered where a collection chooses how it searches.
     final downloadedModels =
-        selectionState.models.where((model) => model.isDownloaded).toList()
+        selectionState.models
+            .where((model) => model.isDownloaded && !model.isEmbeddingModel)
+            .toList()
           ..sort(_compareModelsByParamSize);
     final hasDownloadedModel = downloadedModels.isNotEmpty;
     final hasModelDropdown = downloadedModels.length > 1;

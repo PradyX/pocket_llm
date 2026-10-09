@@ -96,10 +96,17 @@ class DocumentLibrary {
   }
 
   /// Opens the library backed by the on-disk index and loads it.
-  static Future<DocumentLibrary> open() async {
+  ///
+  /// [embeddingEngine] is what makes a collection that answers from embeddings
+  /// possible; without it the library still works and reports those collections
+  /// as needing a model.
+  static Future<DocumentLibrary> open({
+    EmbeddingEngine? embeddingEngine,
+  }) async {
     final library = DocumentLibrary(
       extractor: DocumentExtractionService(),
       store: await DocumentIndexStore.open(),
+      embeddingEngine: embeddingEngine,
     );
     library.load();
     return library;
