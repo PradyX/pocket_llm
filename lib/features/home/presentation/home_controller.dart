@@ -25,6 +25,7 @@ import 'package:pocket_llm/features/conversations/presentation/conversation_cont
 import 'package:pocket_llm/features/documents/application/document_context_builder.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
 import 'package:pocket_llm/features/documents/domain/document_context.dart';
+import 'package:pocket_llm/features/documents/domain/document_scope.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/domain/inference_profile.dart';
@@ -1190,10 +1191,26 @@ class HomeController extends _$HomeController {
   /// request: retrieval is an addition to the chat, never a requirement. The
   /// collection is decided on the Documents screen, so chat never silently
   /// searches material the user did not select.
+  /// The documents this request may read from, or null when it may read none.
+  ///
+  /// The collection comes from the conversation, not from the app-wide choice:
+  /// a chat that pins "Work" keeps answering from it while the Documents screen
+  /// shows something else, and a chat with documents turned off retrieves
+  /// nothing at all (Road Map 1 Phase 6B).
   Future<_DocumentRetrieval?> _availableDocumentRetrieval() async {
     try {
       final library = await ref.read(documentLibraryProvider.future);
-      final collectionId = library.activeCollectionId;
+      final conversation = ref
+          .read(conversationControllerProvider)
+          .activeConversation;
+      final scope = DocumentScope.resolve(
+        collections: library.collections,
+        activeCollectionId: library.activeCollectionId,
+        pinnedCollectionId: conversation?.documentCollectionId,
+        documentsEnabled: conversation?.documentsEnabled ?? true,
+      );
+      final collectionId = scope.collectionId;
+      if (collectionId == null) return null;
       if (library.chunkCountIn(collectionId) == 0) return null;
       return _DocumentRetrieval(
         retriever: library.retriever,

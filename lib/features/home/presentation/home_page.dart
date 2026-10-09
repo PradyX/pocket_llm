@@ -18,6 +18,8 @@ import 'package:pocket_llm/features/conversations/presentation/conversation_cont
 import 'package:pocket_llm/features/conversations/presentation/delete_conversation_dialog.dart';
 import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
+import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
+import 'package:pocket_llm/features/documents/presentation/knowledge_scope_button.dart';
 import 'package:pocket_llm/features/home/presentation/composer_shortcuts.dart';
 import 'package:pocket_llm/features/home/presentation/context_usage_indicator.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
@@ -366,6 +368,24 @@ class _HomePageState extends ConsumerState<HomePage> {
         );
   }
 
+  /// Applies the knowledge scope chosen for the open conversation.
+  ///
+  /// The choice is stored on the conversation, so it survives a restart and
+  /// travels with the chat when it is opened again.
+  Future<void> _setDocumentScope(String? collectionId, bool enabled) async {
+    final conversationId = ref
+        .read(conversationControllerProvider)
+        .activeConversationId;
+    if (conversationId == null) return;
+    final controller = ref.read(conversationControllerProvider.notifier);
+    if (!enabled) {
+      await controller.setDocumentsEnabled(conversationId, false);
+      return;
+    }
+    await controller.setDocumentsEnabled(conversationId, true);
+    await controller.setDocumentCollection(conversationId, collectionId);
+  }
+
   /// Deletes the conversation on screen, once the user has confirmed it.
   ///
   /// The chat header and the conversation list offer the same action, so both
@@ -620,6 +640,9 @@ class _HomePageState extends ConsumerState<HomePage> {
         : contextProjection?.fixedTokens;
     final toolContractIncluded =
         contextProjection?.toolContractIncluded ?? false;
+    // Loaded once per session and shared with the retrieval that runs on send;
+    // a chat with no documents at all simply shows an empty picker.
+    final documentLibrary = ref.watch(documentLibraryProvider).valueOrNull;
 
     return Scaffold(
       appBar: AppBar(
@@ -716,6 +739,21 @@ class _HomePageState extends ConsumerState<HomePage> {
                 toolContractIncluded: toolContractIncluded,
                 isGenerating: isGenerating,
               ),
+            ),
+          // Which local documents this chat may read (Road Map 1 Phase 6B).
+          // Idle only: changing the scope mid-answer would not apply to the
+          // request that is already running.
+          if (!isGenerating)
+            KnowledgeScopeButton(
+              collections: documentLibrary?.collections ?? const [],
+              activeCollectionId:
+                  documentLibrary?.activeCollectionId ??
+                  KnowledgeCollection.defaultId,
+              pinnedCollectionId: activeConversation?.documentCollectionId,
+              documentsEnabled: activeConversation?.documentsEnabled ?? true,
+              isGenerating: isGenerating,
+              onScopeChanged: (collectionId, enabled) =>
+                  unawaited(_setDocumentScope(collectionId, enabled)),
             ),
           IconButton(
             icon: const Icon(Icons.add),

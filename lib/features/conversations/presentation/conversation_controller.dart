@@ -210,6 +210,29 @@ class ConversationController extends _$ConversationController {
     _replaceConversation(updated);
   }
 
+  /// Pins (or unpins) the knowledge collection a conversation reads from.
+  Future<void> setDocumentCollection(
+    String conversationId,
+    String? collectionId,
+  ) async {
+    if (_findSummary(conversationId) == null) return;
+    final updated = await _repository.setDocumentCollection(
+      conversationId,
+      collectionId,
+    );
+    _replaceConversation(updated);
+  }
+
+  /// Turns local document retrieval on or off for a conversation.
+  Future<void> setDocumentsEnabled(String conversationId, bool enabled) async {
+    if (_findSummary(conversationId) == null) return;
+    final updated = await _repository.setDocumentsEnabled(
+      conversationId,
+      enabled,
+    );
+    _replaceConversation(updated);
+  }
+
   /// Stores (or clears) the local summary of a conversation's older turns.
   Future<void> setMemory(
     String conversationId,

@@ -22,6 +22,21 @@ class Conversation {
   final String? systemPrompt;
   final bool isPinned;
 
+  /// Knowledge collection this conversation asks its questions of, or null to
+  /// follow the app-wide active collection.
+  ///
+  /// Road Map 1 Phase 6B: retrieval reads one collection at a time, and
+  /// pinning it here keeps a chat about work notes from answering out of a
+  /// personal collection. Absent on conversations stored before this existed,
+  /// which is why null means "follow the app-wide choice" rather than "none".
+  final String? documentCollectionId;
+
+  /// Whether this conversation may retrieve from local documents at all.
+  ///
+  /// Documented as `true` for every stored conversation that predates the
+  /// field, so upgrading never silently turns retrieval off.
+  final bool documentsEnabled;
+
   /// Local summary of the turns that no longer fit the context window.
   ///
   /// Road Map 1 Phase 4 Strategy B: optional, additive and version-tolerant, so
@@ -41,6 +56,8 @@ class Conversation {
     this.inferenceProfileId,
     this.systemPrompt,
     this.isPinned = false,
+    this.documentCollectionId,
+    this.documentsEnabled = true,
     this.memory,
     this.metadata = const {},
   });
@@ -77,6 +94,8 @@ class Conversation {
     Object? inferenceProfileId = _unset,
     Object? systemPrompt = _unset,
     bool? isPinned,
+    Object? documentCollectionId = _unset,
+    bool? documentsEnabled,
     Object? memory = _unset,
   }) {
     return Conversation(
@@ -95,6 +114,10 @@ class Conversation {
           ? this.systemPrompt
           : systemPrompt as String?,
       isPinned: isPinned ?? this.isPinned,
+      documentCollectionId: documentCollectionId == _unset
+          ? this.documentCollectionId
+          : documentCollectionId as String?,
+      documentsEnabled: documentsEnabled ?? this.documentsEnabled,
       memory: memory == _unset ? this.memory : memory as ConversationMemory?,
       metadata: metadata,
     );
@@ -114,6 +137,8 @@ class Conversation {
       inferenceProfileId: inferenceProfileId,
       systemPrompt: systemPrompt,
       isPinned: isPinned,
+      documentCollectionId: documentCollectionId,
+      documentsEnabled: documentsEnabled,
       memory: memory,
       metadata: metadata,
     );
@@ -130,6 +155,8 @@ class Conversation {
       'inferenceProfileId': inferenceProfileId,
       'systemPrompt': systemPrompt,
       'isPinned': isPinned,
+      'documentCollectionId': documentCollectionId,
+      'documentsEnabled': documentsEnabled,
       'memory': memory?.toJson(),
       'metadata': metadata,
     };
@@ -155,6 +182,10 @@ class Conversation {
       inferenceProfileId: json['inferenceProfileId'] as String?,
       systemPrompt: json['systemPrompt'] as String?,
       isPinned: json['isPinned'] as bool? ?? false,
+      documentCollectionId: json['documentCollectionId'] as String?,
+      // A conversation stored before documents had a scope keeps retrieving
+      // exactly as it did.
+      documentsEnabled: json['documentsEnabled'] as bool? ?? true,
       memory: ConversationMemory.fromJson(json['memory']),
       metadata: rawMetadata is Map
           ? Map<String, dynamic>.from(rawMetadata)

@@ -520,7 +520,8 @@ class _CollectionBar extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    active?.retrievalLabel ?? 'lexical search',
+                    '${active?.retrievalLabel ?? 'lexical search'} · chats '
+                    'use this collection unless they pick their own',
                     style: textTheme.labelSmall?.copyWith(
                       color: colorScheme.onSurfaceVariant,
                     ),

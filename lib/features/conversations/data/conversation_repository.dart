@@ -92,6 +92,34 @@ class ConversationRepository {
     );
   }
 
+  /// Pins (or unpins) the knowledge collection this conversation reads from.
+  ///
+  /// A null [collectionId] means "follow the app-wide active collection", not
+  /// "no documents": turning retrieval off is [setDocumentsEnabled].
+  Future<Conversation> setDocumentCollection(
+    String conversationId,
+    String? collectionId,
+  ) {
+    final normalized = collectionId?.trim() ?? '';
+    return _update(
+      conversationId,
+      (conversation) => conversation.copyWith(
+        documentCollectionId: normalized.isEmpty ? null : normalized,
+      ),
+    );
+  }
+
+  /// Turns local document retrieval on or off for one conversation.
+  Future<Conversation> setDocumentsEnabled(
+    String conversationId,
+    bool enabled,
+  ) {
+    return _update(
+      conversationId,
+      (conversation) => conversation.copyWith(documentsEnabled: enabled),
+    );
+  }
+
   /// Stores (or clears) the local summary of the conversation's older turns.
   ///
   /// Road Map 1 Phase 4 Strategy B. Kept on the conversation itself so it
