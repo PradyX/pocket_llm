@@ -1,7 +1,9 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:pocket_llm/features/documents/domain/document.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
+import 'package:pocket_llm/features/documents/domain/document_vectors.dart';
 
 final RegExp _wordPattern = RegExp(r'[\p{L}\p{N}]+', unicode: true);
 final RegExp _camelBoundary = RegExp(
@@ -58,7 +60,13 @@ class LexicalDocumentRetriever implements DocumentRetriever {
       _chunks.where((chunk) => chunk.collectionId == collectionId).length;
 
   @override
-  void rebuild(List<IndexedDocument> documents) {
+  void rebuild(
+    List<IndexedDocument> documents, {
+    // Stored vectors belong to a vector backend; a lexical ranking never reads
+    // them, which is exactly what keeps this implementation usable as the
+    // fallback when no embedding model is installed.
+    Map<String, DocumentVectors> vectors = const {},
+  }) {
     _chunks.clear();
     _documentIds.clear();
 
@@ -88,10 +96,14 @@ class LexicalDocumentRetriever implements DocumentRetriever {
   }
 
   @override
+  int vectorCountIn(String collectionId) => 0;
+
+  @override
   List<DocumentSearchHit> search(
     String query, {
     int limit = 5,
     String? collectionId,
+    Float32List? queryVector,
   }) {
     if (limit <= 0 || _chunks.isEmpty) return const [];
     final terms = retrievalTokens(query).toSet();

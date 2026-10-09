@@ -1,21 +1,33 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
+import 'package:pocket_llm/core/inference/embedding_engine.dart';
 import 'package:pocket_llm/core/utils/cancel_token.dart';
 import 'package:pocket_llm/core/utils/id_generator.dart';
 import 'package:pocket_llm/core/utils/logger.dart';
 import 'package:pocket_llm/features/documents/data/document_extraction_service.dart';
 import 'package:pocket_llm/features/documents/data/document_index_store.dart';
-import 'package:pocket_llm/features/documents/data/lexical_document_retriever.dart';
+import 'package:pocket_llm/features/documents/data/hybrid_document_retriever.dart';
 import 'package:pocket_llm/features/documents/domain/document.dart';
 import 'package:pocket_llm/features/documents/domain/document_chunking.dart';
 import 'package:pocket_llm/features/documents/domain/document_extraction.dart';
 import 'package:pocket_llm/features/documents/domain/document_index_maintenance.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
+import 'package:pocket_llm/features/documents/domain/document_vectors.dart';
+import 'package:pocket_llm/features/documents/domain/embedding_model_ref.dart';
 import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
 
 /// Stage of one ingestion, reported so the UI can show progress.
-enum DocumentIngestStage { reading, extracting, chunking, saving, done }
+enum DocumentIngestStage {
+  reading,
+  extracting,
+  chunking,
+  embedding,
+  saving,
+  done,
+}
 
 /// Progress of one ingestion; [fraction] runs from 0 to 1.
 class DocumentIngestProgress {
@@ -66,10 +78,15 @@ class DocumentLibrary {
     required DocumentIndexStore store,
     DocumentChunkingConfig chunking = const DocumentChunkingConfig(),
     DocumentRetriever? retriever,
+    EmbeddingEngine? embeddingEngine,
   }) : _extractor = extractor,
        _store = store,
        _fallbackChunking = chunking.normalized(),
-       _retriever = retriever ?? LexicalDocumentRetriever() {
+       // The hybrid retriever *is* the lexical one until a collection has
+       // stored vectors and the caller supplies a query vector, so a build
+       // without an embedding model behaves exactly as it did.
+       _retriever = retriever ?? HybridDocumentRetriever(),
+       _embeddingEngine = embeddingEngine {
     // The library is usable before anything is loaded: an empty index still has
     // its always-present collection, so collection operations never see a
     // half-built state.
@@ -91,6 +108,13 @@ class DocumentLibrary {
   final DocumentExtractor _extractor;
   final DocumentIndexStore _store;
   final DocumentRetriever _retriever;
+
+  /// Turns text into vectors when a collection asks for semantic search, or
+  /// null on a build with no embedding runtime.
+  final EmbeddingEngine? _embeddingEngine;
+
+  /// Stored vectors per document id, mirroring the index file.
+  Map<String, DocumentVectors> _vectors = const {};
 
   /// Chunking settings used for collections created in this session.
   final DocumentChunkingConfig _fallbackChunking;
@@ -133,6 +157,16 @@ class DocumentLibrary {
   int chunkCountIn(String collectionId) =>
       _retriever.chunkCountIn(collectionId);
 
+  /// Chunks of one collection that can be ranked by vector similarity.
+  ///
+  /// Zero for a collection that answers lexically, which is how the UI knows
+  /// whether a collection is really running on embeddings.
+  int vectorCountIn(String collectionId) =>
+      _retriever.vectorCountIn(collectionId);
+
+  /// Stored vectors of one document, or null when it has none.
+  DocumentVectors? vectorsFor(String documentId) => _vectors[documentId];
+
   /// Retrieval backend over the current index, used for prompt assembly.
   DocumentRetriever get retriever => _retriever;
 
@@ -157,13 +191,39 @@ class DocumentLibrary {
         KnowledgeCollection.defaultCollection(chunking: _fallbackChunking),
       ];
       _documents = const [];
+      _vectors = const {};
       _activeCollectionId = KnowledgeCollection.defaultId;
     } else {
       _collections = snapshot.collections;
       _documents = snapshot.documents;
+      _vectors = snapshot.vectors;
       _activeCollectionId = snapshot.activeCollectionId;
     }
-    _retriever.rebuild(_documents);
+    _rebuildRetriever();
+  }
+
+  /// Vectors a retriever may use, i.e. only those of collections that still
+  /// ask for embeddings.
+  ///
+  /// A collection switched back to lexical search keeps its stored vectors so
+  /// switching again does not pay for a re-index, but they are not offered to
+  /// the retriever: an answer must follow the collection's current setting.
+  Map<String, DocumentVectors> _retrieverVectors() {
+    final embeddedCollections = {
+      for (final collection in _collections)
+        if (collection.embeddingModelId != null) collection.id,
+    };
+    if (embeddedCollections.isEmpty) return const {};
+    return {
+      for (final document in _documents)
+        if (embeddedCollections.contains(document.collectionId) &&
+            _vectors[document.id] != null)
+          document.id: _vectors[document.id]!,
+    };
+  }
+
+  void _rebuildRetriever() {
+    _retriever.rebuild(_documents, vectors: _retrieverVectors());
   }
 
   /// Loads the stored index again, e.g. after another part of the app changed
@@ -188,15 +248,21 @@ class DocumentLibrary {
   ///
   /// Searches the active collection unless [collectionId] is given: retrieval
   /// answers from one collection rather than mixing unrelated material.
+  ///
+  /// [queryVector] is the embedded query, when the caller has one; without it a
+  /// collection with stored vectors is answered lexically rather than not at
+  /// all.
   List<DocumentSearchHit> search(
     String query, {
     int limit = 5,
     String? collectionId,
+    Float32List? queryVector,
   }) {
     return _retriever.search(
       query,
       limit: limit,
       collectionId: collectionId ?? _activeCollectionId,
+      queryVector: queryVector,
     );
   }
 
@@ -214,15 +280,52 @@ class DocumentLibrary {
   KnowledgeCollection? createCollection(
     String name, {
     DocumentChunkingConfig? chunking,
+    String? embeddingModelId,
   }) {
     if (name.trim().isEmpty) return null;
     final collection = KnowledgeCollection.create(
       name: name,
       chunking: (chunking ?? _fallbackChunking).normalized(),
+      embeddingModelId: _normalizedEmbeddingModel(embeddingModelId),
     ).normalized();
     _collections = [..._collections, collection];
     _persist();
     return collection;
+  }
+
+  /// Points a collection at an embedding model, or back to lexical search.
+  ///
+  /// Documents already indexed for the collection are not rebuilt here: they
+  /// start reporting a re-index reason, which is what the Documents screen shows
+  /// as changed, so a large collection is re-embedded deliberately instead of
+  /// as a side effect of a menu tap.
+  bool setCollectionEmbeddingModel(
+    String collectionId,
+    String? embeddingModelId,
+  ) {
+    final collection = collectionById(collectionId);
+    if (collection == null) return false;
+    final target = _normalizedEmbeddingModel(embeddingModelId);
+    if (collection.embeddingModelId == target) return true;
+
+    _collections = [
+      for (final existing in _collections)
+        existing.id == collectionId
+            ? existing.copyWith(
+                embeddingModelId: target,
+                updatedAt: DateTime.now(),
+              )
+            : existing,
+    ];
+    _rebuildRetriever();
+    _persist();
+    return true;
+  }
+
+  static String? _normalizedEmbeddingModel(String? embeddingModelId) {
+    final trimmed = embeddingModelId?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    return trimmed;
   }
 
   /// Renames a collection. Refuses empty names rather than inventing one.
@@ -254,8 +357,9 @@ class DocumentLibrary {
     final snapshot = _snapshot.removeCollection(collectionId);
     _collections = snapshot.collections;
     _documents = snapshot.documents;
+    _vectors = snapshot.vectors;
     _activeCollectionId = snapshot.activeCollectionId;
-    _retriever.rebuild(_documents);
+    _rebuildRetriever();
     _persist();
     return forgotten;
   }
@@ -274,10 +378,16 @@ class DocumentLibrary {
   /// size and timestamp, unchanged collection settings and pipeline. Re-reading
   /// a file whose bytes changed but whose text did not keeps the existing chunks
   /// and only refreshes the file reference.
+  ///
+  /// When the target collection answers from embeddings, [embeddingModel] has to
+  /// be the installed model the collection pins; a collection whose model is not
+  /// installed fails with an actionable message rather than quietly indexing
+  /// text it cannot search.
   Future<DocumentIngestResult> addDocument({
     required String path,
     String? name,
     String? collectionId,
+    EmbeddingModelRef? embeddingModel,
     CancelToken? cancelToken,
     void Function(DocumentIngestProgress progress)? onProgress,
   }) async {
@@ -361,6 +471,26 @@ class DocumentLibrary {
     }
     cancelToken?.throwIfCancelled();
 
+    final embeddingModelId = collection.embeddingModelId;
+    DocumentVectors? vectors;
+    if (embeddingModelId != null) {
+      final model = embeddingModel;
+      if (model == null || model.id != embeddingModelId) {
+        throw DocumentExtractionException(
+          '"${collection.name}" answers from embeddings, but its embedding '
+          'model is not installed. Install it, or switch the collection back to '
+          'lexical search.',
+        );
+      }
+      vectors = await _embedChunks(
+        chunks,
+        model: model,
+        documentName: source.name,
+        cancelToken: cancelToken,
+        onProgress: onProgress,
+      );
+    }
+
     final indexed = IndexedDocument(
       source: source,
       chunks: chunks,
@@ -370,13 +500,22 @@ class DocumentLibrary {
       collectionId: collection.id,
       chunking: collection.chunking,
       chunkerVersion: documentChunkerVersion,
-      embeddingModelId: collection.embeddingModelId,
+      embeddingModelId: embeddingModelId,
+      embeddingDimensions: vectors?.dimensions,
     );
 
     onProgress?.call(
-      const DocumentIngestProgress(DocumentIngestStage.saving, 0.85),
+      const DocumentIngestProgress(DocumentIngestStage.saving, 0.9),
     );
-    _replace(indexed, collection: collection);
+    // Last check before anything is written: cancellation during embedding must
+    // leave the index exactly as it was.
+    cancelToken?.throwIfCancelled();
+    _replace(
+      indexed,
+      collection: collection,
+      vectors: vectors,
+      clearVectors: vectors == null,
+    );
     onProgress?.call(const DocumentIngestProgress(DocumentIngestStage.done, 1));
 
     AppLogger.debug(
@@ -390,6 +529,7 @@ class DocumentLibrary {
   /// Re-reads one indexed document, rebuilding its chunks when needed.
   Future<DocumentIngestResult> refreshDocument(
     String documentId, {
+    EmbeddingModelRef? embeddingModel,
     CancelToken? cancelToken,
     void Function(DocumentIngestProgress progress)? onProgress,
   }) {
@@ -403,23 +543,170 @@ class DocumentLibrary {
       path: document.source.path,
       name: document.source.name,
       collectionId: document.collectionId,
+      embeddingModel: embeddingModel,
       cancelToken: cancelToken,
       onProgress: onProgress,
+    );
+  }
+
+  /// Id of the embedding model that is currently resident, or null.
+  String? get loadedEmbeddingModelId {
+    final engine = _embeddingEngine;
+    if (engine == null || !engine.isLoaded) return null;
+    return engine.loadedModelId;
+  }
+
+  /// Releases the embedding model.
+  ///
+  /// Called when the work that needed it is done — an indexing run, or the end
+  /// of a chat session — so the small embedding model is not resident for the
+  /// rest of the app's life.
+  Future<void> releaseEmbeddingModel() async {
+    final engine = _embeddingEngine;
+    if (engine == null || !engine.isLoaded) return;
+    await engine.unload();
+  }
+
+  /// Embeds one question with [model], or returns null when that is not
+  /// possible.
+  ///
+  /// Best-effort by design: retrieval already falls back to lexical ranking, so
+  /// a model that is missing, slow or broken degrades the answer instead of
+  /// failing the turn. The reason is logged; the caller is told by getting
+  /// null.
+  Future<Float32List?> embedQuery(
+    String query, {
+    required EmbeddingModelRef model,
+  }) async {
+    try {
+      await _ensureEmbeddingModel(model);
+      final vectors = await _embeddingEngine!.embed([query]);
+      if (vectors.isEmpty) return null;
+      return vectors.first;
+    } catch (error, stack) {
+      AppLogger.error(
+        'DocumentLibrary: could not embed the question; answering from '
+        'lexical search instead',
+        error,
+        stack,
+      );
+      return null;
+    }
+  }
+
+  /// Embeds every chunk of one document, in batches, reporting progress.
+  ///
+  /// A failure unwinds the upload: nothing is stored for a document whose
+  /// vectors are incomplete, so the collection never half-answers from a
+  /// partially embedded index.
+  Future<DocumentVectors> _embedChunks(
+    List<DocumentChunk> chunks, {
+    required EmbeddingModelRef model,
+    required String documentName,
+    CancelToken? cancelToken,
+    void Function(DocumentIngestProgress progress)? onProgress,
+  }) async {
+    final engine = _embeddingEngine;
+    if (engine == null) {
+      throw const DocumentExtractionException(
+        'Embedding search is not available on this build. Switch the '
+        'collection to lexical search.',
+      );
+    }
+    await _ensureEmbeddingModel(model);
+
+    final vectors = <int, Float32List>{};
+    var dimensions = model.dimensions;
+    final batchSize = math.max(1, model.batchSize);
+    for (var start = 0; start < chunks.length; start += batchSize) {
+      cancelToken?.throwIfCancelled();
+      final end = math.min(start + batchSize, chunks.length);
+      final batch = chunks.sublist(start, end);
+
+      final List<Float32List> embedded;
+      try {
+        embedded = await engine.embed([
+          for (final chunk in batch) chunk.text,
+        ], cancelToken: cancelToken);
+      } on OperationCancelledException {
+        rethrow;
+      } catch (error) {
+        throw DocumentExtractionException(
+          'Could not build vectors for "$documentName": $error',
+        );
+      }
+
+      for (var i = 0; i < batch.length && i < embedded.length; i++) {
+        vectors[batch[i].index] = embedded[i];
+        dimensions ??= embedded[i].length;
+      }
+      onProgress?.call(
+        DocumentIngestProgress(
+          DocumentIngestStage.embedding,
+          0.6 + 0.25 * (end / chunks.length),
+        ),
+      );
+    }
+
+    if (vectors.isEmpty) {
+      throw DocumentExtractionException(
+        'No vectors could be built for "$documentName".',
+      );
+    }
+    return DocumentVectors(
+      dimensions: dimensions ?? vectors.values.first.length,
+      chunkVectors: vectors,
+    );
+  }
+
+  /// Loads [model] unless the same model is already resident.
+  Future<void> _ensureEmbeddingModel(EmbeddingModelRef model) async {
+    final engine = _embeddingEngine;
+    if (engine == null) {
+      throw const DocumentExtractionException(
+        'Embedding search is not available on this build.',
+      );
+    }
+    if (engine.isLoaded && engine.loadedModelId == model.id) return;
+    await engine.load(
+      EmbeddingLoadRequest(
+        modelId: model.id,
+        modelPath: model.path,
+        dimensions: model.dimensions,
+        maxInputTokens: model.maxInputTokens,
+        batchSize: model.batchSize,
+        threads: model.threads,
+      ),
     );
   }
 
   /// Removes a document's derived data. The original file is never touched.
   bool removeDocument(String documentId) {
     if (documentById(documentId) == null) return false;
-    _documents = _snapshot.remove(documentId).documents;
-    _retriever.rebuild(_documents);
+    final snapshot = _snapshot.remove(documentId);
+    _documents = snapshot.documents;
+    _vectors = snapshot.vectors;
+    _rebuildRetriever();
     _persist();
     return true;
   }
 
-  void _replace(IndexedDocument document, {KnowledgeCollection? collection}) {
-    final snapshot = _snapshot.upsert(document);
+  void _replace(
+    IndexedDocument document, {
+    KnowledgeCollection? collection,
+    DocumentVectors? vectors,
+    bool clearVectors = false,
+  }) {
+    var snapshot = _snapshot.upsert(document);
+    if (vectors != null) {
+      snapshot = snapshot.withVectors(document.id, vectors);
+    } else if (clearVectors) {
+      // The collection is back on lexical search, so the stored vectors are
+      // derived data nothing reads any more.
+      snapshot = snapshot.withVectors(document.id, null);
+    }
     _documents = snapshot.documents;
+    _vectors = snapshot.vectors;
 
     // Remember which pipeline built this collection's index, so the UI can say
     // how old it is without inspecting every document.
@@ -435,7 +722,7 @@ class DocumentLibrary {
           .collections;
     }
 
-    _retriever.rebuild(_documents);
+    _rebuildRetriever();
     _persist();
   }
 
@@ -443,6 +730,7 @@ class DocumentLibrary {
     collections: _collections,
     activeCollectionId: _activeCollectionId,
     documents: _documents,
+    vectors: _vectors,
   );
 
   /// What makes [document] out of date, or null when its index still applies.
@@ -465,15 +753,25 @@ class DocumentLibrary {
     }
 
     final collection = collectionById(document.collectionId);
-    return documentReindexReason(
-              document,
-              chunking: collection?.chunking ?? const DocumentChunkingConfig(),
-              embeddingModelId: collection?.embeddingModelId,
-              embeddingDimensions: null,
-            ) ==
-            null
-        ? null
-        : _RefreshNeed.pipeline;
+    final reason = documentReindexReason(
+      document,
+      chunking: collection?.chunking ?? const DocumentChunkingConfig(),
+      embeddingModelId: collection?.embeddingModelId,
+      embeddingDimensions: null,
+    );
+    if (reason != null) return _RefreshNeed.pipeline;
+
+    // A collection that answers from embeddings needs a vector for every chunk
+    // it can return: a missing or partial set is rebuilt rather than answered
+    // around, because half a vector index would quietly shrink what a question
+    // can find.
+    if (collection?.embeddingModelId != null) {
+      final stored = _vectors[document.id];
+      if (stored == null || stored.count != document.chunkCount) {
+        return _RefreshNeed.pipeline;
+      }
+    }
+    return null;
   }
 
   Future<FileStat> _statOrThrow(File file) async {

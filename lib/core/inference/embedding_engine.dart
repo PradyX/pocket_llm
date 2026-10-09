@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:pocket_llm/core/utils/cancel_token.dart';
@@ -87,25 +86,4 @@ abstract interface class EmbeddingEngine {
     List<String> texts, {
     CancelToken? cancelToken,
   });
-}
-
-/// Cosine similarity between two vectors of equal width.
-///
-/// Both operands are expected to be L2-normalized (which is how the engine
-/// returns them), so this is the dot product; the fallback keeps the function
-/// honest for vectors that were normalized elsewhere.
-double cosineSimilarity(Float32List a, Float32List b) {
-  if (a.length != b.length || a.isEmpty) return 0;
-  var dot = 0.0;
-  var normA = 0.0;
-  var normB = 0.0;
-  for (var i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  if (normA == 0 || normB == 0) return 0;
-  final scale = math.sqrt(normA) * math.sqrt(normB);
-  if (scale == 0) return 0;
-  return dot / scale;
 }

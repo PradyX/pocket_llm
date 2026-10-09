@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pocket_llm/core/data/versioned_json_document.dart';
 import 'package:pocket_llm/features/documents/domain/document.dart';
+import 'package:pocket_llm/features/documents/domain/document_vectors.dart';
 import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
 
 /// Everything the local document index holds.
@@ -16,6 +17,7 @@ class DocumentIndexSnapshot {
     this.collections = const [],
     this.activeCollectionId = KnowledgeCollection.defaultId,
     this.documents = const [],
+    this.vectors = const {},
   });
 
   static const DocumentIndexSnapshot empty = DocumentIndexSnapshot();
@@ -29,19 +31,49 @@ class DocumentIndexSnapshot {
   /// Indexed documents, oldest first.
   final List<IndexedDocument> documents;
 
+  /// Stored vectors per document id, for the documents that were embedded.
+  ///
+  /// Kept beside the documents rather than inside them so the derived vectors
+  /// of a collection that uses lexical search simply do not exist here.
+  final Map<String, DocumentVectors> vectors;
+
   int get chunkCount =>
       documents.fold(0, (sum, document) => sum + document.chunkCount);
+
+  /// Number of stored vectors across every document.
+  int get vectorCount =>
+      vectors.values.fold(0, (sum, document) => sum + document.count);
 
   DocumentIndexSnapshot copyWith({
     List<KnowledgeCollection>? collections,
     String? activeCollectionId,
     List<IndexedDocument>? documents,
+    Map<String, DocumentVectors>? vectors,
   }) {
     return DocumentIndexSnapshot(
       collections: collections ?? this.collections,
       activeCollectionId: activeCollectionId ?? this.activeCollectionId,
       documents: documents ?? this.documents,
+      vectors: vectors ?? this.vectors,
     );
+  }
+
+  /// Vectors of one document, or null when it was indexed lexically.
+  DocumentVectors? vectorsFor(String documentId) => vectors[documentId];
+
+  /// Returns the snapshot with [vectors] stored for [documentId], or with the
+  /// document's vectors forgotten when [vectors] is null or empty.
+  DocumentIndexSnapshot withVectors(
+    String documentId,
+    DocumentVectors? vectors,
+  ) {
+    final updated = Map<String, DocumentVectors>.from(this.vectors);
+    if (vectors == null || vectors.isEmpty) {
+      updated.remove(documentId);
+    } else {
+      updated[documentId] = vectors;
+    }
+    return copyWith(vectors: updated);
   }
 
   KnowledgeCollection? collectionById(String collectionId) {
@@ -83,12 +115,15 @@ class DocumentIndexSnapshot {
     return copyWith(documents: updated);
   }
 
-  /// Returns the snapshot without [documentId].
+  /// Returns the snapshot without [documentId] or its vectors.
   DocumentIndexSnapshot remove(String documentId) {
+    final updatedVectors = Map<String, DocumentVectors>.from(vectors)
+      ..remove(documentId);
     return copyWith(
       documents: documents
           .where((document) => document.id != documentId)
           .toList(growable: false),
+      vectors: updatedVectors,
     );
   }
 
@@ -112,6 +147,10 @@ class DocumentIndexSnapshot {
   /// removed. The default collection cannot be removed.
   DocumentIndexSnapshot removeCollection(String collectionId) {
     if (collectionId == KnowledgeCollection.defaultId) return this;
+    final forgotten = {
+      for (final document in documents)
+        if (document.collectionId == collectionId) document.id,
+    };
     return copyWith(
       collections: collections
           .where((collection) => collection.id != collectionId)
@@ -122,6 +161,10 @@ class DocumentIndexSnapshot {
       activeCollectionId: activeCollectionId == collectionId
           ? KnowledgeCollection.defaultId
           : activeCollectionId,
+      vectors: {
+        for (final entry in vectors.entries)
+          if (!forgotten.contains(entry.key)) entry.key: entry.value,
+      },
     );
   }
 
@@ -133,32 +176,39 @@ class DocumentIndexSnapshot {
           .map((collection) => collection.toJson())
           .toList(),
       'documents': documents.map((document) => document.toJson()).toList(),
+      if (vectors.isNotEmpty)
+        'vectors': {
+          for (final entry in vectors.entries) entry.key: entry.value.toJson(),
+        },
     };
   }
 }
 
 /// Persistent, offline storage for derived document data.
 ///
-/// Storage format (version 2):
+/// Storage format (version 3):
 ///
 /// ```json
 /// {
-///   "version": 2,
+///   "version": 3,
 ///   "activeCollectionId": "collection-default",
 ///   "collections": [ { ...KnowledgeCollection... } ],
-///   "documents": [ { ...IndexedDocument... } ]
+///   "documents": [ { ...IndexedDocument... } ],
+///   "vectors": { "doc-id": { "dimensions": 384, "chunks": { "0": "..." } } }
 /// }
 /// ```
 ///
-/// Version 1 had a single chunking config for the whole index and no
-/// collections. Such a file is read by putting every document in a default
-/// collection that keeps the stored chunking settings — nothing is dropped and
-/// the file is only rewritten in the new shape when something changes.
+/// Version 2 added collections and version 1 a single chunking config for the
+/// whole index. Both are read as they were written — every document lands in a
+/// default collection that keeps the stored chunking settings — and the file is
+/// only rewritten in the new shape when something changes. A version 1 or 2 file
+/// has no vectors, which is exactly what lexical retrieval needs.
 ///
-/// Only derived data lives here: extracted text, chunks and the file reference.
-/// Original files are never copied or modified. A payload that cannot be read is
-/// copied to `index.json.corrupt-<time>` before a rewrite, and a file written by
-/// a newer build is left untouched.
+/// Only derived data lives here: extracted text, chunks, the file reference and
+/// the vectors an embedding model produced. Original files are never copied or
+/// modified. A payload that cannot be read is copied to
+/// `index.json.corrupt-<time>` before a rewrite, and a file written by a newer
+/// build is left untouched.
 class DocumentIndexStore {
   DocumentIndexStore(File file)
     : _document = VersionedJsonDocument(
@@ -169,7 +219,7 @@ class DocumentIndexStore {
       );
 
   /// Current on-disk schema version.
-  static const int currentVersion = 2;
+  static const int currentVersion = 3;
 
   /// Version that stored a single chunking config for the whole index.
   static const int _legacySingleCollectionVersion = 1;
@@ -216,6 +266,8 @@ class DocumentIndexStore {
       }
     }
 
+    final vectors = _readVectors(decoded['vectors']);
+
     final version = (decoded['version'] as num?)?.toInt() ?? 1;
     if (version <= _legacySingleCollectionVersion) {
       return _repaired(
@@ -226,6 +278,7 @@ class DocumentIndexStore {
             ),
           ],
           documents: documents,
+          vectors: vectors,
         ),
       );
     }
@@ -255,8 +308,27 @@ class DocumentIndexStore {
             ? activeCollectionId
             : KnowledgeCollection.defaultId,
         documents: documents,
+        vectors: vectors,
       ),
     );
+  }
+
+  /// Reads the stored vector map, skipping anything that is not usable.
+  ///
+  /// Repair happens per document: a payload with one unreadable vector set
+  /// keeps the others, because the alternative — dropping the whole map — would
+  /// silently turn an embedded collection back into a lexical one.
+  static Map<String, DocumentVectors> _readVectors(Object? raw) {
+    if (raw is! Map) return const {};
+    final vectors = <String, DocumentVectors>{};
+    for (final entry in raw.entries) {
+      final documentId = '${entry.key}';
+      if (documentId.isEmpty) continue;
+      final parsed = DocumentVectors.fromJson(entry.value);
+      if (parsed == null) continue;
+      vectors[documentId] = parsed;
+    }
+    return vectors;
   }
 
   /// Writes [snapshot]. Returns false when the store is read-only.
@@ -268,6 +340,10 @@ class DocumentIndexStore {
 
   /// Guarantees the default collection exists, that the active selection points
   /// at a collection that exists, and that no document is orphaned.
+  ///
+  /// Vectors are repaired against the documents that survived: vectors of a
+  /// document that is gone, or for a chunk position the document no longer has,
+  /// are dropped rather than kept as a hit nothing can point at.
   static DocumentIndexSnapshot _repaired(DocumentIndexSnapshot snapshot) {
     final collections = <KnowledgeCollection>[...snapshot.collections];
     if (!collections.any(
@@ -284,12 +360,22 @@ class DocumentIndexStore {
             : document.withCollection(KnowledgeCollection.defaultId),
     ];
 
+    final vectors = <String, DocumentVectors>{};
+    for (final document in documents) {
+      final stored = snapshot.vectors[document.id];
+      if (stored == null) continue;
+      final limited = stored.limitedTo(document.chunkCount);
+      if (limited.isEmpty) continue;
+      vectors[document.id] = limited;
+    }
+
     return DocumentIndexSnapshot(
       collections: collections,
       activeCollectionId: known.contains(snapshot.activeCollectionId)
           ? snapshot.activeCollectionId
           : KnowledgeCollection.defaultId,
       documents: documents,
+      vectors: vectors,
     );
   }
 

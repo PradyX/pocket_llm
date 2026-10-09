@@ -138,6 +138,7 @@ class DocumentsState {
     DocumentIngestStage.reading => 'Reading the file…',
     DocumentIngestStage.extracting => 'Extracting text…',
     DocumentIngestStage.chunking => 'Slicing into chunks…',
+    DocumentIngestStage.embedding => 'Building search vectors…',
     DocumentIngestStage.saving => 'Saving the local index…',
     DocumentIngestStage.done => 'Finishing up…',
     null => 'Working…',

@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_llm/core/inference/embedding_engine.dart';
@@ -67,65 +65,6 @@ void main() {
             'Chat and embeddings cannot share a native context, so they must '
             'not share an engine.',
       );
-    });
-  });
-
-  group('cosine similarity', () {
-    Float32List vector(List<double> values) =>
-        Float32List.fromList(values.toList());
-
-    test('equal normalized vectors score one', () {
-      final a = Float32List.fromList([0.6, 0.8]);
-      expect(cosineSimilarity(a, a), closeTo(1, 1e-6));
-    });
-
-    test('orthogonal vectors score zero and opposite ones score minus one', () {
-      expect(
-        cosineSimilarity(
-          Float32List.fromList([1, 0]),
-          Float32List.fromList([0, 1]),
-        ),
-        closeTo(0, 1e-6),
-      );
-      expect(
-        cosineSimilarity(
-          Float32List.fromList([1, 0]),
-          Float32List.fromList([-1, 0]),
-        ),
-        closeTo(-1, 1e-6),
-      );
-    });
-
-    test('unnormalized vectors are scaled, not misread', () {
-      expect(
-        cosineSimilarity(
-          Float32List.fromList([2, 4]),
-          Float32List.fromList([1, 2]),
-        ),
-        closeTo(1, 1e-6),
-      );
-    });
-
-    test('a zero vector, an empty vector or a width mismatch scores zero', () {
-      expect(
-        cosineSimilarity(
-          Float32List.fromList([0, 0]),
-          Float32List.fromList([1, 1]),
-        ),
-        0,
-      );
-      expect(cosineSimilarity(Float32List(0), Float32List(0)), 0);
-      expect(
-        cosineSimilarity(
-          Float32List.fromList([1, 0]),
-          Float32List.fromList([1, 0, 0]),
-        ),
-        0,
-      );
-    });
-
-    test('vector() helper checks the width, not just the values', () {
-      expect(vector([1, 2]).length, 2);
     });
   });
 }
