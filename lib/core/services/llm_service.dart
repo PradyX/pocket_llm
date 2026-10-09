@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -47,6 +48,18 @@ class LlmService implements InferenceEngine {
   /// Sticky: it describes the build, not the model currently loaded, so it
   /// survives an unload.
   bool? _multimodalRuntimeAvailable;
+
+  /// True when the runtime's native code is linked into the app instead of
+  /// being opened from a library shipped beside it.
+  ///
+  /// macOS takes this path since the runtime moved to `0.9.0-dev.12`: the
+  /// plugin resolves through Swift Package Manager, and its binary target links
+  /// `llama.framework` — llama.cpp, its ggml backends and libmtmd in one image —
+  /// into the app, so there is nothing left to open. iOS is deliberately not
+  /// included: it still ships the libraries this repository builds, and there
+  /// is no iOS build here to change that safely. Android and Linux keep
+  /// loading the shared libraries the app bundles.
+  static final bool _usesLinkedFramework = Platform.isMacOS;
 
   LlmService({PlatformRuntimePathsService? platformRuntimePathsService})
     : _platformRuntimePathsService = platformRuntimePathsService;
@@ -193,18 +206,28 @@ class LlmService implements InferenceEngine {
     );
 
     try {
-      AppLogger.debug('[LlmService] Native library: $_libraryPath');
-      _llama = await LlamaEngine.spawn(
-        libraryPath: _libraryPath ?? LlamaLibrary.defaultFileName(),
-        modelParams: modelParams,
-        contextParams: contextParams,
-        multimodalParams: normalizedMmprojPath == null
-            ? null
-            : MultimodalParams(
-                mmprojPath: normalizedMmprojPath,
-                mediaMarker: '<image>',
-              ),
+      AppLogger.debug(
+        '[LlmService] Native library: '
+        '${_usesLinkedFramework ? '<process>' : _libraryPath}',
       );
+      final multimodalParams = normalizedMmprojPath == null
+          ? null
+          : MultimodalParams(
+              mmprojPath: normalizedMmprojPath,
+              mediaMarker: '<image>',
+            );
+      _llama = _usesLinkedFramework
+          ? await LlamaEngine.spawnFromProcess(
+              modelParams: modelParams,
+              contextParams: contextParams,
+              multimodalParams: multimodalParams,
+            )
+          : await LlamaEngine.spawn(
+              libraryPath: _libraryPath ?? LlamaLibrary.defaultFileName(),
+              modelParams: modelParams,
+              contextParams: contextParams,
+              multimodalParams: multimodalParams,
+            );
       _session = await _llama!.createSession();
     } catch (e, stack) {
       await unloadModel();
@@ -396,7 +419,25 @@ class LlmService implements InferenceEngine {
   Future<void> _ensureLibraryConfigured({
     required bool requiresMultimodal,
   }) async {
-    if (_libraryConfigured && (!requiresMultimodal || _libraryPath != null)) {
+    if (_libraryConfigured &&
+        (!requiresMultimodal || _multimodalRuntimeAvailable == true)) {
+      return;
+    }
+
+    if (_usesLinkedFramework) {
+      // Nothing to resolve: the framework was linked by Xcode, so the only
+      // question is whether this build's image carries the multimodal half.
+      _multimodalRuntimeAvailable = _hasLinkedMultimodalRuntime();
+      _libraryConfigured = true;
+      AppLogger.debug(
+        '[LlmService] Linked runtime carries multimodal: '
+        '$_multimodalRuntimeAvailable',
+      );
+      if (requiresMultimodal && _multimodalRuntimeAvailable != true) {
+        throw Exception(
+          'Image and audio runtime is not bundled on this build. Reinstall the app or use a supported build.',
+        );
+      }
       return;
     }
 
@@ -425,6 +466,26 @@ class LlmService implements InferenceEngine {
     }
 
     _libraryConfigured = true;
+  }
+
+  /// Whether the linked-in runtime carries the multimodal (mtmd) half.
+  ///
+  /// [InferenceCapabilities.vision] and `.audio` are answered from this. The
+  /// framework ships llama.cpp, its ggml backends and libmtmd in a single
+  /// image, so the question is whether a known mtmd entry point resolves in
+  /// this process. A real lookup is used rather than a hard-coded `true`, so a
+  /// build that ships a text-only runtime reports the truth.
+  static bool _hasLinkedMultimodalRuntime() {
+    try {
+      DynamicLibrary.process().lookup<NativeFunction<Void Function()>>(
+        'mtmd_context_params_default',
+      );
+      return true;
+    } on ArgumentError {
+      return false;
+    } on UnsupportedError {
+      return false;
+    }
   }
 
   Future<String?> _resolveMultimodalLibraryPath() async {

@@ -23,7 +23,12 @@ dependencies:
   slang: ^4.13.0
   slang_flutter: ^4.13.0
   talker_flutter: ^5.1.15
-  llama_cpp_dart: 0.9.0-dev.10
+  # Pinned by the section 17 checklist in the vault note "Architecture and
+  # Runtime". macOS links the plugin's `llama.framework` through Swift Package
+  # Manager and Android uses this repository's own three-ABI jniLibs (see the
+  # `hooks` section below), so no platform here runs the package's bundled
+  # Android AAR.
+  llama_cpp_dart: 0.9.0-dev.12
   image_picker: ^1.1.2
   image: ^4.5.4
   path_provider: ^2.1.2
@@ -56,6 +61,16 @@ dev_dependencies:
   json_serializable: ^6.8.0
   flutter_launcher_icons: ^0.14.4
   flutter_native_splash: ^2.4.7
+
+# The package ships an arm64-only Android AAR and extracts it through a
+# native-assets build hook. This app builds llama.cpp for arm64-v8a,
+# armeabi-v7a and x86_64 itself (scripts/build_llama_native_libs.sh), so the
+# hook is deliberately switched off: bundling it would drop two ABIs and
+# duplicate libraries for the third.
+hooks:
+  user_defines:
+    llama_cpp_dart:
+      bundle_android: false
 
 flutter:
   uses-material-design: true

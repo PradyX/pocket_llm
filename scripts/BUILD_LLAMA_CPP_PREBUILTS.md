@@ -1,13 +1,19 @@
 # Building PocketLlama llama.cpp libraries
 
-The app pins `llama_cpp_dart: 0.9.0-dev.10` and its matching llama.cpp revision:
+The app pins `llama_cpp_dart: 0.9.0-dev.12` and its matching llama.cpp revision:
 
 ```
 afeebe103bd99cda8f5dfaefcabadf890db7fda7 (b10182)
 ```
 
-This prerelease is the newest binding compatible with the project's Flutter
-3.38.9 SDK. `0.9.0-dev.12` requires Flutter 3.44 and uses the same native pin.
+`0.9.0-dev.12` is the newest published binding and keeps the llama.cpp pin of
+`0.9.0-dev.10`, so generation behaviour does not change. It changes *packaging*:
+macOS and iOS resolve through Swift Package Manager and link `llama.framework`
+(llama.cpp, its ggml backends and libmtmd in one image), and Android offers a
+native-assets build hook that extracts an arm64-only AAR. PocketLlama therefore
+bundles no `macos/Runner/Frameworks` libraries any more, and it switches the
+Android hook off (`hooks.user_defines.llama_cpp_dart.bundle_android: false` in
+`pubspec.yaml`) because this repository builds all three Android ABIs itself.
 The 0.9 API is a rewrite: PocketLlama uses `LlamaEngine` worker isolates,
 `EngineSession`, streaming token events, and `LlamaMedia` for images.
 
@@ -23,12 +29,11 @@ older package's pubspec comment format. Never update native libraries alone:
 FFI structure layouts and symbols must match the Dart package.
 
 ```bash
-# macOS: Android, universal macOS, arm64 iOS device and simulator
+# macOS host: Android plus the arm64 iOS device and simulator libraries
 scripts/build_llama_native_libs.sh all
 
 # Individual targets
 scripts/build_llama_native_libs.sh android
-scripts/build_llama_native_libs.sh macos
 scripts/build_llama_native_libs.sh ios
 
 # Run on a Linux host
@@ -47,24 +52,30 @@ arm64-v8a, armeabi-v7a, and x86_64. It statically links the C++ runtime and enab
 flexible page sizes. PocketLlama manages JNI libraries itself; do not add a
 second AAR containing a different llama runtime.
 
-Apple builds require Xcode and the appropriate SDKs. macOS builds arm64 and
-x86_64; iOS builds arm64 device and arm64 simulator separately. Metal is enabled
-for macOS/device and disabled for the simulator.
+There is no `macos` target: macOS uses the framework the plugin links (see
+`scripts/BUILD_LLAMA_CPP_PREBUILTS.md` and the vault note "Architecture and
+Runtime").
+
+Apple builds require Xcode and the appropriate SDKs. iOS builds arm64 device and
+arm64 simulator separately; Metal is enabled for the device and disabled for the
+simulator.
 
 ## Installed outputs
 
 | Target | Destination |
 | --- | --- |
 | Android | `android/app/src/main/jniLibs/<abi>/` |
-| macOS | `macos/Runner/Frameworks/` |
 | iOS device | `ios/` |
 | iOS simulator | `ios/Frameworks/` |
 | Linux | `linux/lib/` |
+| macOS | none — `llama.framework` is linked by Swift Package Manager |
 
 Always replace the entire `libllama`, `libmtmd`, and `libggml*` family together.
-The app passes the bundled **libllama** path to the engine; the new binding opens
-sibling **libmtmd** for multimodal symbols. The existing `POCKET_LLM_MTMD_PATH`
-override still selects the containing runtime directory.
+On Android and Linux the app passes the bundled **libllama** path to the engine,
+and the binding opens its sibling **libmtmd** for multimodal symbols; the
+`POCKET_LLM_MTMD_PATH` override still selects the containing runtime directory
+there. On macOS nothing is opened: the app asks the in-process runtime whether it
+carries the mtmd half and reports vision/audio capability from that answer.
 
 Native binaries are gitignored and must be rebuilt on each build machine.
 Linux binaries must be rebuilt on Linux before packaging a Linux release.
@@ -72,11 +83,18 @@ After rebuilding, restart the app completely so no old native library remains
 loaded. Run `flutter test` and exercise text generation, Stop, model switching,
 and image generation with a matching projector on each target device.
 
-For a desktop ABI/tokenizer smoke test (no model weights required):
+The end-to-end macOS check runs the real engine against real weights:
+
+```bash
+flutter test integration_test/device_inference_smoke_test.dart -d macos
+```
+
+For an ABI/tokenizer smoke test (no model weights required) against a library
+this repository built:
 
 ```bash
 dart run tool/smoke_llama_runtime.dart \
-  "$PWD/macos/Runner/Frameworks/libllama.dylib" \
+  "$PWD/linux/lib/libllama.so" \
   "$LLAMA_CPP_DIR/models/ggml-vocab-qwen35.gguf"
 ```
 
@@ -104,7 +122,7 @@ To exercise PocketLlama's service itself with local native libraries:
 
 ```bash
 POCKET_LLM_TEST_MODEL=/absolute/path/to/model.gguf \
-POCKET_LLM_MTMD_PATH="$PWD/macos/Runner/Frameworks/libmtmd.dylib" \
+POCKET_LLM_MTMD_PATH="$PWD/linux/lib/libmtmd.so" \
 flutter test test/llm_service_native_test.dart
 ```
 

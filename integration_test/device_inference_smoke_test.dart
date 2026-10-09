@@ -92,6 +92,31 @@ void main() {
       ),
     );
 
+    // 1b. What this build's runtime reports about itself. Vision and audio come
+    //     from the multimodal half of the runtime (libmtmd on Android/Linux,
+    //     inside the linked framework on macOS), so losing it would silently
+    //     disable image and audio input.
+    final capabilities = engine.capabilities;
+    // ignore: avoid_print
+    print(
+      'capabilities: streaming=${capabilities.streaming} '
+      'cancellation=${capabilities.cancellation} '
+      'gpuOffload=${capabilities.gpuOffload} '
+      'vision=${capabilities.vision} audio=${capabilities.audio} '
+      'embeddings=${capabilities.embeddings}',
+    );
+    expect(capabilities.streaming, isTrue);
+    expect(capabilities.cancellation, isTrue);
+    if (Platform.isMacOS) {
+      expect(
+        capabilities.vision && capabilities.audio,
+        isTrue,
+        reason:
+            'the linked llama.framework ships the mtmd half; without it '
+            'image and audio input would be reported unavailable',
+      );
+    }
+
     final systemPrompt = composePersonaSystemPrompt(
       persona: BuiltInPersonas.general,
       toolContract: model.supportsToolCalling

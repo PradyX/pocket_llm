@@ -73,19 +73,27 @@ die() {
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/build_llama_native_libs.sh [all|android|linux|macos|ios|ios-device|ios-simulator]
+  scripts/build_llama_native_libs.sh [all|android|linux|ios|ios-device|ios-simulator]
 
 The script resolves the locked `llama_cpp_dart` version from `pubspec.lock`,
 finds the matching `llama.cpp` commit from your local pub cache, checks out
 that commit in `LLAMA_CPP_DIR`, and then builds/copies the native libraries.
 
+macOS is not a target here. Since `llama_cpp_dart` 0.9.0-dev.12 the plugin
+resolves through Swift Package Manager and links `llama.framework` (llama.cpp,
+its ggml backends and libmtmd in one image) into the app, so there is no
+`macos/Runner/Frameworks` copy to build any more. The package's Android AAR is
+arm64-only, which is why Android still builds its three ABIs locally (the
+package hook is switched off in `pubspec.yaml`).
+
 With no explicit targets:
-  - on macOS hosts: builds Android + macOS + iOS device + iOS simulator
+  - on macOS hosts: builds Android + iOS device + iOS simulator
   - on Linux hosts: builds Linux only
 
 Defaults:
-  LLAMA_CPP_DIR=/Users/prady/FlutterProjects/llama.cpp   (macOS)
   LLAMA_CPP_DIR=/home/prady/flutter-projects/llama.cpp   (Linux)
+  LLAMA_CPP_DIR=/Users/prady/FlutterProjects/llama.cpp   (macOS host, for the
+                                                          Android/iOS targets)
   ANDROID_PLATFORM=24
   IOS_DEPLOYMENT_TARGET=13.0
   CMAKE_JOBS=<host cpu count>
@@ -93,6 +101,7 @@ Defaults:
   BUILD_ROOT=<project>/build/llama-native
 
 Optional overrides:
+  LLAMA_CPP_DIR=<path>                Source checkout to build from
   LLAMA_CPP_COMMIT=<commit-or-tag>    Force a specific llama.cpp checkout target
   SKIP_GIT_FETCH=1                    Do not fetch latest refs before checkout
   SKIP_GIT_CHECKOUT=1                 Verify and build the pinned checkout without switching
@@ -101,8 +110,8 @@ Optional overrides:
 Examples:
   scripts/build_llama_native_libs.sh
   scripts/build_llama_native_libs.sh linux
-  scripts/build_llama_native_libs.sh android macos
-  LLAMA_CPP_DIR=/path/to/llama.cpp scripts/build_llama_native_libs.sh ios
+  scripts/build_llama_native_libs.sh android ios
+  LLAMA_CPP_DIR=/path/to/llama.cpp scripts/build_llama_native_libs.sh android
 EOF
 }
 
@@ -525,35 +534,6 @@ build_linux() {
   copy_linux_outputs "${build_dir}"
 }
 
-build_macos() {
-  local build_dir="${BUILD_ROOT}/macos"
-
-  require_command cmake
-
-  log "Configuring macOS"
-  rm -rf "${build_dir}"
-  cmake \
-    -S "${LLAMA_CPP_DIR}" \
-    -B "${build_dir}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
-    -DBUILD_SHARED_LIBS=ON \
-    -DLLAMA_BUILD_TESTS=OFF \
-    -DLLAMA_BUILD_EXAMPLES=OFF \
-    -DLLAMA_BUILD_SERVER=OFF \
-    -DLLAMA_BUILD_TOOLS=ON \
-    -DGGML_METAL=ON \
-    -DGGML_METAL_EMBED_LIBRARY=ON \
-    -DGGML_NATIVE=OFF \
-    -DLLAMA_OPENSSL=OFF
-
-  log "Building macOS"
-  cmake --build "${build_dir}" --parallel "${CMAKE_JOBS}" --target llama mtmd
-
-  log "Copying macOS libraries"
-  copy_apple_outputs "${build_dir}" "${PROJECT_DIR}/macos/Runner/Frameworks"
-}
-
 build_ios_variant() {
   local variant_name="$1"
   local sysroot="$2"
@@ -633,9 +613,6 @@ print_summary() {
 
   log "iOS simulator libraries:"
   find "${PROJECT_DIR}/ios/Frameworks" -maxdepth 1 -type f -name '*.dylib' | sort
-
-  log "macOS libraries:"
-  find "${PROJECT_DIR}/macos/Runner/Frameworks" -maxdepth 1 -type f -name 'lib*.dylib' | sort
 }
 
 main() {
@@ -647,7 +624,6 @@ main() {
 
   local build_android_requested=0
   local build_linux_requested=0
-  local build_macos_requested=0
   local build_ios_device_requested=0
   local build_ios_sim_requested=0
 
@@ -656,7 +632,6 @@ main() {
       build_linux_requested=1
     else
       build_android_requested=1
-      build_macos_requested=1
       build_ios_device_requested=1
       build_ios_sim_requested=1
     fi
@@ -669,7 +644,6 @@ main() {
             build_linux_requested=1
           else
             build_android_requested=1
-            build_macos_requested=1
             build_ios_device_requested=1
             build_ios_sim_requested=1
           fi
@@ -679,9 +653,6 @@ main() {
           ;;
         linux)
           build_linux_requested=1
-          ;;
-        macos)
-          build_macos_requested=1
           ;;
         ios)
           build_ios_device_requested=1
@@ -717,11 +688,6 @@ main() {
 
   if [[ "${build_linux_requested}" -eq 1 ]]; then
     build_linux
-  fi
-
-  if [[ "${build_macos_requested}" -eq 1 ]]; then
-    require_command xcodebuild
-    build_macos
   fi
 
   if [[ "${build_ios_device_requested}" -eq 1 ]]; then

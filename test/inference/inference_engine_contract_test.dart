@@ -240,7 +240,7 @@ void main() {
       // Road Map 1 section 17: a newer binding is not adopted until its
       // checklist is run and recorded. Moving this pin without re-reading the
       // record is what this breaks on.
-      const evaluatedVersion = '0.9.0-dev.10';
+      const evaluatedVersion = '0.9.0-dev.12';
 
       final pin = RegExp(
         r'^\s*llama_cpp_dart:\s*(\S+)\s*$',
@@ -255,6 +255,36 @@ void main() {
             '1 section 17, record it in the vault note "Architecture and '
             'Runtime", and update this test with the version that was '
             'evaluated.',
+      );
+    });
+
+    test('the platforms package the runtime the way the pin expects', () {
+      // 0.9.0-dev.12 packages its own native runtime on the platforms it
+      // supports: macOS through a Swift package that links `llama.framework`
+      // (llama.cpp + ggml + libmtmd in one image) and Android through a build
+      // hook that extracts an arm64-only AAR. This app therefore links the
+      // framework on macOS instead of shipping dylibs, and keeps its own
+      // three-ABI Android libraries by switching the hook off. Both are
+      // deliberate, so both are pinned here: an edit that quietly restores a
+      // second runtime copy for one platform fails this test.
+      final macosProject = File(
+        'macos/Runner.xcodeproj/project.pbxproj',
+      ).readAsStringSync();
+      expect(
+        macosProject.contains('libllama.dylib'),
+        isFalse,
+        reason:
+            'macOS must use the linked llama.framework, not a second copy of '
+            'llama.cpp in macos/Runner/Frameworks.',
+      );
+
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      expect(
+        pubspec,
+        contains('bundle_android: false'),
+        reason:
+            'The package AAR is arm64-only; bundling it would drop the '
+            'armeabi-v7a and x86_64 libraries this repository builds.',
       );
     });
   });
