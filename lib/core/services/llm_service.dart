@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:llama_cpp_dart/llama_cpp_dart.dart';
 import 'package:path/path.dart' as p;
 import 'package:pocket_llm/core/inference/inference_engine.dart';
+import 'package:pocket_llm/core/services/native_runtime_layout.dart';
 import 'package:pocket_llm/core/services/platform_runtime_paths_service.dart';
 import 'package:pocket_llm/core/utils/logger.dart';
 
@@ -50,16 +51,10 @@ class LlmService implements InferenceEngine {
   bool? _multimodalRuntimeAvailable;
 
   /// True when the runtime's native code is linked into the app instead of
-  /// being opened from a library shipped beside it.
-  ///
-  /// macOS takes this path since the runtime moved to `0.9.0-dev.12`: the
-  /// plugin resolves through Swift Package Manager, and its binary target links
-  /// `llama.framework` — llama.cpp, its ggml backends and libmtmd in one image —
-  /// into the app, so there is nothing left to open. iOS is deliberately not
-  /// included: it still ships the libraries this repository builds, and there
-  /// is no iOS build here to change that safely. Android and Linux keep
-  /// loading the shared libraries the app bundles.
-  static final bool _usesLinkedFramework = Platform.isMacOS;
+  /// being opened from a library shipped beside it. The platform rule lives in
+  /// [NativeRuntimeLayout] so the embedding engine answers it the same way.
+  static bool get _usesLinkedFramework =>
+      NativeRuntimeLayout.isLinkedIntoProcess;
 
   LlmService({PlatformRuntimePathsService? platformRuntimePathsService})
     : _platformRuntimePathsService = platformRuntimePathsService;
@@ -167,9 +162,9 @@ class LlmService implements InferenceEngine {
     final defaultThreads = defaultComputeThreads(isMobile: isMobile);
     final resolvedNCtx = request.contextTokens ?? (isMobile ? 1024 : 2048);
 
-    _validateGgufFile(modelPath, label: 'Model');
+    validateGgufFile(modelPath, label: 'Model');
     if (normalizedMmprojPath != null) {
-      _validateGgufFile(normalizedMmprojPath, label: 'Vision projector');
+      validateGgufFile(normalizedMmprojPath, label: 'Vision projector');
     }
 
     if (_llama != null) {
@@ -453,7 +448,7 @@ class LlmService implements InferenceEngine {
       );
       _libraryPath = p.join(
         p.dirname(preferredPath),
-        Platform.isIOS || Platform.isMacOS ? 'libllama.dylib' : 'libllama.so',
+        NativeRuntimeLayout.sharedLibraryFileName,
       );
       _libraryConfigured = true;
       return;
@@ -540,7 +535,12 @@ class LlmService implements InferenceEngine {
     return null;
   }
 
-  void _validateGgufFile(String filePath, {required String label}) {
+  /// Rejects a file that is not a GGUF at all before a runtime is asked to
+  /// open it, so the user gets a sentence instead of a native error.
+  ///
+  /// Shared with the embedding service: both load models the same way, and a
+  /// half-downloaded file has to fail in both.
+  static void validateGgufFile(String filePath, {required String label}) {
     final file = File(filePath);
     if (!file.existsSync()) {
       throw Exception('$label file not found at $filePath');

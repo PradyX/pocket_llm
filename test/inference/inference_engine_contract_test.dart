@@ -227,12 +227,18 @@ void main() {
         }
       }
 
+      offenders.sort();
       expect(
         offenders,
-        ['lib/core/services/llm_service.dart'],
+        [
+          'lib/core/services/llm_service.dart',
+          'lib/core/services/local_embedding_service.dart',
+        ]..sort(),
         reason:
             'A second feature importing the binding would tie that feature to '
-            'one runtime and make the swap unsafe.',
+            'one runtime and make the swap unsafe. The two allowed files are '
+            'the two engines — chat and embeddings — and each of them hides the '
+            'binding behind its own seam.',
       );
     });
 
