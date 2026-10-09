@@ -219,12 +219,12 @@ class _VoiceConversationPageState extends ConsumerState<VoiceConversationPage> {
     );
   }
 
+  /// What was said stays on screen through the answer as well: the words are
+  /// the question being answered, and they are the thing a hands-free user
+  /// cannot check any other way.
   static bool _showsLiveTranscript(VoiceConversationState state) =>
       state.stage == VoiceConversationStage.transcribing ||
-      (state.stage == VoiceConversationStage.thinking &&
-          state.transcript.isNotEmpty) ||
-      (state.stage == VoiceConversationStage.listening &&
-          state.transcript.isNotEmpty);
+      state.transcript.isNotEmpty;
 
   static bool _showsReply(VoiceConversationState state) =>
       state.reply.isNotEmpty;
