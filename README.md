@@ -153,6 +153,8 @@ flutter run -d macos
 flutter run -d linux
 ```
 
+On macOS, prefer `scripts/run_macos.sh` over a bare `flutter run -d macos`: it renews the development provisioning profile, which Apple issues for only seven days on a free Personal Team and which the Flutter macOS builder cannot renew on its own. See [scripts/run_macos.sh](scripts/run_macos.sh) for the details and flags.
+
 For Linux-specific native runtime, benchmark asset, and installable release archive steps, see [scripts/BUILD_LINUX.md](scripts/BUILD_LINUX.md).
 
 ### If you change Riverpod annotations
