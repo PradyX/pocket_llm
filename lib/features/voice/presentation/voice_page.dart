@@ -9,6 +9,7 @@ import 'package:pocket_llm/features/voice/application/recording_controller.dart'
 import 'package:pocket_llm/features/voice/application/transcription_controller.dart';
 import 'package:pocket_llm/features/voice/application/tts_controller.dart';
 import 'package:pocket_llm/features/voice/application/voice_controller.dart';
+import 'package:pocket_llm/features/voice/application/voice_conversation_controller.dart';
 import 'package:pocket_llm/features/voice/data/microphone_recorder.dart';
 import 'package:pocket_llm/features/voice/data/speech_to_text_service.dart';
 import 'package:pocket_llm/features/voice/domain/speech_voice.dart';
@@ -69,10 +70,63 @@ class _VoicePageState extends ConsumerState<VoicePage> {
             ),
           ),
           const SizedBox(height: 12),
+          const _ConversationModeCard(),
+          const SizedBox(height: 12),
           const _SpeechToTextCard(),
           const SizedBox(height: 12),
           const _TextToSpeechCard(),
         ],
+      ),
+    );
+  }
+}
+
+/// Hands-free conversation, once the pieces around it are in place.
+///
+/// The loop needs all three: a speech model, a downloaded model to answer, and
+/// a device speech engine. Rather than a button that fails, the card says which
+/// one is missing.
+class _ConversationModeCard extends ConsumerWidget {
+  const _ConversationModeCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final readiness = ref.watch(voiceConversationReadinessProvider);
+
+    return Card(
+      color: colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Voice conversation', style: textTheme.titleSmall),
+            const SizedBox(height: 6),
+            Text(
+              'Hands-free: speak, and the loop transcribes what you said, sends '
+              'it to the chat, reads the answer aloud and opens the microphone '
+              'again. Press Interrupt to talk over an answer.',
+              style: textTheme.bodySmall,
+            ),
+            if (!readiness.canStart) ...[
+              const SizedBox(height: 8),
+              Text(
+                readiness.blocker ?? '',
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: () => context.push(AppRoutes.voiceConversation),
+              icon: const Icon(Icons.record_voice_over_rounded),
+              label: const Text('Open voice conversation'),
+            ),
+          ],
+        ),
       ),
     );
   }

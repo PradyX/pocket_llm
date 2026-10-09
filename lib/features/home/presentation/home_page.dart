@@ -24,6 +24,7 @@ import 'package:pocket_llm/features/home/presentation/composer_shortcuts.dart';
 import 'package:pocket_llm/features/home/presentation/context_usage_indicator.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/voice/application/tts_controller.dart';
+import 'package:pocket_llm/features/voice/application/voice_conversation_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:pocket_llm/features/personas/application/personas_controller.dart';
@@ -102,6 +103,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       next,
     ) {
       if (previous == null) return;
+      // The hands-free voice loop reads its own replies through the same
+      // engine; reading them here as well would talk over it and cut the
+      // loop's utterance short.
+      if (ref.read(voiceConversationActiveProvider)) return;
       if (!shouldReadFinishedReply(
         wasGenerating: previous.isGenerating,
         isGenerating: next.isGenerating,
