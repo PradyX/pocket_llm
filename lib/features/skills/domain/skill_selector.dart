@@ -95,8 +95,11 @@ abstract final class SkillSelector {
 
   static int _score(Skill skill, Set<String> words) {
     if (words.isEmpty) return 0;
-    final haystack = '${skill.name} ${skill.description} ${skill.body}'
-        .toLowerCase();
+    // Whole words only: substring matching ranks unrelated skills whose
+    // text happens to contain a query fragment.
+    final haystack = _keywords(
+      '${skill.name} ${skill.description} ${skill.body}',
+    );
     var score = 0;
     for (final word in words) {
       if (haystack.contains(word)) score += word.length > 5 ? 2 : 1;

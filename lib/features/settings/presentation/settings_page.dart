@@ -129,6 +129,13 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: const Text('Reusable procedures bots can follow'),
                   onTap: () => context.push(AppRoutes.skills),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.hub_outlined),
+                  title: const Text('MCP servers'),
+                  subtitle: const Text('External tools bots can use'),
+                  onTap: () => context.push(AppRoutes.mcp),
+                ),
               ],
             ),
           ),

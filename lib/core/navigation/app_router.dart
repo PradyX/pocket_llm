@@ -12,6 +12,7 @@ import 'package:pocket_llm/features/voice/presentation/voice_conversation_page.d
 import 'package:pocket_llm/features/voice/presentation/voice_page.dart';
 import 'package:pocket_llm/features/about/presentation/about_page.dart';
 import 'package:pocket_llm/features/agents/presentation/agent_page.dart';
+import 'package:pocket_llm/features/mcp/presentation/mcp_page.dart';
 import 'package:pocket_llm/features/skills/presentation/skills_page.dart';
 import 'package:pocket_llm/features/workspaces/presentation/workspaces_page.dart';
 import 'package:pocket_llm/features/backup/presentation/backup_page.dart';
@@ -38,6 +39,7 @@ abstract class AppRoutes {
   static const agent = '/agent';
   static const workspaces = '/workspaces';
   static const skills = '/skills';
+  static const mcp = '/mcp';
   static const backup = '/backup';
   static const modelDetails = '/model-details';
 
@@ -120,6 +122,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.skills,
         builder: (context, state) => const SkillsPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.mcp,
+        builder: (context, state) => const McpPage(),
       ),
     ],
   );
