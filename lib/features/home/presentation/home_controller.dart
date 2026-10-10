@@ -22,6 +22,7 @@ import 'package:pocket_llm/features/conversations/domain/message_attachment.dart
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 import 'package:pocket_llm/features/conversations/domain/message_tool_activity.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/features/context/application/context_budget_controller.dart';
 import 'package:pocket_llm/features/documents/application/document_context_builder.dart';
 import 'package:pocket_llm/features/documents/application/document_library.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
@@ -31,6 +32,7 @@ import 'package:pocket_llm/features/documents/domain/embedding_model_ref.dart';
 import 'package:pocket_llm/features/documents/domain/document_retrieval.dart';
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/inference_profiles/domain/inference_profile.dart';
+import 'package:pocket_llm/features/inference_profiles/domain/inference_profile_resolver.dart';
 import 'package:pocket_llm/features/personas/application/personas_controller.dart';
 import 'package:pocket_llm/features/personas/domain/persona.dart';
 import 'package:pocket_llm/features/personas/domain/persona_prompt.dart';
@@ -139,54 +141,102 @@ ContextProjection projectConversationContext({
   );
 }
 
+/// The model, profile and window behind the open conversation's next request.
+///
+/// Road Map 2 Phase 2.1: this is the one place the model → persona → profile →
+/// settings chain is resolved, so the chat projection, the request itself and
+/// the Context screen all describe the same window *before* the user's context
+/// budget lowers it. A persona may pin an inference profile, and the pinned one
+/// wins over the app-wide active profile, exactly as a request does it.
+class SelectedContextWindow {
+  const SelectedContextWindow({
+    required this.model,
+    required this.persona,
+    required this.resolvedConfig,
+  });
+
+  final LlmModel model;
+
+  /// Persona the open conversation chats with; it owns the system prompt and
+  /// may pin the inference profile.
+  final Persona persona;
+
+  /// What the runtime will be started with for this model and profile.
+  final ResolvedInferenceConfig resolvedConfig;
+
+  /// The model's own declared limit, when its GGUF metadata is available.
+  int? get declaredContextTokens => model.ggufMetadata?.contextLength;
+}
+
+/// Window and configuration the chat screen would use right now, or null when
+/// no installed model is selected.
+///
+/// Kept disposable like the controller it reads, so a screen mounting it never
+/// keeps the conversation state alive on its own.
+final selectedContextWindowProvider =
+    Provider.autoDispose<SelectedContextWindow?>((ref) {
+      final model = ref.watch(modelSelectionControllerProvider).selectedModel;
+      if (model == null || !model.isDownloaded) return null;
+
+      final profiles = ref.watch(inferenceProfilesProvider);
+      final persona = ref
+          .watch(personasProvider)
+          .resolve(
+            ref
+                .watch(conversationControllerProvider)
+                .activeConversation
+                ?.personaId,
+          );
+      final pinnedProfileId = persona.inferenceProfileId;
+      final profile = pinnedProfileId == null
+          ? profiles.activeProfile
+          : profiles.profileById(pinnedProfileId) ?? profiles.activeProfile;
+      final resolvedConfig = ref
+          .watch(inferenceProfileResolverProvider)
+          .resolve(
+            profile: profile,
+            settings: ref.watch(inferenceSettingsProvider),
+            declaredContextTokens: model.ggufMetadata?.contextLength,
+          );
+      return SelectedContextWindow(
+        model: model,
+        persona: persona,
+        resolvedConfig: resolvedConfig,
+      );
+    });
+
 /// Projection for the conversation the chat screen is showing.
 ///
-/// Uses the same policy the request will use — the profile's context, the
-/// model's declared limit and the output reservation — so the split it reports
-/// is the one the runtime will really be started with. Two things can add to
-/// the request later and are therefore not part of the projection: retrieved
-/// document chunks, which are chosen from the question at send time, and, in
-/// adaptive mode, the output reservation the last measurements may adjust.
-/// While a request runs, the chat shows that run's own numbers instead.
-/// Kept disposable like the controller it reads, so the chat screen mounting it
-/// never keeps the conversation state alive on its own.
+/// Uses the same policy the request will use — the context budget on top of the
+/// profile's context, the model's declared limit and the output reservation —
+/// so the split it reports is the one the runtime will really be started with.
+/// Two things can add to the request later and are therefore not part of the
+/// projection: retrieved document chunks, which are chosen from the question at
+/// send time, and, in adaptive mode, the output reservation the last
+/// measurements may adjust. While a request runs, the chat shows that run's own
+/// numbers instead.
 final homeContextProjectionProvider = Provider.autoDispose<ContextProjection?>((
   ref,
 ) {
-  final selection = ref.watch(modelSelectionControllerProvider);
-  final model = selection.selectedModel;
-  if (model == null || !model.isDownloaded) return null;
+  final window = ref.watch(selectedContextWindowProvider);
+  if (window == null) return null;
 
-  final profiles = ref.watch(inferenceProfilesProvider);
-  final persona = ref
-      .watch(personasProvider)
-      .resolve(
-        ref.watch(conversationControllerProvider).activeConversation?.personaId,
+  final policy = ref
+      .watch(contextBudgetProvider)
+      .budget
+      .resolvePolicy(
+        runtimeContextTokens: window.resolvedConfig.contextTokens,
+        declaredContextTokens: window.declaredContextTokens,
+        reservedOutputTokens: window.resolvedConfig.maxOutputTokens,
       );
-  final pinnedProfileId = persona.inferenceProfileId;
-  final profile = pinnedProfileId == null
-      ? profiles.activeProfile
-      : profiles.profileById(pinnedProfileId) ?? profiles.activeProfile;
-  final resolvedConfig = ref
-      .watch(inferenceProfileResolverProvider)
-      .resolve(
-        profile: profile,
-        settings: ref.watch(inferenceSettingsProvider),
-        declaredContextTokens: model.ggufMetadata?.contextLength,
-      );
-  final policy = ContextPolicy.forModel(
-    runtimeContextTokens: resolvedConfig.contextTokens,
-    declaredContextTokens: model.ggufMetadata?.contextLength,
-    reservedOutputTokens: resolvedConfig.maxOutputTokens,
-  );
 
   // The tool contract is only sent to a model whose template can carry tool
   // calls, so the projection charges for it exactly when a request would.
-  final toolContractIncluded = model.supportsToolCalling;
+  final toolContractIncluded = window.model.supportsToolCalling;
   return projectConversationContext(
     messages: ref.watch(homeControllerProvider),
     systemPrompt: composePersonaSystemPrompt(
-      persona: persona,
+      persona: window.persona,
       toolContract: toolContractIncluded
           ? ref.watch(toolRegistryProvider).describeForPrompt()
           : '',
@@ -607,14 +657,17 @@ class HomeController extends _$HomeController {
       // to, the model's declared limit and the output reservation decide how
       // much history is sent, so the budget can never describe a different
       // window than the one the runtime is loaded with.
-      final contextPolicy = ContextPolicy.forModel(
-        runtimeContextTokens: resolvedConfig.contextTokens,
-        declaredContextTokens: selectedModel.ggufMetadata?.contextLength,
-        reservedOutputTokens: maxTokens,
-        retrievalTokens: documentRetrieval == null
-            ? 0
-            : ContextPolicy.defaultRetrievalTokens,
-      );
+      final contextPolicy = ref
+          .read(contextBudgetProvider)
+          .budget
+          .resolvePolicy(
+            runtimeContextTokens: resolvedConfig.contextTokens,
+            declaredContextTokens: selectedModel.ggufMetadata?.contextLength,
+            reservedOutputTokens: maxTokens,
+            retrievalTokens: documentRetrieval == null
+                ? 0
+                : ContextPolicy.defaultRetrievalTokens,
+          );
       final documentContext = documentRetrieval == null
           ? DocumentContext.empty
           : const DocumentContextBuilder().build(

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pocket_llm/features/agents/application/agent_loop_service.dart';
 import 'package:pocket_llm/features/agents/domain/agent_run.dart';
+import 'package:pocket_llm/features/context/application/context_budget_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/model_selection/presentation/model_selection_controller.dart';
 import 'package:pocket_llm/features/tools/application/tools_providers.dart';
@@ -187,6 +188,8 @@ class AgentController extends StateNotifier<AgentState> {
             goal: state.goal,
             registry: _ref.read(toolRegistryProvider),
             maxIterations: state.maxIterations,
+            // The context budget the user chose governs this run too.
+            budget: _ref.read(contextBudgetProvider).budget,
             onStep: (step) {
               if (!mounted) return;
               state = state.copyWith(steps: [...state.steps, step]);

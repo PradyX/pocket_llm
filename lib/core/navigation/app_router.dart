@@ -1,4 +1,5 @@
 import 'package:pocket_llm/features/benchmark/presentation/benchmark_screen.dart';
+import 'package:pocket_llm/features/context/presentation/context_budget_page.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversations_page.dart';
 import 'package:pocket_llm/features/documents/presentation/documents_page.dart';
 import 'package:pocket_llm/features/home/presentation/home_page.dart';
@@ -27,6 +28,7 @@ abstract class AppRoutes {
   static const about = '/about';
   static const conversations = '/conversations';
   static const inferenceProfiles = '/inference-profiles';
+  static const contextBudget = '/context-budget';
   static const personas = '/personas';
   static const documents = '/documents';
   static const voice = '/voice';
@@ -82,6 +84,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.personas,
         builder: (context, state) => const PersonasPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.contextBudget,
+        builder: (context, state) => const ContextBudgetPage(),
       ),
       GoRoute(
         path: AppRoutes.documents,

@@ -79,6 +79,9 @@ class ContextPolicy {
   /// Smallest output reservation, even when the user asks for less.
   static const int minimumReservedOutputTokens = 64;
 
+  /// Window used when the caller has no usable runtime context to offer.
+  static const int fallbackContextTokens = 2048;
+
   /// Retrieval budget asked for when local documents are available.
   static const int defaultRetrievalTokens = 900;
 
@@ -123,7 +126,9 @@ class ContextPolicy {
     int maxMessageTokens = defaultMaxMessageTokens,
     int retrievalTokens = 0,
   }) {
-    final runtime = runtimeContextTokens <= 0 ? 2048 : runtimeContextTokens;
+    final runtime = runtimeContextTokens <= 0
+        ? fallbackContextTokens
+        : runtimeContextTokens;
     final declared = declaredContextTokens;
     final context = declared != null && declared > 0 && declared < runtime
         ? declared

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pocket_llm/features/context/domain/context_budget.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/conversations/domain/message.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
@@ -121,6 +122,23 @@ void main() {
       crowded.usage.usedTokens,
       lessThanOrEqualTo(policy.usableInputTokens),
     );
+  });
+
+  test('a manual context budget lowers the limit the chat reports', () {
+    // Road Map 2 Phase 2.1: the budget a user chooses is what the projection
+    // and the request are both built from.
+    final policy = const ContextBudget(
+      mode: ContextBudgetMode.manual,
+      maxContextTokens: 1024,
+    ).resolvePolicy(runtimeContextTokens: 4096, reservedOutputTokens: 256);
+    final projection = projectConversationContext(
+      messages: [userMessage('hello')],
+      systemPrompt: composedPrompt(),
+      policy: policy,
+    );
+
+    expect(projection.usage.contextTokens, 1024);
+    expect(projection.usage.limitTokens, 1024 - 256 - 64);
   });
 
   test('the model’s declared limit caps the window the projection reports', () {

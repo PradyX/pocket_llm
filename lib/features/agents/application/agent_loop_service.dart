@@ -5,6 +5,7 @@ import 'package:pocket_llm/core/services/device_profile_service.dart';
 import 'package:pocket_llm/core/services/service_providers.dart';
 import 'package:pocket_llm/core/utils/llm_prompt_utils.dart';
 import 'package:pocket_llm/features/agents/domain/agent_run.dart';
+import 'package:pocket_llm/features/context/domain/context_budget.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart';
 import 'package:pocket_llm/features/model_selection/data/model_compatibility_service.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
@@ -156,6 +157,7 @@ class AgentLoopService {
     required ToolRegistry registry,
     int maxIterations = defaultMaxIterations,
     int? maxTokens,
+    ContextBudget budget = ContextBudget.auto,
     void Function(AgentStep step)? onStep,
   }) async {
     final trimmedGoal = goal.trim();
@@ -174,7 +176,10 @@ class AgentLoopService {
       64,
       contextTokens ~/ 4,
     );
-    final policy = ContextPolicy.forModel(
+    // The user's context budget governs an agent run exactly as it governs a
+    // chat turn, so the preference cannot mean one thing in one screen and
+    // something else in another.
+    final policy = budget.resolvePolicy(
       runtimeContextTokens: contextTokens,
       reservedOutputTokens: outputTokens,
       declaredContextTokens: model.ggufMetadata?.contextLength,

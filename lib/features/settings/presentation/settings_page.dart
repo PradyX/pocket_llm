@@ -5,6 +5,9 @@ import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/core/settings/attachment_settings_provider.dart';
 import 'package:pocket_llm/core/services/attachment_image_service.dart';
 import 'package:pocket_llm/core/theme/theme_provider.dart';
+import 'package:pocket_llm/features/context/application/context_budget_controller.dart';
+import 'package:pocket_llm/features/conversations/domain/context_policy.dart'
+    show formatTokens;
 import 'package:pocket_llm/features/inference_profiles/application/inference_profiles_controller.dart';
 import 'package:pocket_llm/features/personas/application/personas_controller.dart';
 
@@ -20,6 +23,11 @@ class SettingsPage extends ConsumerWidget {
         .watch(inferenceProfilesProvider)
         .activeProfile
         .name;
+    final contextBudget = ref.watch(contextBudgetProvider).budget;
+    final contextCap = contextBudget.windowCap;
+    final contextBudgetSummary = contextCap == null
+        ? 'Automatic'
+        : 'Limited to ${formatTokens(contextCap)} tokens';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -97,6 +105,13 @@ class SettingsPage extends ConsumerWidget {
                   title: const Text('Inference Profiles'),
                   subtitle: Text('Active: $activeProfileName'),
                   onTap: () => context.push(AppRoutes.inferenceProfiles),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.pie_chart_outline),
+                  title: const Text('Context'),
+                  subtitle: Text('Budget: $contextBudgetSummary'),
+                  onTap: () => context.push(AppRoutes.contextBudget),
                 ),
               ],
             ),

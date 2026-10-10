@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_llm/features/agents/application/agent_loop_service.dart';
 import 'package:pocket_llm/features/agents/domain/agent_run.dart';
+import 'package:pocket_llm/features/context/domain/context_budget.dart';
 import 'package:pocket_llm/features/model_selection/domain/gguf_metadata.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
 import 'package:pocket_llm/features/tools/application/tool_registry.dart';
@@ -378,6 +379,47 @@ void main() {
     expect(run.tokenBudget, lessThan(300));
     expect(run.steps.last.kind, AgentStepKind.notice);
     expect(run.steps.last.text, contains('Stopped before this turn'));
+  });
+
+  test('a manual context budget shrinks the agent token budget', () async {
+    final model = LlmModel(
+      id: 'm-3',
+      name: 'Roomie model',
+      parameterSize: '1B',
+      description: 'test model',
+      isDownloaded: true,
+      ggufMetadata: const GgufMetadata(
+        architecture: 'llama',
+        name: 'roomy',
+        version: 3,
+        kvCount: 1,
+        tensorCount: 1,
+        fileSizeBytes: 1024,
+        parameterCount: 1,
+        quantization: 'Q4_K_M',
+        contextLength: 8192,
+      ),
+    );
+
+    final automatic = await serviceFor(ScriptedAgentRuntime(script: ['done']))
+        .run(
+          model: model,
+          goal: 'Anything',
+          registry: registryFor(calls: []),
+        );
+    final capped = await serviceFor(ScriptedAgentRuntime(script: ['done'])).run(
+      model: model,
+      goal: 'Anything',
+      registry: registryFor(calls: []),
+      // Road Map 2 Phase 2.1: the budget the user chose governs a run too.
+      budget: const ContextBudget(
+        mode: ContextBudgetMode.manual,
+        maxContextTokens: 1024,
+      ),
+    );
+
+    expect(automatic.tokenBudget, greaterThan(capped.tokenBudget));
+    expect(capped.tokenBudget, lessThanOrEqualTo(1024 - 64));
   });
 
   test('the log is exported as versioned JSON and a readable report', () {
