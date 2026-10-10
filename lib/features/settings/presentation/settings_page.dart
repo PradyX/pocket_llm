@@ -143,6 +143,13 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: const Text('Specialists with a Soul'),
                   onTap: () => context.push(AppRoutes.bots),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.folder_open),
+                  title: const Text('Obsidian vaults'),
+                  subtitle: const Text('Human-readable project knowledge'),
+                  onTap: () => context.push(AppRoutes.vaults),
+                ),
               ],
             ),
           ),
