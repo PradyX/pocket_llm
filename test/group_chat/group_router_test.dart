@@ -117,6 +117,32 @@ void main() {
       );
     });
 
+    test('a direct chat always reaches its bot, no mention needed', () {
+      final direct = GroupChat.create(
+        workspaceId: 'ws',
+        name: 'Coder',
+        memberBotIds: const ['coder'],
+        directBotId: 'coder',
+      );
+      expect(
+        GroupRouter.nextSpeaker(
+          chat: direct,
+          members: members,
+          userText: 'hello there',
+        ),
+        'coder',
+      );
+      // An explicit mention of a member still wins.
+      expect(
+        GroupRouter.nextSpeaker(
+          chat: direct,
+          members: members,
+          userText: '@planner you take this',
+        ),
+        'planner',
+      );
+    });
+
     test('group chats persist round caps in range', () {
       final room = GroupChat.create(
         workspaceId: 'ws',

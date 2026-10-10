@@ -138,13 +138,6 @@ class SettingsPage extends ConsumerWidget {
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.smart_toy_outlined),
-                  title: const Text('Bots'),
-                  subtitle: const Text('Specialists with a Soul'),
-                  onTap: () => context.push(AppRoutes.bots),
-                ),
-                const Divider(height: 1),
-                ListTile(
                   leading: const Icon(Icons.folder_open),
                   title: const Text('Obsidian vaults'),
                   subtitle: const Text('Human-readable project knowledge'),
@@ -152,24 +145,10 @@ class SettingsPage extends ConsumerWidget {
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.view_kanban_outlined),
-                  title: const Text('Board'),
-                  subtitle: const Text('Tasks for the active workspace'),
-                  onTap: () => context.push(AppRoutes.kanban),
-                ),
-                const Divider(height: 1),
-                ListTile(
                   leading: const Icon(Icons.account_tree_outlined),
                   title: const Text('Workflows'),
                   subtitle: const Text('Research to done, with approvals'),
                   onTap: () => context.push(AppRoutes.workflows),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.forum_outlined),
-                  title: const Text('Group chats'),
-                  subtitle: const Text('Several bots in one room'),
-                  onTap: () => context.push(AppRoutes.groupChats),
                 ),
               ],
             ),

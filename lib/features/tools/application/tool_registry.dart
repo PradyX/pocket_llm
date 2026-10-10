@@ -99,6 +99,20 @@ class ToolRegistry {
   List<ToolDefinition> get definitions =>
       _entries.values.map((entry) => entry.definition).toList(growable: false);
 
+  /// A registry with [extra] tools added, for one scoped run.
+  ///
+  /// The platform and the permission gate carry over, so a scoped tool is
+  /// still validated, platform-checked and permission-gated exactly like a
+  /// built-in. Names from [extra] win on collision, which is what lets a
+  /// workspace-scoped tool shadow a generic one deliberately.
+  ToolRegistry extendedWith(Iterable<ToolEntry> extra) {
+    return ToolRegistry(
+      tools: [..._entries.values, ...extra],
+      platform: _platform,
+      permissionGate: _permissionGate,
+    );
+  }
+
   /// Tools that actually run on this platform.
   List<ToolDefinition> get supportedDefinitions => definitions
       .where((definition) => definition.isSupportedOn(_platform))

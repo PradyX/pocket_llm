@@ -15,14 +15,16 @@ import 'package:pocket_llm/features/conversations/domain/message_tool_activity.d
 import 'package:pocket_llm/features/home/domain/attachment_history.dart';
 import 'package:pocket_llm/features/home/domain/readable_reply.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
-import 'package:pocket_llm/features/conversations/presentation/delete_conversation_dialog.dart';
+
 import 'package:pocket_llm/core/settings/voice_settings_provider.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
+import 'package:pocket_llm/features/documents/domain/document_scope.dart';
 import 'package:pocket_llm/features/documents/domain/knowledge_collection.dart';
 import 'package:pocket_llm/features/documents/presentation/knowledge_scope_button.dart';
 import 'package:pocket_llm/features/home/presentation/composer_shortcuts.dart';
 import 'package:pocket_llm/features/home/presentation/context_usage_indicator.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
+import 'package:pocket_llm/core/navigation/app_shell.dart';
 import 'package:pocket_llm/features/voice/application/tts_controller.dart';
 import 'package:pocket_llm/features/voice/application/voice_conversation_controller.dart';
 import 'package:pocket_llm/features/model_selection/domain/llm_model.dart';
@@ -402,25 +404,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     await controller.setDocumentCollection(conversationId, collectionId);
   }
 
-  /// Deletes the conversation on screen, once the user has confirmed it.
-  ///
-  /// The chat header and the conversation list offer the same action, so both
-  /// ask the same question before anything is removed.
-  Future<void> _deleteActiveConversation() async {
-    final conversation = ref
-        .read(conversationControllerProvider)
-        .activeConversation;
-    if (conversation == null) return;
-
-    final confirmed = await confirmDeleteConversation(
-      context,
-      conversation.title,
-    );
-    if (!mounted || !confirmed) return;
-
-    await ref.read(homeControllerProvider.notifier).deleteActiveConversation();
-  }
-
   /// Chooses the persona for the active conversation, or the app default when
   /// no conversation exists yet.
   Future<void> _pickPersona() async {
@@ -623,11 +606,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       if (next == null) return;
       unawaited(_askForToolApproval(next));
     });
-    final activeConversation = ref.watch(
-      conversationControllerProvider.select(
-        (state) => state.activeConversation,
-      ),
-    );
     final selectionState = ref.watch(modelSelectionControllerProvider);
     final selectedModel = selectionState.selectedModel;
     // Embedding models are installed models too, but they cannot answer a
@@ -638,11 +616,13 @@ class _HomePageState extends ConsumerState<HomePage> {
             .toList()
           ..sort(_compareModelsByParamSize);
     final hasDownloadedModel = downloadedModels.isNotEmpty;
-    final hasModelDropdown = downloadedModels.length > 1;
     final canAttachImage = _isVisionReady(selectedModel);
-    final activePersona = ref
-        .watch(personasProvider)
-        .resolve(activeConversation?.personaId);
+    // The pill shows the chat model the next request would use.
+    final pillModel =
+        selectedModel != null &&
+            downloadedModels.any((m) => m.id == selectedModel.id)
+        ? selectedModel
+        : (hasDownloadedModel ? downloadedModels.first : null);
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isGenerating = generationStatus.isGenerating;
@@ -660,264 +640,175 @@ class _HomePageState extends ConsumerState<HomePage> {
         : contextProjection?.fixedTokens;
     final toolContractIncluded =
         contextProjection?.toolContractIncluded ?? false;
-    // Loaded once per session and shared with the retrieval that runs on send;
-    // a chat with no documents at all simply shows an empty picker.
-    final documentLibrary = ref.watch(documentLibraryProvider).valueOrNull;
+    // Option C: dock the sidebar on wide screens, keep the drawer narrow.
+    final isWide = MediaQuery.of(context).size.width >= 900;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Pocket LLM'),
-            if (hasModelDropdown)
-              SizedBox(
-                height: 22,
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value:
-                        selectedModel != null &&
-                            downloadedModels.any(
-                              (m) => m.id == selectedModel.id,
-                            )
-                        ? selectedModel.id
-                        : downloadedModels.first.id,
-                    isExpanded: true,
-                    isDense: true,
-                    iconSize: 0,
-                    icon: const SizedBox.shrink(),
-                    style: textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
+    return AppShell(
+      section: AppSection.chats,
+      leading: ShellChatLeading(isGenerating: isGenerating),
+      isGenerating: isGenerating,
+      child: Scaffold(
+        appBar: AppBar(
+          // Option A: menu · centered model pill · context ring · new chat.
+          centerTitle: true,
+          leading: isWide
+              ? null
+              : Builder(
+                  builder: (drawerContext) => IconButton(
+                    tooltip: 'Menu',
+                    onPressed: () => Scaffold.of(drawerContext).openDrawer(),
+                    icon: const Icon(Icons.menu_rounded),
+                    style: IconButton.styleFrom(
+                      backgroundColor: colorScheme.surfaceContainerHighest,
                     ),
-                    dropdownColor: colorScheme.surfaceContainerHigh,
-                    selectedItemBuilder: (context) => downloadedModels
-                        .map(
-                          (model) => Row(
-                            children: [
-                              Icon(
-                                Icons.expand_more_rounded,
-                                size: 16,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 2),
-                              Expanded(
-                                child: Text(
-                                  '${model.name} · ${model.parameterSize}',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                        .toList(),
-                    items: downloadedModels
-                        .map(
-                          (model) => DropdownMenuItem<String>(
-                            value: model.id,
-                            child: Text(
-                              '${model.name} · ${model.parameterSize}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: isGenerating
-                        ? null
-                        : (modelId) {
-                            if (modelId == null) return;
-                            final selected = downloadedModels.firstWhere(
-                              (model) => model.id == modelId,
-                            );
-                            ref
-                                .read(modelSelectionControllerProvider.notifier)
-                                .selectModel(selected);
-                          },
                   ),
                 ),
-              )
-            else if (selectedModel != null)
-              Text(
-                '${selectedModel.name} · ${selectedModel.parameterSize}',
-                style: textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          // The dial this conversation's token budget lives in: the ring shows
-          // the share of the model's input budget the next request would use,
-          // and every figure behind it is one click away in the panel that
-          // opens under the bar.
-          if (contextUsage != null && hasDownloadedModel)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: ContextUsageIndicator(
-                usage: contextUsage,
-                fixedSystemTokens: fixedSystemTokens,
-                toolContractIncluded: toolContractIncluded,
-                isGenerating: isGenerating,
-              ),
-            ),
-          // Which local documents this chat may read (Road Map 1 Phase 6B).
-          // Idle only: changing the scope mid-answer would not apply to the
-          // request that is already running.
-          if (!isGenerating)
-            KnowledgeScopeButton(
-              collections: documentLibrary?.collections ?? const [],
-              activeCollectionId:
-                  documentLibrary?.activeCollectionId ??
-                  KnowledgeCollection.defaultId,
-              pinnedCollectionId: activeConversation?.documentCollectionId,
-              documentsEnabled: activeConversation?.documentsEnabled ?? true,
-              isGenerating: isGenerating,
-              onScopeChanged: (collectionId, enabled) =>
-                  unawaited(_setDocumentScope(collectionId, enabled)),
-            ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'New chat',
-            onPressed: isGenerating ? null : _startNewConversation,
-          ),
-          // An open conversation can be deleted whatever it holds: a chat that
-          // lost its messages still has its title and its row in the list, and
-          // hiding the action here left no way to remove it from this screen.
-          if (activeConversation != null)
-            IconButton(
-              icon: const Icon(Icons.delete_outline_rounded),
-              tooltip: 'Delete conversation',
-              onPressed: isGenerating ? null : _deleteActiveConversation,
-            ),
-        ],
-        bottom: activeConversation == null
-            ? null
-            : PreferredSize(
-                preferredSize: const Size.fromHeight(26),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 4,
-                  ),
-                  color: colorScheme.surfaceContainerHigh,
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.chat_bubble_outline,
-                        size: 13,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
+          title: hasDownloadedModel && pillModel != null
+              ? PopupMenuButton<String>(
+                  tooltip: 'Switch model',
+                  enabled: !isGenerating,
+                  onSelected: (modelId) {
+                    final selected = downloadedModels.firstWhere(
+                      (model) => model.id == modelId,
+                    );
+                    ref
+                        .read(modelSelectionControllerProvider.notifier)
+                        .selectModel(selected);
+                  },
+                  itemBuilder: (context) => [
+                    for (final model in downloadedModels)
+                      CheckedPopupMenuItem<String>(
+                        value: model.id,
+                        checked: model.id == pillModel.id,
                         child: Text(
-                          activeConversation.title,
-                          maxLines: 1,
+                          '${model.name} · ${model.parameterSize}',
                           overflow: TextOverflow.ellipsis,
-                          style: textTheme.labelSmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: isGenerating ? null : _pickPersona,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.face_retouching_natural,
-                                size: 13,
-                                color: colorScheme.primary,
-                              ),
-                              const SizedBox(width: 4),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 120,
-                                ),
-                                child: Text(
-                                  activePersona.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: textTheme.labelSmall?.copyWith(
-                                    color: colorScheme.primary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              Icon(
-                                Icons.expand_more_rounded,
-                                size: 14,
-                                color: colorScheme.primary,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-      ),
-      drawer: _buildDrawer(context, colorScheme, textTheme, selectedModel),
-      body: Column(
-        children: [
-          Expanded(
-            child: messages.isEmpty
-                ? _buildEmptyState(context, colorScheme, textTheme)
-                : ListView.builder(
-                    controller: _scrollController,
+                  ],
+                  child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
+                      horizontal: 14,
                       vertical: 8,
                     ),
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final message = messages[index];
-                      return _ChatBubble(
-                        message: message,
-                        onRegenerate: (!isGenerating && !message.isUser)
-                            ? () => _regenerateMessage(message)
-                            : null,
-                        onEditResend:
-                            (!isGenerating &&
-                                message.isUser &&
-                                message.attachments.isEmpty)
-                            ? () => _editAndResendMessage(message)
-                            : null,
-                        onReadAloud:
-                            (ttsState.isSupported &&
-                                !message.isUser &&
-                                message.content.trim().isNotEmpty)
-                            ? () => _toggleReadAloud(message)
-                            : null,
-                        isReading:
-                            ttsState.isSpeaking &&
-                            _readingMessageId == message.id,
-                        isPaused: ttsState.isPaused,
-                        onPauseReading: () => _toggleReadingPause(),
-                      );
-                    },
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            '${pillModel.name} · ${pillModel.parameterSize}',
+                            overflow: TextOverflow.ellipsis,
+                            style: textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.expand_more_rounded, size: 18),
+                      ],
+                    ),
                   ),
+                )
+              : TextButton(
+                  onPressed: () => context.push(AppRoutes.modelSelection),
+                  child: const Text('Get a model'),
+                ),
+          actions: [
+            // The dial this conversation's token budget lives in: the ring shows
+            // the share of the model's input budget the next request would use,
+            // and every figure behind it is one click away in the panel that
+            // opens under the bar.
+            if (contextUsage != null && hasDownloadedModel)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: ContextUsageIndicator(
+                  usage: contextUsage,
+                  fixedSystemTokens: fixedSystemTokens,
+                  toolContractIncluded: toolContractIncluded,
+                  isGenerating: isGenerating,
+                ),
+              ),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'New chat',
+              onPressed: isGenerating ? null : _startNewConversation,
+            ),
+          ],
+        ),
+        drawer: isWide
+            ? null
+            : _buildDrawer(context, colorScheme, textTheme, selectedModel),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 768),
+            child: Column(
+              children: [
+                Expanded(
+                  child: messages.isEmpty
+                      ? _buildEmptyState(context, colorScheme, textTheme)
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final message = messages[index];
+                            return _ChatBubble(
+                              message: message,
+                              onRegenerate: (!isGenerating && !message.isUser)
+                                  ? () => _regenerateMessage(message)
+                                  : null,
+                              onEditResend:
+                                  (!isGenerating &&
+                                      message.isUser &&
+                                      message.attachments.isEmpty)
+                                  ? () => _editAndResendMessage(message)
+                                  : null,
+                              onReadAloud:
+                                  (ttsState.isSupported &&
+                                      !message.isUser &&
+                                      message.content.trim().isNotEmpty)
+                                  ? () => _toggleReadAloud(message)
+                                  : null,
+                              isReading:
+                                  ttsState.isSpeaking &&
+                                  _readingMessageId == message.id,
+                              isPaused: ttsState.isPaused,
+                              onPauseReading: () => _toggleReadingPause(),
+                            );
+                          },
+                        ),
+                ),
+                _buildInputBar(
+                  context,
+                  colorScheme,
+                  textTheme,
+                  isGenerating,
+                  generationText,
+                  hasDownloadedModel,
+                  canAttachImage,
+                  selectedModel,
+                ),
+              ],
+            ),
           ),
-          _buildInputBar(
-            context,
-            colorScheme,
-            textTheme,
-            isGenerating,
-            generationText,
-            hasDownloadedModel,
-            canAttachImage,
-            selectedModel,
-          ),
-        ],
+        ),
       ),
+    );
+  }
+
+  /// Fills the composer with a suggestion so it waits for review, exactly
+  /// like a draft prepared anywhere else.
+  void _fillComposer(String prompt) {
+    _messageController.value = TextEditingValue(
+      text: prompt,
+      selection: TextSelection.collapsed(offset: prompt.length),
     );
   }
 
@@ -928,46 +819,50 @@ class _HomePageState extends ConsumerState<HomePage> {
   ) {
     final selectionState = ref.watch(modelSelectionControllerProvider);
     final hasDownloadedModel = selectionState.models.any((m) => m.isDownloaded);
+    final hour = DateTime.now().hour;
+    final greeting = hour < 12
+        ? 'Good morning'
+        : hour < 17
+        ? 'Good afternoon'
+        : 'Good evening';
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(24),
+    // Without a model there is nothing to chat with yet: keep the onboarding
+    // path to model selection instead of the greeting.
+    if (!hasDownloadedModel) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Icon(
+                  Icons.download_for_offline_rounded,
+                  size: 40,
+                  color: colorScheme.onPrimaryContainer,
+                ),
               ),
-              child: Icon(
-                hasDownloadedModel
-                    ? Icons.smart_toy_rounded
-                    : Icons.download_for_offline_rounded,
-                size: 40,
-                color: colorScheme.onPrimaryContainer,
+              const SizedBox(height: 24),
+              Text(
+                'No models ready',
+                style: textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              hasDownloadedModel ? 'Start a conversation' : 'No models ready',
-              style: textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
+              const SizedBox(height: 8),
+              Text(
+                'You need to download a model before you can start chatting.',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              hasDownloadedModel
-                  ? 'Type a message below to chat with your local LLM.'
-                  : 'You need to download a model before you can start chatting.',
-              style: textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            if (!hasDownloadedModel) ...[
               const SizedBox(height: 24),
               FilledButton.icon(
                 onPressed: () => context.push(AppRoutes.modelSelection),
@@ -975,6 +870,132 @@ class _HomePageState extends ConsumerState<HomePage> {
                 label: const Text('Go to Model Selection'),
               ),
             ],
+          ),
+        ),
+      );
+    }
+
+    // Option A: a centered greeting with tappable suggestion cards that fill
+    // the composer, so the empty chat reads like a standard chat app.
+    const suggestions = [
+      (
+        icon: Icons.edit_outlined,
+        title: 'Draft an email',
+        subtitle: 'to my landlord\u2026',
+        prompt: 'Help me draft a polite email to my landlord about ',
+      ),
+      (
+        icon: Icons.folder_copy_outlined,
+        title: 'Summarize docs',
+        subtitle: 'from my knowledge\u2026',
+        prompt: 'Summarize the key points from my documents about ',
+      ),
+      (
+        icon: Icons.lightbulb_outline_rounded,
+        title: 'Brainstorm',
+        subtitle: 'ideas for\u2026',
+        prompt: 'Brainstorm 5 creative ideas for ',
+      ),
+      (
+        icon: Icons.add_photo_alternate_outlined,
+        title: 'Ask about image',
+        subtitle: 'attach, then ask\u2026',
+        prompt: 'What do you see in this image? ',
+      ),
+    ];
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Icon(
+                Icons.smart_toy_rounded,
+                size: 32,
+                color: colorScheme.onPrimaryContainer,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              greeting,
+              style: textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Running 100% on-device \u00b7 private to you',
+              style: textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 2.4,
+              children: [
+                for (final suggestion in suggestions)
+                  Card(
+                    margin: EdgeInsets.zero,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => _fillComposer(suggestion.prompt),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  suggestion.icon,
+                                  size: 15,
+                                  color: colorScheme.primary,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    suggestion.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: textTheme.labelLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              suggestion.subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
       ),
@@ -999,150 +1020,296 @@ class _HomePageState extends ConsumerState<HomePage> {
       ref.watch(homeControllerProvider),
     );
 
-    return Container(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 8,
-        top: 8,
-        bottom: MediaQuery.of(context).padding.bottom + 8,
+    // Option A: one floating composer card — attachment/persona chips on top,
+    // the text field in the middle, voice and send at the bottom.
+    final activeConversation = ref.watch(
+      conversationControllerProvider.select(
+        (state) => state.activeConversation,
       ),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        border: Border(
-          top: BorderSide(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+    );
+    final composerPersonaName = ref
+        .watch(personasProvider)
+        .resolve(activeConversation?.personaId)
+        .name;
+
+    // Loaded once per session and shared with the retrieval that runs on send;
+    // a chat with no documents at all simply shows an empty picker.
+    final documentLibrary = ref.watch(documentLibraryProvider).valueOrNull;
+    final docScope = DocumentScope.resolve(
+      collections: documentLibrary?.collections ?? const [],
+      activeCollectionId:
+          documentLibrary?.activeCollectionId ?? KnowledgeCollection.defaultId,
+      pinnedCollectionId: activeConversation?.documentCollectionId,
+      documentsEnabled: activeConversation?.documentsEnabled ?? true,
+    );
+    var docsLabel = 'Docs: All';
+    if (!docScope.retrieves) {
+      docsLabel = 'Docs off';
+    } else if (!docScope.isAutomatic && docScope.collectionId != null) {
+      for (final collection in documentLibrary?.collections ?? const []) {
+        if (collection.id == docScope.collectionId) {
+          docsLabel = collection.name;
+        }
+      }
+    }
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        8,
+        16,
+        MediaQuery.of(context).padding.bottom + 12,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.6),
           ),
+          boxShadow: [
+            BoxShadow(
+              color: colorScheme.shadow.withValues(alpha: 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isGenerating)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        progressText,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () {
+                        ref
+                            .read(homeControllerProvider.notifier)
+                            .stopGeneration();
+                      },
+                      icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                      label: const Text('Stop'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: colorScheme.error,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_draftImages.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _buildDraftImagesPreview(
+                  context,
+                  colorScheme,
+                  textTheme,
+                ),
+              ),
+            if (hasDownloadedModel)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    if (canAttachImage)
+                      _composerChip(
+                        context,
+                        colorScheme,
+                        icon: Icons.add_photo_alternate_outlined,
+                        label: 'Attach',
+                        onTap: canCompose
+                            ? () => _pickImage(selectedModel)
+                            : null,
+                      ),
+                    if (canAttachImage && historyImages.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: _composerChip(
+                          context,
+                          colorScheme,
+                          icon: Icons.collections_rounded,
+                          label: 'From chat',
+                          onTap: canCompose
+                              ? () => _showAttachmentHistory(historyImages)
+                              : null,
+                        ),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: KnowledgeScopeButton(
+                        collections: documentLibrary?.collections ?? const [],
+                        activeCollectionId:
+                            documentLibrary?.activeCollectionId ??
+                            KnowledgeCollection.defaultId,
+                        pinnedCollectionId:
+                            activeConversation?.documentCollectionId,
+                        documentsEnabled:
+                            activeConversation?.documentsEnabled ?? true,
+                        isGenerating: isGenerating,
+                        onScopeChanged: (collectionId, enabled) =>
+                            unawaited(_setDocumentScope(collectionId, enabled)),
+                        child: _composerChipContent(
+                          context,
+                          colorScheme,
+                          icon: Icons.folder_open_outlined,
+                          label: docsLabel,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: _composerChip(
+                        context,
+                        colorScheme,
+                        icon: Icons.face_retouching_natural,
+                        label: composerPersonaName,
+                        onTap: isGenerating ? null : _pickPersona,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  // Desktop: Return sends, Shift+Return adds a line. Mobile
+                  // keyboards keep their own send action and Return as a line
+                  // break, which is what the shortcut wrapper checks.
+                  child: ComposerSendOnEnter(
+                    sendsOnEnter: canCompose && sendsMessageOnEnter,
+                    onSend: _sendMessage,
+                    child: TextField(
+                      controller: _messageController,
+                      enabled: canCompose,
+                      readOnly: !canCompose,
+                      maxLines: 5,
+                      minLines: 1,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: !hasDownloadedModel
+                            ? 'Download a model to start chatting...'
+                            : isGenerating
+                            ? 'Wait for current response...'
+                            : canAttachImage
+                            ? 'Ask about your image or start a chat...'
+                            : 'Message Pocket LLM...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: colorScheme.surface,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                      onSubmitted: canCompose ? (_) => _sendMessage() : null,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: IconButton(
+                    tooltip: 'Voice input',
+                    onPressed: canCompose
+                        ? () => context.push(AppRoutes.voice)
+                        : null,
+                    icon: const Icon(Icons.mic_none_rounded),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: IconButton.filled(
+                    onPressed: canCompose ? _sendMessage : null,
+                    icon: const Icon(Icons.arrow_upward_rounded),
+                    style: IconButton.styleFrom(
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
-      child: Column(
+    );
+  }
+
+  /// Small pill button for the composer card's top action row.
+  Widget _composerChip(
+    BuildContext context,
+    ColorScheme colorScheme, {
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: _composerChipContent(
+        context,
+        colorScheme,
+        icon: icon,
+        label: label,
+      ),
+    );
+  }
+
+  /// The pill itself, shared with pickers that open their own menu.
+  Widget _composerChipContent(
+    BuildContext context,
+    ColorScheme colorScheme, {
+    required IconData icon,
+    required String label,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (isGenerating)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      progressText,
-                      style: textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: () {
-                      ref
-                          .read(homeControllerProvider.notifier)
-                          .stopGeneration();
-                    },
-                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                    label: const Text('Stop'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: colorScheme.error,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                ],
-              ),
+          Icon(icon, size: 15, color: colorScheme.primary),
+          const SizedBox(width: 5),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 140),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
-          if (_draftImages.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _buildDraftImagesPreview(context, colorScheme, textTheme),
-            ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (canAttachImage && historyImages.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8, bottom: 2),
-                  child: IconButton(
-                    tooltip: 'Images from this chat',
-                    onPressed: canCompose
-                        ? () => _showAttachmentHistory(historyImages)
-                        : null,
-                    icon: const Icon(Icons.collections_rounded),
-                    style: IconButton.styleFrom(
-                      backgroundColor: colorScheme.surfaceContainerHighest,
-                      foregroundColor: colorScheme.primary,
-                    ),
-                  ),
-                ),
-              if (canAttachImage)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8, bottom: 2),
-                  child: IconButton(
-                    tooltip: 'Add image',
-                    onPressed: canCompose
-                        ? () => _pickImage(selectedModel)
-                        : null,
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                    style: IconButton.styleFrom(
-                      backgroundColor: colorScheme.surfaceContainerHighest,
-                      foregroundColor: colorScheme.primary,
-                    ),
-                  ),
-                ),
-              Expanded(
-                // Desktop: Return sends, Shift+Return adds a line. Mobile
-                // keyboards keep their own send action and Return as a line
-                // break, which is what the shortcut wrapper checks.
-                child: ComposerSendOnEnter(
-                  sendsOnEnter: canCompose && sendsMessageOnEnter,
-                  onSend: _sendMessage,
-                  child: TextField(
-                    controller: _messageController,
-                    enabled: canCompose,
-                    readOnly: !canCompose,
-                    maxLines: 5,
-                    minLines: 1,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      hintText: !hasDownloadedModel
-                          ? 'Download a model to start chatting...'
-                          : isGenerating
-                          ? 'Wait for current response...'
-                          : canAttachImage
-                          ? 'Ask about your image or start a chat...'
-                          : 'Type a message...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: colorScheme.surfaceContainerHighest,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
-                    ),
-                    onSubmitted: canCompose ? (_) => _sendMessage() : null,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 2),
-                child: IconButton.filled(
-                  onPressed: canCompose ? _sendMessage : null,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                  style: IconButton.styleFrom(
-                    backgroundColor: colorScheme.primary,
-                    foregroundColor: colorScheme.onPrimary,
-                  ),
-                ),
-              ),
-            ],
           ),
         ],
       ),

@@ -36,6 +36,12 @@ abstract final class GroupRouter {
     final mentioned = mentions(text: userText, members: members);
     if (mentioned.isNotEmpty) return mentioned.first;
 
+    // A direct chat is one bot's room: every line is for them.
+    if (chat.directBotId != null &&
+        members.any((bot) => bot.id == chat.directBotId)) {
+      return chat.directBotId;
+    }
+
     if (chat.mode == SpeakerMode.workflow && workflowWaitingBotId != null) {
       if (members.any((bot) => bot.id == workflowWaitingBotId)) {
         return workflowWaitingBotId;

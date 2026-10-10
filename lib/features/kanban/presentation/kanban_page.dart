@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pocket_llm/core/navigation/app_shell.dart';
 import 'package:pocket_llm/features/bots/application/bots_controller.dart';
+import 'package:pocket_llm/features/group_chat/application/group_chat_controller.dart';
+import 'package:pocket_llm/features/group_chat/presentation/group_chats_page.dart';
 import 'package:pocket_llm/features/kanban/application/kanban_controller.dart';
 import 'package:pocket_llm/features/kanban/domain/task.dart';
 import 'package:pocket_llm/features/workspaces/application/workspaces_controller.dart';
@@ -51,66 +54,69 @@ class KanbanPage extends ConsumerWidget {
     final workspaces = ref.watch(workspacesProvider);
     final active = workspaces.active;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(active == null ? 'Board' : '${active.name} board'),
-        actions: [
-          IconButton(
-            tooltip: 'Reload',
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ref.read(kanbanProvider.notifier).reload(),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: active == null ? null : () => _create(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('New task'),
-      ),
-      body: active == null
-          ? const Center(child: Text('No workspace selected.'))
-          : !state.isReady
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                if (state.usesVault)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Row(
-                      children: [
-                        Icon(Icons.folder_open, size: 16),
-                        SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Stored as vault notes under Tasks/',
-                            style: TextStyle(fontSize: 12),
+    return AppShell(
+      section: AppSection.board,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(active == null ? 'Board' : '${active.name} board'),
+          actions: [
+            IconButton(
+              tooltip: 'Reload',
+              icon: const Icon(Icons.refresh),
+              onPressed: () => ref.read(kanbanProvider.notifier).reload(),
+            ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: active == null ? null : () => _create(context, ref),
+          icon: const Icon(Icons.add),
+          label: const Text('New task'),
+        ),
+        body: active == null
+            ? const Center(child: Text('No workspace selected.'))
+            : !state.isReady
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  if (state.usesVault)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.folder_open, size: 16),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Stored as vault notes under Tasks/',
+                              style: TextStyle(fontSize: 12),
+                            ),
                           ),
-                        ),
+                        ],
+                      ),
+                    ),
+                  Expanded(
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.all(12),
+                      children: [
+                        for (final status in TaskStatus.values)
+                          _Column(status: status),
                       ],
                     ),
                   ),
-                Expanded(
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.all(12),
-                    children: [
-                      for (final status in TaskStatus.values)
-                        _Column(status: status),
-                    ],
-                  ),
-                ),
-                if (state.errorMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Text(
-                      state.errorMessage!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+                  if (state.errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        state.errorMessage!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            ),
+                ],
+              ),
+      ),
     );
   }
 }
@@ -334,16 +340,43 @@ class _TaskSheetState extends ConsumerState<_TaskSheet> {
                 ),
               ],
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () {
-                  notifier.deleteTask(task.id);
-                  Navigator.of(context).pop();
-                },
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Delete task'),
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () async {
+                    final chatId = await ref
+                        .read(groupChatsProvider.notifier)
+                        .discussTaskInRoom(task);
+                    if (!context.mounted) return;
+                    Navigator.of(context).pop();
+                    if (chatId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Could not open a room for the task.'),
+                        ),
+                      );
+                      return;
+                    }
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            GroupChatDetailPage(chatId: chatId),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.forum_outlined),
+                  label: const Text('Discuss in room'),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    notifier.deleteTask(task.id);
+                    Navigator.of(context).pop();
+                  },
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete'),
+                ),
+              ],
             ),
           ],
         ),

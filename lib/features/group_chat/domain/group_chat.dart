@@ -16,12 +16,17 @@ enum SpeakerMode {
 }
 
 /// One project chat shared by the user and several bots.
+///
+/// A direct chat ([directBotId] set) is one bot's canonical room: every
+/// user line is for them, no `@mention` needed, and exactly one answer
+/// follows. Rooms stay multi-speaker with mention routing.
 class GroupChat {
   const GroupChat({
     required this.id,
     required this.workspaceId,
     required this.name,
     this.memberBotIds = const [],
+    this.directBotId,
     this.mode = SpeakerMode.manual,
     this.maxRounds = defaultMaxRounds,
     this.workflowId,
@@ -41,6 +46,7 @@ class GroupChat {
     required String workspaceId,
     required String name,
     List<String> memberBotIds = const [],
+    String? directBotId,
     DateTime? now,
   }) {
     final timestamp = now ?? DateTime.now();
@@ -49,6 +55,7 @@ class GroupChat {
       workspaceId: workspaceId,
       name: name.trim().isEmpty ? 'Group chat' : name.trim(),
       memberBotIds: memberBotIds,
+      directBotId: directBotId,
       createdAt: timestamp,
       updatedAt: timestamp,
     );
@@ -58,6 +65,14 @@ class GroupChat {
   final String workspaceId;
   final String name;
   final List<String> memberBotIds;
+
+  /// The bot this room belongs to, when it is a 1:1 direct chat.
+  /// Null for group rooms. Old documents without the key read as rooms.
+  final String? directBotId;
+
+  /// True for a bot's canonical 1:1 chat.
+  bool get isDirect => directBotId != null;
+
   final SpeakerMode mode;
   final int maxRounds;
   final String? workflowId;
@@ -68,6 +83,7 @@ class GroupChat {
   GroupChat copyWith({
     String? name,
     List<String>? memberBotIds,
+    String? directBotId,
     SpeakerMode? mode,
     int? maxRounds,
     String? workflowId,
@@ -83,6 +99,7 @@ class GroupChat {
           ? 'Group chat'
           : (name ?? this.name).trim(),
       memberBotIds: memberBotIds ?? this.memberBotIds,
+      directBotId: directBotId ?? this.directBotId,
       mode: mode ?? this.mode,
       maxRounds: (maxRounds ?? this.maxRounds).clamp(
         minMaxRounds,
@@ -101,6 +118,7 @@ class GroupChat {
       'workspaceId': workspaceId,
       'name': name,
       'memberBotIds': memberBotIds,
+      'directBotId': directBotId,
       'mode': mode.name,
       'maxRounds': maxRounds,
       'workflowId': workflowId,
@@ -136,6 +154,7 @@ class GroupChat {
       workspaceId: workspaceId,
       name: name,
       memberBotIds: readStrings(json['memberBotIds']),
+      directBotId: readOpt(json['directBotId']),
       mode: SpeakerMode.values.firstWhere(
         (candidate) => candidate.name == json['mode'],
         orElse: () => SpeakerMode.manual,

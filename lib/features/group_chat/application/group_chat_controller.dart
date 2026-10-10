@@ -7,8 +7,10 @@ import 'package:pocket_llm/features/bots/domain/bot_prompt.dart';
 import 'package:pocket_llm/features/group_chat/data/group_chat_store.dart';
 import 'package:pocket_llm/features/group_chat/domain/group_chat.dart';
 import 'package:pocket_llm/features/group_chat/domain/group_router.dart';
+import 'package:pocket_llm/features/kanban/domain/task.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 import 'package:pocket_llm/features/kanban/application/kanban_controller.dart';
+import 'package:pocket_llm/features/kanban/application/kanban_tools.dart';
 import 'package:pocket_llm/features/obsidian/application/vault_notes_service.dart';
 import 'package:pocket_llm/features/obsidian/application/vaults_controller.dart';
 import 'package:pocket_llm/features/skills/application/skills_controller.dart';
@@ -21,6 +23,12 @@ import 'package:pocket_llm/features/workflows/domain/workflow.dart';
 final groupChatStoreProvider = FutureProvider<GroupChatStore>(
   (ref) => GroupChatStore.open(),
 );
+
+/// True when the room waits on the user: a bot's answer still needs
+/// pasting in. Shared by the roster badge and the room itself.
+bool roomNeedsUser(GroupChatsSnapshot snapshot, String chatId) {
+  return snapshot.messagesFor(chatId).any((message) => message.isPending);
+}
 
 class GroupChatsState {
   const GroupChatsState({
@@ -138,11 +146,13 @@ class GroupChatsNotifier extends StateNotifier<GroupChatsState> {
     required String workspaceId,
     required String name,
     List<String> memberBotIds = const [],
+    String? directBotId,
   }) async {
     final chat = GroupChat.create(
       workspaceId: workspaceId,
       name: name,
       memberBotIds: memberBotIds,
+      directBotId: directBotId,
     );
     state = state.copyWith(
       snapshot: state.snapshot.upsertChat(chat),
@@ -176,6 +186,60 @@ class GroupChatsNotifier extends StateNotifier<GroupChatsState> {
       _ref.read(agentLoopServiceProvider).cancel();
     } catch (_) {}
   }
+
+  /// Opens a room for [task] and starts the turn: the assignee when one is
+  /// set, otherwise whoever the user adds. This is the board-to-chat half
+  /// of the Hermes loop — a card becomes a working conversation, and the
+  /// bots' moves land back on the board through their board tools.
+  ///
+  /// Returns the room id, so the board can navigate straight into it.
+  Future<String?> discussTaskInRoom(ProjectTask task) async {
+    final members =
+        task.assignedBotId != null && _botById(task.assignedBotId!) != null
+        ? [task.assignedBotId!]
+        : const <String>[];
+    final chat = await createChat(
+      workspaceId: task.workspaceId,
+      name: '${task.id} ${task.title}',
+      memberBotIds: members,
+    );
+    if (chat == null) return null;
+    if (_ref.read(activeWorkspaceIdProvider) == task.workspaceId) {
+      await _ref
+          .read(kanbanProvider.notifier)
+          .addComment(task.id, 'room', 'Opened ${chat.name} to work this.');
+    }
+    final brief = StringBuffer('Working ${task.id}: ${task.title}');
+    if (task.description.isNotEmpty) brief.write('\n${task.description}');
+    await sendUserMessage(chat.id, brief.toString());
+    return chat.id;
+  }
+
+  /// Opens (or finds) one bot's canonical 1:1 room in the workspace.
+  ///
+  /// Tapping a bot always lands in the same room, Hermes-style: the room
+  /// is created once, then reused, so the bot keeps one shared history
+  /// with the user next to its group-room life.
+  Future<GroupChat?> directChatWith({
+    required String workspaceId,
+    required String botId,
+  }) async {
+    for (final chat in state.snapshot.chats) {
+      if (chat.workspaceId == workspaceId && chat.directBotId == botId) {
+        return chat;
+      }
+    }
+    return createChat(
+      workspaceId: workspaceId,
+      name: _botById(botId)?.name ?? 'Bot',
+      memberBotIds: [botId],
+      directBotId: botId,
+    );
+  }
+
+  /// True when the room waits on the user: a bot's answer needs pasting
+  /// in, so the roster can badge it needs-you.
+  bool needsUser(String chatId) => roomNeedsUser(state.snapshot, chatId);
 
   /// Posts the user's line and runs whoever should answer.
   Future<void> sendUserMessage(String chatId, String text) async {
@@ -239,12 +303,16 @@ class GroupChatsNotifier extends StateNotifier<GroupChatsState> {
         final answer = _latestBotText(chatId, speaker);
         if (answer == null || _cancelRequested.contains(chatId)) break;
         await _feedWorkflow(chat, botId: speaker, output: answer);
-        speaker = GroupRouter.followUpSpeaker(
-          members: _membersOf(chat),
-          botText: answer,
-          roundsUsed: rounds,
-          maxRounds: chat.maxRounds,
-        );
+        // A direct chat is one question, one answer — the floor always
+        // returns to the user instead of chaining follow-ups.
+        speaker = chat.isDirect
+            ? null
+            : GroupRouter.followUpSpeaker(
+                members: _membersOf(chat),
+                botText: answer,
+                roundsUsed: rounds,
+                maxRounds: chat.maxRounds,
+              );
         text = answer;
       }
     } finally {
@@ -288,13 +356,33 @@ class GroupChatsNotifier extends StateNotifier<GroupChatsState> {
       await _persist();
       return;
     }
+    // The room's board, through the same registry, validation and
+    // permission gates as every other tool: listing is free, creating
+    // and moving ask the user first.
+    final registry = _ref
+        .read(toolRegistryProvider)
+        .extendedWith(
+          buildKanbanTools(
+            KanbanToolContext(
+              workspaceId: chat.workspaceId,
+              repositoryFor: (workspaceId) =>
+                  resolveTaskRepository(_ref.read, workspaceId),
+              actorName: bot.name,
+              onBoardChanged: () async {
+                if (_ref.read(activeWorkspaceIdProvider) == chat.workspaceId) {
+                  await _ref.read(kanbanProvider.notifier).reload();
+                }
+              },
+            ),
+          ),
+        );
     try {
       final run = await _ref
           .read(agentLoopServiceProvider)
           .run(
             model: model,
             goal: prompt,
-            registry: _ref.read(toolRegistryProvider),
+            registry: registry,
             maxIterations: 6,
             systemPrompt: BotPrompt.assemble(bot: bot),
           );
@@ -398,6 +486,10 @@ class GroupChatsNotifier extends StateNotifier<GroupChatsState> {
           'Answer as ${bot.name}, briefly and in character. '
           'Mention another bot as @name to hand them the floor.',
       if (taskLine.isNotEmpty) taskLine,
+      'Board tools for this workspace: kanban_list_tasks, '
+          'kanban_create_task, kanban_move_task. When the room agrees on '
+          'work, create the task; when you finish a step, move it. '
+          'Moves appear on the Board and in activity.',
       if (workflowLine.isNotEmpty) workflowLine,
       if (memory.isNotEmpty) 'Relevant project notes:\n$memory',
       'Recent room:\n${room.toString().trim()}',

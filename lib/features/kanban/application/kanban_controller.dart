@@ -11,6 +11,35 @@ final activeWorkspaceIdProvider = Provider<String?>((ref) {
   return ref.watch(workspacesProvider).active?.id;
 });
 
+/// Reads one provider. Controllers pass their `Ref.read`, widgets their
+/// `WidgetRef.read` — both spell the same read, so rooms resolve the same
+/// repository as the board without caring which ref they hold.
+typedef BoardReader = T Function<T>(ProviderListenable<T> provider);
+
+/// Opens the repository a workspace currently boards from: vault notes when
+/// the workspace links a vault, the local store otherwise.
+///
+/// Shared by the board screen, the board tools bots call from rooms and
+/// the room's message-to-task action, so every side reads and writes the
+/// same tasks.
+Future<TaskRepository> resolveTaskRepository(
+  BoardReader read,
+  String workspaceId,
+) async {
+  final vaults = read(vaultsProvider);
+  final binding = vaults.snapshot.bindingFor(workspaceId);
+  if (binding != null) {
+    final paths = read(vaultsProvider.notifier).pathsFor(workspaceId);
+    if (paths != null) {
+      return VaultTaskRepository(
+        paths: paths,
+        permissions: binding.permissions,
+      );
+    }
+  }
+  return LocalTaskRepository.open();
+}
+
 class KanbanState {
   const KanbanState({
     this.tasks = const [],
@@ -70,20 +99,8 @@ class KanbanNotifier extends StateNotifier<KanbanState> {
   TaskRepository? _repository;
   String? _workspaceId;
 
-  Future<TaskRepository> _resolveRepository(String workspaceId) async {
-    final vaults = _ref.read(vaultsProvider);
-    final binding = vaults.snapshot.bindingFor(workspaceId);
-    if (binding != null) {
-      final paths = _ref.read(vaultsProvider.notifier).pathsFor(workspaceId);
-      if (paths != null) {
-        return VaultTaskRepository(
-          paths: paths,
-          permissions: binding.permissions,
-        );
-      }
-    }
-    return LocalTaskRepository.open();
-  }
+  Future<TaskRepository> _resolveRepository(String workspaceId) =>
+      resolveTaskRepository(_ref.read, workspaceId);
 
   Future<void> reload() async {
     final workspaceId = _ref.read(activeWorkspaceIdProvider);
