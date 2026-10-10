@@ -13,6 +13,7 @@ import 'package:pocket_llm/features/voice/presentation/voice_page.dart';
 import 'package:pocket_llm/features/about/presentation/about_page.dart';
 import 'package:pocket_llm/features/agents/presentation/agent_page.dart';
 import 'package:pocket_llm/features/bots/presentation/bots_page.dart';
+import 'package:pocket_llm/features/group_chat/presentation/group_chats_page.dart';
 import 'package:pocket_llm/features/kanban/presentation/kanban_page.dart';
 import 'package:pocket_llm/features/workflows/presentation/workflows_page.dart';
 import 'package:pocket_llm/features/obsidian/presentation/vaults_page.dart';
@@ -48,6 +49,7 @@ abstract class AppRoutes {
   static const vaults = '/vaults';
   static const kanban = '/kanban';
   static const workflows = '/workflows';
+  static const groupChats = '/group-chats';
   static const backup = '/backup';
   static const modelDetails = '/model-details';
 
@@ -150,6 +152,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.workflows,
         builder: (context, state) => const WorkflowsPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.groupChats,
+        builder: (context, state) => const GroupChatsPage(),
       ),
     ],
   );

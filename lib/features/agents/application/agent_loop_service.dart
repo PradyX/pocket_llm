@@ -159,6 +159,7 @@ class AgentLoopService {
     int? maxTokens,
     ContextBudget budget = ContextBudget.auto,
     void Function(AgentStep step)? onStep,
+    String? systemPrompt,
   }) async {
     final trimmedGoal = goal.trim();
     if (trimmedGoal.isEmpty) {
@@ -251,9 +252,11 @@ class AgentLoopService {
     var nextIndex = steps.length + 1;
 
     for (iteration = 1; iteration <= iterations; iteration++) {
+      // Group chat bots run under their own Soul; everyone else uses the
+      // default agent contract for this registry.
       final promptBundle = buildModelChatPrompt(
         history,
-        systemPrompt: _systemPromptWithTools(registry),
+        systemPrompt: systemPrompt ?? _systemPromptWithTools(registry),
         promptFormatId: model.promptFormatId,
       );
       final promptTokens =

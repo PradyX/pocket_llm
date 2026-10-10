@@ -164,6 +164,13 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: const Text('Research to done, with approvals'),
                   onTap: () => context.push(AppRoutes.workflows),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.forum_outlined),
+                  title: const Text('Group chats'),
+                  subtitle: const Text('Several bots in one room'),
+                  onTap: () => context.push(AppRoutes.groupChats),
+                ),
               ],
             ),
           ),
