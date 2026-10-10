@@ -122,6 +122,13 @@ class SettingsPage extends ConsumerWidget {
                   ),
                   onTap: () => context.push(AppRoutes.workspaces),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.extension_outlined),
+                  title: const Text('Skills'),
+                  subtitle: const Text('Reusable procedures bots can follow'),
+                  onTap: () => context.push(AppRoutes.skills),
+                ),
               ],
             ),
           ),
