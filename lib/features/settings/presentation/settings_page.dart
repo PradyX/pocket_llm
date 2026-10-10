@@ -136,6 +136,13 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: const Text('External tools bots can use'),
                   onTap: () => context.push(AppRoutes.mcp),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.smart_toy_outlined),
+                  title: const Text('Bots'),
+                  subtitle: const Text('Specialists with a Soul'),
+                  onTap: () => context.push(AppRoutes.bots),
+                ),
               ],
             ),
           ),
