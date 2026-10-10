@@ -150,6 +150,13 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: const Text('Human-readable project knowledge'),
                   onTap: () => context.push(AppRoutes.vaults),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.view_kanban_outlined),
+                  title: const Text('Board'),
+                  subtitle: const Text('Tasks for the active workspace'),
+                  onTap: () => context.push(AppRoutes.kanban),
+                ),
               ],
             ),
           ),
