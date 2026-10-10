@@ -13,7 +13,9 @@ import 'package:pocket_llm/features/voice/presentation/voice_page.dart';
 import 'package:pocket_llm/features/about/presentation/about_page.dart';
 import 'package:pocket_llm/features/agents/presentation/agent_page.dart';
 import 'package:pocket_llm/features/bots/presentation/bots_page.dart';
+import 'package:pocket_llm/features/activity/presentation/activity_page.dart';
 import 'package:pocket_llm/features/group_chat/presentation/group_chats_page.dart';
+import 'package:pocket_llm/features/workspaces/presentation/workspace_detail_page.dart';
 import 'package:pocket_llm/features/kanban/presentation/kanban_page.dart';
 import 'package:pocket_llm/features/workflows/presentation/workflows_page.dart';
 import 'package:pocket_llm/features/obsidian/presentation/vaults_page.dart';
@@ -50,6 +52,14 @@ abstract class AppRoutes {
   static const kanban = '/kanban';
   static const workflows = '/workflows';
   static const groupChats = '/group-chats';
+  static const workspace = '/workspace';
+  static const activity = '/activity';
+
+  /// Route to one workspace's detail screen.
+  static String workspaceFor(String workspaceId) {
+    return '$workspace?id=${Uri.encodeQueryComponent(workspaceId)}';
+  }
+
   static const backup = '/backup';
   static const modelDetails = '/model-details';
 
@@ -156,6 +166,16 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.groupChats,
         builder: (context, state) => const GroupChatsPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.workspace,
+        builder: (context, state) => WorkspaceDetailPage(
+          workspaceId: state.uri.queryParameters['id'] ?? '',
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.activity,
+        builder: (context, state) => const ActivityPage(),
       ),
     ],
   );

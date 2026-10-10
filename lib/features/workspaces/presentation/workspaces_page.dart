@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:pocket_llm/core/navigation/app_router.dart';
 import 'package:pocket_llm/features/workspaces/application/workspaces_controller.dart';
 
 /// Lists project workspaces and selects the active one.
@@ -125,7 +127,8 @@ class _WorkspacesPageState extends ConsumerState<WorkspacesPage> {
                           PopupMenuItem(value: 'delete', child: Text('Delete')),
                         ],
                       ),
-                      onTap: () => notifier.setActive(workspace.id),
+                      onTap: () =>
+                          context.push(AppRoutes.workspaceFor(workspace.id)),
                     ),
                   ),
                 if (state.errorMessage != null) ...[

@@ -13,6 +13,7 @@ class Workspace {
     this.description = '',
     this.obsidianVaultId,
     this.obsidianProjectPath = '',
+    this.repositoryPath,
     this.defaultModelId,
     this.defaultContextPolicyId,
     this.botIds = const [],
@@ -49,6 +50,9 @@ class Workspace {
   /// Workspace-relative directory inside the vault (e.g. `Projects/pocketllm`).
   final String obsidianProjectPath;
 
+  /// Local Git checkout bots work in, if any. Device-specific, never synced.
+  final String? repositoryPath;
+
   final String? defaultModelId;
   final String? defaultContextPolicyId;
 
@@ -67,6 +71,7 @@ class Workspace {
       description: description.trim(),
       obsidianVaultId: obsidianVaultId,
       obsidianProjectPath: obsidianProjectPath.trim(),
+      repositoryPath: repositoryPath,
       defaultModelId: defaultModelId,
       defaultContextPolicyId: defaultContextPolicyId,
       botIds: List.unmodifiable(botIds),
@@ -84,6 +89,8 @@ class Workspace {
     String? obsidianVaultId,
     bool clearVault = false,
     String? obsidianProjectPath,
+    String? repositoryPath,
+    bool clearRepository = false,
     String? defaultModelId,
     String? defaultContextPolicyId,
     List<String>? botIds,
@@ -100,6 +107,9 @@ class Workspace {
           ? null
           : (obsidianVaultId ?? this.obsidianVaultId),
       obsidianProjectPath: obsidianProjectPath ?? this.obsidianProjectPath,
+      repositoryPath: clearRepository
+          ? null
+          : (repositoryPath ?? this.repositoryPath),
       defaultModelId: defaultModelId ?? this.defaultModelId,
       defaultContextPolicyId:
           defaultContextPolicyId ?? this.defaultContextPolicyId,
@@ -122,6 +132,7 @@ class Workspace {
       'description': description,
       'obsidianVaultId': obsidianVaultId,
       'obsidianProjectPath': obsidianProjectPath,
+      'repositoryPath': repositoryPath,
       'defaultModelId': defaultModelId,
       'defaultContextPolicyId': defaultContextPolicyId,
       'botIds': botIds,
@@ -162,6 +173,9 @@ class Workspace {
       obsidianProjectPath: json['obsidianProjectPath'] is String
           ? json['obsidianProjectPath'] as String
           : '',
+      repositoryPath: json['repositoryPath'] is String
+          ? json['repositoryPath'] as String
+          : null,
       defaultModelId: json['defaultModelId'] is String
           ? json['defaultModelId'] as String
           : null,

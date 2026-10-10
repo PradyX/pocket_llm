@@ -16,6 +16,20 @@ enum VaultNoteError {
   final String message;
 }
 
+/// Two versions of one note left by file synchronization (§12.4).
+class VaultSyncConflict {
+  const VaultSyncConflict({
+    required this.originalPath,
+    required this.conflictPath,
+  });
+
+  /// Workspace-relative path of the note both sides belong to.
+  final String originalPath;
+
+  /// Workspace-relative path of the conflicted copy.
+  final String conflictPath;
+}
+
 /// One note read from the vault.
 class VaultNote {
   const VaultNote({
@@ -190,6 +204,88 @@ class VaultNotesService {
     }
     notes.sort();
     return notes;
+  }
+
+  /// One sync conflict: two versions of the same note (§12.4).
+  ///
+  /// Never silently last-write-wins: both sides stay on disk until the user
+  /// picks one in the vault screen.
+  Future<List<VaultSyncConflict>> scanConflicts({
+    required VaultPaths paths,
+    required VaultPermissions permissions,
+  }) async {
+    if (!permissions.canRead) return const [];
+    final notes = await listNotes(paths: paths, permissions: permissions);
+    final conflicts = <VaultSyncConflict>[];
+    for (final relative in notes) {
+      final base = relative.split('/').last;
+      if (!base.contains('.sync-conflict-') && !base.contains('.conflict-')) {
+        continue;
+      }
+      final original = _originalOf(relative);
+      if (original == null) continue;
+      conflicts.add(
+        VaultSyncConflict(originalPath: original, conflictPath: relative),
+      );
+    }
+    return conflicts;
+  }
+
+  /// The note a conflict file belongs to, or null when it matches nothing.
+  ///
+  /// `Architecture.sync-conflict-20240101-120000-ABC.md` → `Architecture.md`;
+  /// `Plans/x.conflict-device-2.md` → `Plans/x.md`.
+  static String? _originalOf(String conflictPath) {
+    final patterns = ['.sync-conflict-', '.conflict-'];
+    for (final pattern in patterns) {
+      final index = conflictPath.indexOf(pattern);
+      if (index < 0) continue;
+      final head = conflictPath.substring(0, index);
+      final tail = conflictPath.substring(index + pattern.length);
+      // The tail is a device/date stamp plus the extension.
+      final dot = tail.lastIndexOf('.');
+      if (dot < 0) continue;
+      final headDot = head.lastIndexOf('.');
+      final base = headDot >= 0 ? head.substring(0, headDot) : head;
+      return '$base${tail.substring(dot)}';
+    }
+    return null;
+  }
+
+  /// Resolves [conflict] by keeping one side.
+  ///
+  /// Keeping the conflict side copies it over the original; keeping the
+  /// original just deletes the conflict file. Either way the conflict file
+  /// is gone afterwards, and the choice is explicit.
+  Future<VaultNoteError?> resolveConflict({
+    required VaultPaths paths,
+    required VaultPermissions permissions,
+    required VaultSyncConflict conflict,
+    required bool keepConflictSide,
+  }) async {
+    if (!permissions.canWrite || !permissions.canUpdate) {
+      return VaultNoteError.denied;
+    }
+    final conflictAbsolute = paths.projectFile(conflict.conflictPath);
+    final originalAbsolute = paths.projectFile(conflict.originalPath);
+    if (conflictAbsolute == null || originalAbsolute == null) {
+      return VaultNoteError.outsideProject;
+    }
+    try {
+      if (keepConflictSide) {
+        final content = await File(conflictAbsolute).readAsString();
+        await writeNote(
+          paths: paths,
+          permissions: permissions,
+          relativePath: conflict.originalPath,
+          content: content,
+        );
+      }
+      await File(conflictAbsolute).delete();
+      return null;
+    } catch (_) {
+      return VaultNoteError.io;
+    }
   }
 
   /// Keyword retrieval over the project folder (§8.5): whole-word matches in

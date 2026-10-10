@@ -150,6 +150,49 @@ void main() {
       );
     });
 
+    test('sync conflicts surface and resolve explicitly', () async {
+      const permissions = VaultPermissions.defaults;
+      await service.ensureProjectStructure(paths, projectName: 'p');
+      await service.writeNote(
+        paths: paths,
+        permissions: permissions,
+        relativePath: 'Architecture.md',
+        content: 'local version',
+      );
+      await service.writeNote(
+        paths: paths,
+        permissions: permissions,
+        relativePath: 'Architecture.sync-conflict-20240101-120000-DEVICE.md',
+        content: 'remote version',
+      );
+      final conflicts = await service.scanConflicts(
+        paths: paths,
+        permissions: permissions,
+      );
+      expect(conflicts.map((c) => c.originalPath), ['Architecture.md']);
+
+      // Keeping the remote side copies it over the original.
+      expect(
+        await service.resolveConflict(
+          paths: paths,
+          permissions: const VaultPermissions(),
+          conflict: conflicts.single,
+          keepConflictSide: true,
+        ),
+        isNull,
+      );
+      final (note, _) = await service.readNote(
+        paths: paths,
+        permissions: permissions,
+        relativePath: 'Architecture.md',
+      );
+      expect(note?.content, 'remote version');
+      expect(
+        await service.scanConflicts(paths: paths, permissions: permissions),
+        isEmpty,
+      );
+    });
+
     test('search ranks name hits above body hits', () async {
       const permissions = VaultPermissions.defaults;
       await service.ensureProjectStructure(paths, projectName: 'p');
