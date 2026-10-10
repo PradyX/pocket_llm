@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pocket_llm/features/conversations/domain/context_policy.dart'
-    show formatTokens;
+    show ContextPolicy, formatTokens;
+import 'package:pocket_llm/features/context/application/compaction_policy_controller.dart';
 import 'package:pocket_llm/features/context/application/context_budget_controller.dart';
+import 'package:pocket_llm/features/context/domain/compaction_policy.dart';
 import 'package:pocket_llm/features/context/domain/context_budget.dart';
+import 'package:pocket_llm/features/context/domain/context_compaction.dart';
+
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
 
 /// Chooses how much of a model's context window one request may use.
@@ -180,6 +184,8 @@ class ContextBudgetPage extends ConsumerWidget {
               ),
             ),
           ],
+          const SizedBox(height: 16),
+          _CompactionCard(outcome: outcome),
         ],
       ),
     );
@@ -322,6 +328,175 @@ class _ResolvedWindowCard extends StatelessWidget {
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// When old turns are condensed, and what survives: the inspector.
+class _CompactionCard extends ConsumerWidget {
+  const _CompactionCard({required this.outcome});
+
+  final ContextBudgetOutcome? outcome;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(compactionPolicyProvider);
+    final notifier = ref.read(compactionPolicyProvider.notifier);
+    final policy = state.policy;
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final readOnly = state.isReadOnly;
+
+    final budget = outcome?.budgetTokens;
+    final usable = budget == null
+        ? null
+        : ContextPolicy(
+            contextTokens: budget,
+            reservedOutputTokens: outcome!.reservedOutputTokens,
+          ).usableInputTokens;
+    final triggerAt = usable == null
+        ? null
+        : (usable * policy.compactionTriggerPercent) ~/ 100;
+    final targetAt = usable == null
+        ? null
+        : ContextCompactor.targetTokens(
+            usableInputTokens: usable,
+            policy: policy,
+          );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Compaction', style: textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text(
+              triggerAt == null
+                  ? 'Old turns are condensed locally before the window fills. '
+                        'Select a model to see the exact thresholds.'
+                  : 'Condensing starts at about ${formatTokens(triggerAt)} '
+                        'tokens of input and aims to land at about '
+                        '${formatTokens(targetAt!)}.',
+              style: textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Starts compacting at ${policy.compactionTriggerPercent}% '
+              'of the usable input',
+              style: textTheme.bodySmall,
+            ),
+            Slider(
+              value: policy.compactionTriggerPercent.toDouble(),
+              min: CompactionPolicy.minTriggerPercent.toDouble(),
+              max: CompactionPolicy.maxTriggerPercent.toDouble(),
+              divisions:
+                  CompactionPolicy.maxTriggerPercent -
+                  CompactionPolicy.minTriggerPercent,
+              label: '${policy.compactionTriggerPercent}%',
+              onChanged: readOnly
+                  ? null
+                  : (value) => notifier.update(
+                      policy.copyWith(compactionTriggerPercent: value.round()),
+                    ),
+            ),
+            Text(
+              'Aims for ${policy.compactionTargetPercent}% afterwards',
+              style: textTheme.bodySmall,
+            ),
+            Slider(
+              value: policy.compactionTargetPercent.toDouble(),
+              min: CompactionPolicy.minTargetPercent.toDouble(),
+              max: CompactionPolicy.maxTargetPercent.toDouble(),
+              divisions:
+                  CompactionPolicy.maxTargetPercent -
+                  CompactionPolicy.minTargetPercent,
+              label: '${policy.compactionTargetPercent}%',
+              onChanged: readOnly
+                  ? null
+                  : (value) => notifier.update(
+                      policy.copyWith(compactionTargetPercent: value.round()),
+                    ),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Always keep the newest ${policy.keepRecentTurns} turns',
+                    style: textTheme.bodySmall,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Keep fewer turns',
+                  icon: const Icon(Icons.remove),
+                  onPressed: readOnly
+                      ? null
+                      : () => notifier.update(
+                          policy.copyWith(
+                            keepRecentTurns: policy.keepRecentTurns - 1,
+                          ),
+                        ),
+                ),
+                Text(
+                  '${policy.keepRecentTurns}',
+                  style: textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Keep more turns',
+                  icon: const Icon(Icons.add),
+                  onPressed: readOnly
+                      ? null
+                      : () => notifier.update(
+                          policy.copyWith(
+                            keepRecentTurns: policy.keepRecentTurns + 1,
+                          ),
+                        ),
+                ),
+              ],
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Pinned messages survive condensing'),
+              value: policy.preservePinnedMessages,
+              onChanged: readOnly
+                  ? null
+                  : (value) => notifier.update(
+                      policy.copyWith(preservePinnedMessages: value),
+                    ),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Condense long tool outputs separately'),
+              value: policy.summarizeToolResults,
+              onChanged: readOnly
+                  ? null
+                  : (value) => notifier.update(
+                      policy.copyWith(summarizeToolResults: value),
+                    ),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Keep a local summary of old turns'),
+              subtitle: const Text(
+                'Written by the on-device model, never uploaded.',
+              ),
+              value: policy.memoryEnabled,
+              onChanged: readOnly
+                  ? null
+                  : (value) =>
+                        notifier.update(policy.copyWith(memoryEnabled: value)),
+            ),
+            if (state.errorMessage != null)
+              Text(
+                state.errorMessage!,
+                style: textTheme.bodySmall?.copyWith(color: colorScheme.error),
+              ),
           ],
         ),
       ),

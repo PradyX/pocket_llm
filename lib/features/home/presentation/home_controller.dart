@@ -22,7 +22,11 @@ import 'package:pocket_llm/features/conversations/domain/message_attachment.dart
 import 'package:pocket_llm/features/conversations/domain/message_source.dart';
 import 'package:pocket_llm/features/conversations/domain/message_tool_activity.dart';
 import 'package:pocket_llm/features/conversations/presentation/conversation_controller.dart';
+import 'package:pocket_llm/features/context/application/compaction_policy_controller.dart';
 import 'package:pocket_llm/features/context/application/context_budget_controller.dart';
+import 'package:pocket_llm/features/context/data/compaction_checkpoint_store.dart';
+import 'package:pocket_llm/features/context/domain/compaction_checkpoint.dart';
+import 'package:pocket_llm/features/context/domain/context_compaction.dart';
 import 'package:pocket_llm/features/documents/application/document_context_builder.dart';
 import 'package:pocket_llm/features/documents/application/document_library.dart';
 import 'package:pocket_llm/features/documents/application/documents_controller.dart';
@@ -1078,7 +1082,20 @@ class HomeController extends _$HomeController {
   }) {
     if (_memoryRefresh != null) return;
     if (assembly.omittedMessages.isEmpty) return;
-    if (!_memoryService.shouldRefresh(assembly.omittedMessages)) return;
+    // Road Map 2 Phase 2.1: the stored compaction policy governs the refresh.
+    // A disabled memory keeps plain sliding context, and reaching the trigger
+    // starts a refresh even before the legacy size heuristic would.
+    final compactionPolicy = ref.read(compactionPolicyProvider).policy;
+    if (!compactionPolicy.memoryEnabled) return;
+    final triggerDue = ContextCompactor.shouldCompact(
+      usedInputTokens: assembly.usage.usedTokens,
+      usableInputTokens: assembly.usage.limitTokens,
+      policy: compactionPolicy,
+    );
+    if (!triggerDue &&
+        !_memoryService.shouldRefresh(assembly.omittedMessages)) {
+      return;
+    }
 
     _memoryRefreshCancelled = false;
     final refresh = _runMemoryRefresh(assembly: assembly, model: model);
@@ -1119,6 +1136,28 @@ class HomeController extends _$HomeController {
       await ref
           .read(conversationControllerProvider.notifier)
           .setMemory(conversationId, memory);
+      // The checkpoint records what this pass covered, for debugging and a
+      // future recovery flow. It must never break the chat that just succeeded.
+      try {
+        final checkpoints = await CompactionCheckpointStore.open(
+          conversationId,
+        );
+        checkpoints.append(
+          CompactionCheckpoint.create(
+            conversationId: conversationId,
+            beforeCompactionMessageId: anchorMessageId,
+            summary: memory.summary,
+            extractedMemory: memory.summary,
+            summarizedMessageIds: [for (final message in omitted) message.id],
+            modelUsed: model.id,
+          ),
+        );
+      } catch (error) {
+        debugPrint(
+          'HomeController: could not store compaction checkpoint: '
+          '$error',
+        );
+      }
     } catch (error) {
       // Summarising is an addition to the chat, never a requirement: a failure
       // leaves the previous memory in place and the chat keeps working with

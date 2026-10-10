@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:pocket_llm/features/context/application/compaction_policy_controller.dart';
 import 'package:pocket_llm/features/context/application/context_budget_controller.dart';
+import 'package:pocket_llm/features/context/data/compaction_policy_store.dart';
 import 'package:pocket_llm/features/context/data/context_budget_store.dart';
 import 'package:pocket_llm/features/context/presentation/context_budget_page.dart';
 import 'package:pocket_llm/features/home/presentation/home_controller.dart';
@@ -17,6 +19,12 @@ void main() {
   late Directory tempDir;
   late File file;
   late ContextBudgetStore store;
+  late CompactionPolicyStore compactionStore;
+
+  /// The manual cap slider (token ladder), not the compaction percent sliders.
+  Finder capSlider() => find.byWidgetPredicate(
+    (widget) => widget is Slider && (widget.label ?? '').endsWith('K'),
+  );
 
   final model = LlmModel(
     id: 'm-1',
@@ -43,6 +51,9 @@ void main() {
     tempDir = await Directory.systemTemp.createTemp('pocketllm_budget_page');
     file = File(p.join(tempDir.path, 'context', 'budget.json'));
     store = ContextBudgetStore(file);
+    compactionStore = CompactionPolicyStore(
+      File(p.join(tempDir.path, 'context', 'compaction_policy.json')),
+    );
   });
 
   tearDown(() async {
@@ -61,6 +72,9 @@ void main() {
       ProviderScope(
         overrides: [
           contextBudgetStoreProvider.overrideWith((ref) async => store),
+          compactionPolicyStoreProvider.overrideWith(
+            (ref) async => compactionStore,
+          ),
           selectedContextWindowProvider.overrideWithValue(
             hasModel
                 ? SelectedContextWindow(
@@ -84,8 +98,9 @@ void main() {
 
     expect(find.text('Automatic (recommended)'), findsOneWidget);
     expect(find.text('Manual limit'), findsOneWidget);
-    // No cap in automatic mode, so there is nothing to slide.
-    expect(find.byType(Slider), findsNothing);
+    // No cap in automatic mode, so there is no cap slider (the compaction
+    // section always has its own percent sliders).
+    expect(capSlider(), findsNothing);
 
     expect(find.text('Current budget'), findsOneWidget);
     expect(find.text('Model maximum'), findsOneWidget);
@@ -109,7 +124,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // The starting cap is stated in words, not just on the slider.
-    expect(find.byType(Slider), findsOneWidget);
+    expect(capSlider(), findsOneWidget);
     expect(
       find.text(
         '${ContextBudgetNotifier.defaultManualContextTokens ~/ 1024}.0K tokens '
@@ -122,7 +137,7 @@ void main() {
     await tester.tap(find.text('Remove the limit and use Automatic'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(Slider), findsNothing);
+    expect(capSlider(), findsNothing);
     final written = jsonDecode(file.readAsStringSync()) as Map;
     expect(written['mode'], 'auto');
     expect(written['maxContextTokens'], isNull);
@@ -135,7 +150,7 @@ void main() {
     // The choice is still available and still stored.
     await tester.tap(find.text('Manual limit'));
     await tester.pumpAndSettle();
-    expect(find.byType(Slider), findsOneWidget);
+    expect(capSlider(), findsOneWidget);
     expect((jsonDecode(file.readAsStringSync()) as Map)['mode'], 'manual');
   });
 }

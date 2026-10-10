@@ -294,6 +294,24 @@ class ConversationController extends _$ConversationController {
     );
   }
 
+  /// Pins or unpins one message so it survives context compaction.
+  ///
+  /// Road Map 2 Phase 2.1 §4.6. The flag travels with the stored message, so
+  /// a pin outlives app restarts and applies to every later request built
+  /// from this conversation.
+  Future<void> setMessagePinned(
+    String conversationId,
+    String messageId,
+    bool pinned,
+  ) async {
+    final messages = await _repository.loadMessages(conversationId);
+    final index = messages.indexWhere((message) => message.id == messageId);
+    if (index < 0 || messages[index].isPinned == pinned) return;
+    final updated = [...messages];
+    updated[index] = updated[index].copyWith(isPinned: pinned);
+    await saveConversationMessages(conversationId, updated);
+  }
+
   /// Replaces the placeholder title with the first user message text.
   Future<void> maybeAutoTitleFromMessage(
     String conversationId,

@@ -12,6 +12,7 @@ import 'package:pocket_llm/features/voice/presentation/voice_conversation_page.d
 import 'package:pocket_llm/features/voice/presentation/voice_page.dart';
 import 'package:pocket_llm/features/about/presentation/about_page.dart';
 import 'package:pocket_llm/features/agents/presentation/agent_page.dart';
+import 'package:pocket_llm/features/workspaces/presentation/workspaces_page.dart';
 import 'package:pocket_llm/features/backup/presentation/backup_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -34,6 +35,7 @@ abstract class AppRoutes {
   static const voice = '/voice';
   static const voiceConversation = '/voice/conversation';
   static const agent = '/agent';
+  static const workspaces = '/workspaces';
   static const backup = '/backup';
   static const modelDetails = '/model-details';
 
@@ -108,6 +110,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.about,
         builder: (context, state) => const AboutPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.workspaces,
+        builder: (context, state) => const WorkspacesPage(),
       ),
     ],
   );

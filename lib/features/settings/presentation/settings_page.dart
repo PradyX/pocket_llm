@@ -113,6 +113,15 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: Text('Budget: $contextBudgetSummary'),
                   onTap: () => context.push(AppRoutes.contextBudget),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.folder_copy_outlined),
+                  title: const Text('Workspaces'),
+                  subtitle: const Text(
+                    'Projects linking bots, chats, skills and boards',
+                  ),
+                  onTap: () => context.push(AppRoutes.workspaces),
+                ),
               ],
             ),
           ),

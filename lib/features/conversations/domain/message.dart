@@ -108,6 +108,11 @@ class Message {
   /// Token count estimate when known locally.
   final int? tokenCount;
 
+  /// User- or bot-pinned information that survives normal context compaction
+  /// (Road Map 2 Phase 2.1 §4.6). Absent on every message saved before pinned
+  /// context existed, which reads as unpinned.
+  final bool isPinned;
+
   const Message({
     required this.id,
     required this.conversationId,
@@ -121,6 +126,7 @@ class Message {
     this.sources = const [],
     this.toolActivity = const [],
     this.tokenCount,
+    this.isPinned = false,
   });
 
   /// Creates a new message with a generated id.
@@ -136,6 +142,7 @@ class Message {
     List<MessageSource> sources = const [],
     List<MessageToolActivity> toolActivity = const [],
     int? tokenCount,
+    bool isPinned = false,
   }) {
     return Message(
       id: IdGenerator.message(),
@@ -150,6 +157,7 @@ class Message {
       sources: sources,
       toolActivity: toolActivity,
       tokenCount: tokenCount,
+      isPinned: isPinned,
     );
   }
 
@@ -192,6 +200,7 @@ class Message {
     List<MessageSource>? sources,
     List<MessageToolActivity>? toolActivity,
     Object? tokenCount = _unset,
+    bool? isPinned,
   }) {
     return Message(
       id: id,
@@ -208,6 +217,7 @@ class Message {
       sources: sources ?? this.sources,
       toolActivity: toolActivity ?? this.toolActivity,
       tokenCount: tokenCount == _unset ? this.tokenCount : tokenCount as int?,
+      isPinned: isPinned ?? this.isPinned,
     );
   }
 
@@ -227,6 +237,7 @@ class Message {
           .map((activity) => activity.toJson())
           .toList(),
       'tokenCount': tokenCount,
+      'isPinned': isPinned,
     };
   }
 
@@ -294,6 +305,7 @@ class Message {
       // messages that did not call a tool.
       toolActivity: MessageToolActivity.listFromJson(json['toolActivity']),
       tokenCount: (json['tokenCount'] as num?)?.toInt(),
+      isPinned: json['isPinned'] as bool? ?? false,
     );
   }
 }

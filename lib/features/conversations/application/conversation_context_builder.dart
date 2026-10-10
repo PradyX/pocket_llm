@@ -66,6 +66,7 @@ class ConversationContextBuilder {
     required ContextPolicy policy,
     DocumentContext? documentContext,
     ConversationMemory? memory,
+    Set<String> pinnedMessageIds = const {},
   }) {
     // A memory only applies while its anchor is still part of the history: a
     // summary of messages the user has since deleted would describe a chat
@@ -104,6 +105,36 @@ class ConversationContextBuilder {
         if (_visible(messages[index])) messages[index],
     ];
 
+    // Pinned messages survive windowing (Road Map 2 Phase 2.1 §4.6): they are
+    // charged first, oldest first, and are never reported as omitted. A pin
+    // cannot push out the newest turn, which is still added below.
+    bool isPinned(Message message) =>
+        message.isPinned || pinnedMessageIds.contains(message.id);
+    for (final message in candidates) {
+      if (!isPinned(message) || included.contains(message)) continue;
+      final imageCount = message.attachments.isEmpty
+          ? 0
+          : message.attachments.length;
+      var text = message.content;
+      var cost = _cost(text, imageCount);
+      if (cost > policy.maxMessageTokens) {
+        text = TokenEstimator.truncate(text, policy.maxMessageTokens);
+        cost = _cost(text, imageCount);
+        truncatedCount++;
+      }
+      if (cost > available - usedByMessages) break;
+      included.add(
+        text == message.content ? message : message.copyWith(content: text),
+      );
+      usedByMessages += cost;
+    }
+
+    // The newest turn is never dropped, even when pins were charged first:
+    // once it is sent (as a pin or below), later turns may be skipped.
+    final newestId = candidates.isEmpty ? null : candidates.last.id;
+    var newestSent =
+        newestId == null || included.any((message) => message.id == newestId);
+
     for (var index = candidates.length - 1; index >= 0; index--) {
       final message = candidates[index];
       final imageCount = message.attachments.isEmpty
@@ -119,7 +150,8 @@ class ConversationContextBuilder {
         wasTruncated = true;
       }
 
-      final isNewest = included.isEmpty;
+      if (included.contains(message)) continue;
+      final isNewest = !newestSent;
       final remaining = available - usedByMessages;
 
       if (cost > remaining) {
@@ -140,10 +172,18 @@ class ConversationContextBuilder {
         text == message.content ? message : message.copyWith(content: text),
       );
       usedByMessages += cost;
+      if (message.id == newestId) newestSent = true;
       if (wasTruncated) truncatedCount++;
     }
 
-    final includedMessages = included.reversed.toList(growable: false);
+    // Pinned messages were charged oldest-first while the window fill runs
+    // newest-first, so chronological order is restored by candidate position
+    // rather than by reversing the fill order.
+    final order = {
+      for (var i = 0; i < candidates.length; i++) candidates[i].id: i,
+    };
+    included.sort((a, b) => order[a.id]!.compareTo(order[b.id]!));
+    final includedMessages = List<Message>.unmodifiable(included);
     final used = systemCost + usedByMessages;
     final includedIds = {for (final message in includedMessages) message.id};
     final omittedMessages = <Message>[
