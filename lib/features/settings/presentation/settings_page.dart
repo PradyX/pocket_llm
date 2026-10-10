@@ -157,6 +157,13 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: const Text('Tasks for the active workspace'),
                   onTap: () => context.push(AppRoutes.kanban),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.account_tree_outlined),
+                  title: const Text('Workflows'),
+                  subtitle: const Text('Research to done, with approvals'),
+                  onTap: () => context.push(AppRoutes.workflows),
+                ),
               ],
             ),
           ),

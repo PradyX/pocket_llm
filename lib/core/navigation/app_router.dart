@@ -14,6 +14,7 @@ import 'package:pocket_llm/features/about/presentation/about_page.dart';
 import 'package:pocket_llm/features/agents/presentation/agent_page.dart';
 import 'package:pocket_llm/features/bots/presentation/bots_page.dart';
 import 'package:pocket_llm/features/kanban/presentation/kanban_page.dart';
+import 'package:pocket_llm/features/workflows/presentation/workflows_page.dart';
 import 'package:pocket_llm/features/obsidian/presentation/vaults_page.dart';
 import 'package:pocket_llm/features/mcp/presentation/mcp_page.dart';
 import 'package:pocket_llm/features/skills/presentation/skills_page.dart';
@@ -46,6 +47,7 @@ abstract class AppRoutes {
   static const bots = '/bots';
   static const vaults = '/vaults';
   static const kanban = '/kanban';
+  static const workflows = '/workflows';
   static const backup = '/backup';
   static const modelDetails = '/model-details';
 
@@ -144,6 +146,10 @@ GoRouter appRouter(Ref ref) {
       GoRoute(
         path: AppRoutes.kanban,
         builder: (context, state) => const KanbanPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.workflows,
+        builder: (context, state) => const WorkflowsPage(),
       ),
     ],
   );
